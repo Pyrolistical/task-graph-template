@@ -62,6 +62,65 @@ bun tasks/task-state.ts
 
 Outputs JSON to stdout with tasks grouped by state and any detected problems.
 
+#### JSON Output Schema
+
+The output is a single JSON object with two top-level keys:
+
+| Key | Type | Description |
+|---|---|---|
+| `tasks` | `Record<State, TaskId[]>` | Tasks grouped by their current state. Keys are always the valid states listed below, even if empty. Values are sorted arrays of task IDs. |
+| `problems` | `Problem[]` | Array of detected issues (empty if none). |
+
+**Valid states** (keys in `tasks`):
+`NEW`, `BLOCKED`, `READY_WORK`, `WORKING`, `READY_CHECK`, `CHECKING`,
+`READY_REVIEW`, `REVIEWING`, `READY_TASK_GRAPH_UPDATE`, `TASK_GRAPH_UPDATING`
+
+**Problem object:**
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `string` | One of the problem types listed below. |
+| `task_id` | `string \| null` | The affected task ID (present for task-specific problems, omitted for global issues like dependency cycles). |
+| `message` | `string` | Human-readable description of the problem. |
+
+**Problem types:**
+
+| Type | When reported |
+|---|---|
+| `MalformedTaskDocument` | A `.md` file has an invalid/missing task ID or a duplicate ID. |
+| `InvalidMetadata` | A task has an invalid state value, malformed dependency IDs, or `claimed_by` without `claimed_pid`. |
+| `MissingDependency` | A task depends on an ID that does not exist among active tasks. |
+| `DependencyCycle` | Circular dependency detected among one or more tasks. |
+| `InvalidStateTransition` | A task is in `WORKING`, `CHECKING`, `REVIEWING`, or `TASK_GRAPH_UPDATING` without a claim. |
+| `MissingClaimProcess` | A task's claimed PID no longer exists (stale claim). |
+| `StuckTask` | A task has been in the same state longer than its threshold (`WORKING`: 12h, `CHECKING`: 1h, `REVIEWING`: 12h, `TASK_GRAPH_UPDATING`: 1h). |
+
+**Example output:**
+
+```json
+{
+  "tasks": {
+    "NEW": [],
+    "BLOCKED": ["000003"],
+    "READY_WORK": ["000001"],
+    "WORKING": ["000002"],
+    "READY_CHECK": [],
+    "CHECKING": [],
+    "READY_REVIEW": [],
+    "REVIEWING": [],
+    "READY_TASK_GRAPH_UPDATE": [],
+    "TASK_GRAPH_UPDATING": []
+  },
+  "problems": [
+    {
+      "type": "StuckTask",
+      "task_id": "000002",
+      "message": "Task \"000002\" has been in \"WORKING\" for 15.3 hours (threshold: 12h)"
+    }
+  ]
+}
+```
+
 ### Transition a task
 
 ```bash
@@ -87,7 +146,7 @@ bun tasks/transition.js <task-id> <transition-name> [args...]
 #### Examples
 
 ```bash
-# Create a task with no dependencies (NEW → READY_WORK)
+# A task with no dependencies (NEW → READY_WORK)
 bun tasks/transition.js 000001 noDependencies
 
 # Add dependencies (NEW → BLOCKED or self-loop)
