@@ -2,10 +2,13 @@
 id:
 title:
 state: NEW
+state_entered:
 depends_on: []
 claimed_by:
 claimed_pid:
-state_entered:
+todos: []
+checks: []
+task_graph_updates: []
 ---
 
 # Goal
@@ -18,18 +21,4 @@ state_entered:
 
 ## Notes
 
----
-
 # Implementation History
-
----
-
-# Automated Checks
-
----
-
-# Reviews
-
----
-
-# Task Graph Updates
