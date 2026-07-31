@@ -1,17 +1,18 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
+import { tempDir, test } from "./temp.ts";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { createTask } from "./create.ts";
-import { buildReport } from "./state.ts";
+import { SchemaError } from "./schema.ts";
 import {
   CLAIMED_STATES,
+  FAILURE_STATES,
   FIELD_ORDER,
   LOCK_FILENAME,
   type TaskMeta,
-  TaskSchemaError,
+  type UpdateOp,
   VALID_STATES,
   type ValidState,
+  createTask,
   detectCycles,
   formatId,
   isValidId,
@@ -20,6 +21,7 @@ import {
   readTaskFile,
   rebuildDocument,
   splitDocument,
+  writeTaskBody,
 } from "./task.ts";
 import {
   ALLOWED_TRANSITIONS,
@@ -28,14 +30,13 @@ import {
   type TransitionName,
   type TransitionResult,
   applyTransition,
-  parseArgs,
 } from "./transition.ts";
 
-const TEMPLATE_PATH = path.join(import.meta.dir, "template.md");
-const CREATE_PATH = path.join(import.meta.dir, "create.ts");
+const TEMPLATE_PATH = path.join(import.meta.dir, "..", "tasks", "template.md");
+const TASK_PATH = path.join(import.meta.dir, "task.ts");
 
 function makeTasksDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "task-graph-"));
+  const dir = tempDir("task-graph-");
   fs.copyFileSync(TEMPLATE_PATH, path.join(dir, "template.md"));
   fs.writeFileSync(path.join(dir, "next-task-id"), "1\n");
   return dir;
@@ -60,8 +61,11 @@ function baseMeta(overrides: Partial<TaskMeta> = {}): TaskMeta {
     depends_on: [],
     claimed_by: null,
     claimed_pid: null,
+    held_reason: null,
+    workspace: null,
     todos: [],
     checks: [],
+    failures: [],
     task_graph_updates: [],
     ...overrides,
   };
@@ -87,13 +91,61 @@ function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
   return meta.id;
 }
 
+function shape(name: TransitionName, extra: string[]): TransitionArgs {
+  const rest = (from: number) => extra.slice(from).join(" ");
+
+  switch (name) {
+    case "addDependencies":
+    case "removeDependencies":
+      return { taskIds: extra };
+    case "claim":
+      return extra.length <= 2
+        ? { agentName: extra[0], pid: Number(extra[1]) }
+        : {
+            agentName: extra[0],
+            pid: Number(extra[1]),
+            branch: extra[2],
+            worktree: extra[3],
+            session: extra[4],
+          };
+    case "fail":
+      return extra[0] === "result"
+        ? { failures: [{ type: "result", message: rest(1) }] }
+        : {
+            failures: [
+              {
+                type: "check",
+                command: rest(2),
+                exit_code: Number(extra[1]),
+                output: "",
+              },
+            ],
+          };
+    case "hold":
+      return { reason: rest(0) };
+    case "addTodo":
+      return { message: rest(0) };
+    case "addCheck":
+      return { command: rest(0) };
+    case "doneTodo":
+    case "doneTaskGraph":
+      return { index: Number(extra[0]) };
+    case "addTaskGraph":
+      return extra[0] === "add"
+        ? { op: "add", message: rest(1) }
+        : { op: extra[0] as UpdateOp, taskId: extra[1], message: rest(2) };
+    default:
+      return {};
+  }
+}
+
 function run(
   dir: string,
   id: string,
   name: TransitionName,
   ...extra: string[]
 ) {
-  return applyTransition(dir, id, name, parseArgs(name, extra));
+  return applyTransition(dir, id, name, shape(name, extra));
 }
 
 function metaOf(dir: string, id: string) {
@@ -128,10 +180,23 @@ function toChecking(): { dir: string; id: string } {
   return { dir, id };
 }
 
-function toReviewing(): { dir: string; id: string } {
+function toAgentReview(): { dir: string; id: string } {
   const { dir, id } = toChecking();
   run(dir, id, "pass");
   run(dir, id, "claim", "reviewer", String(process.pid));
+  return { dir, id };
+}
+
+function toManagerReview(): { dir: string; id: string } {
+  const { dir, id } = toAgentReview();
+  run(dir, id, "submit");
+  run(dir, id, "claim", "manager", String(process.pid));
+  return { dir, id };
+}
+
+function toHeld(): { dir: string; id: string } {
+  const { dir, id } = toWorking();
+  run(dir, id, "hold", "the API key is missing");
   return { dir, id };
 }
 
@@ -142,7 +207,9 @@ function closeTask(dir: string, id: string) {
   run(dir, id, "claim", "c", String(process.pid));
   run(dir, id, "pass");
   run(dir, id, "claim", "r", String(process.pid));
-  return run(dir, id, "pass");
+  run(dir, id, "submit");
+  run(dir, id, "claim", "m", String(process.pid));
+  return run(dir, id, "merged");
 }
 
 describe("id helpers", () => {
@@ -191,11 +258,11 @@ describe("document splitting", () => {
     try {
       parseTaskMeta(raw);
     } catch (err) {
-      issues = (err as TaskSchemaError).issues;
+      issues = (err as SchemaError).issues;
     }
     expect(issues).toHaveLength(2);
-    expect(issues[0]).toContain(`"id"`);
-    expect(issues[1]).toContain(`"title"`);
+    expect(issues[0]).toStartWith("id:");
+    expect(issues[1]).toStartWith("title:");
 
     expect(body).toContain("# Goal");
     expect(body).toContain("# Implementation History");
@@ -206,7 +273,7 @@ describe("schema", () => {
   test("a valid document round-trips to a fixed point", () => {
     const meta = baseMeta({
       title: "Add: a colon, a $& and a #hash",
-      state: "REVIEWING",
+      state: "MANAGER_REVIEWING",
       depends_on: ["000007", "000008"],
       claimed_by: "reviewer-1",
       claimed_pid: 4242,
@@ -217,7 +284,11 @@ describe("schema", () => {
           done: true,
         },
       ],
-      checks: [{ command: "bun test", done: false }],
+      checks: ["bun test"],
+      failures: [
+        { type: "check", command: "bun test", exit_code: 1, output: "boom" },
+        { type: "result", message: "the review did not parse" },
+      ],
       task_graph_updates: [
         { op: "add", message: "split parser", done: false },
         { op: "update", task_id: "000007", message: "retarget", done: true },
@@ -244,11 +315,9 @@ describe("schema", () => {
   });
 
   test("an unquoted six-digit id would be read as a number and is rejected", () => {
-    const doc = `---\nid: 000042\ntitle: t\nstate: NEW\nstate_entered: null\ndepends_on: []\nclaimed_by: null\nclaimed_pid: null\ntodos: []\nchecks: []\ntask_graph_updates: []\n---\n`;
+    const doc = `---\nid: 000042\ntitle: t\nstate: NEW\nstate_entered: null\ndepends_on: []\nclaimed_by: null\nclaimed_pid: null\ntodos: []\nchecks: []\nfailures: []\ntask_graph_updates: []\n---\n`;
     expect(parseDocument(doc).raw.id).toBe(42);
-    expect(() => parseTaskMeta(parseDocument(doc).raw)).toThrow(
-      TaskSchemaError,
-    );
+    expect(() => parseTaskMeta(parseDocument(doc).raw)).toThrow(SchemaError);
   });
 
   test("titles with YAML metacharacters survive a round-trip", () => {
@@ -269,13 +338,13 @@ describe("schema", () => {
     try {
       parseTaskMeta({ id: "000001", nonsense: true });
     } catch (err) {
-      issues = (err as TaskSchemaError).issues;
+      issues = (err as SchemaError).issues;
     }
-    expect(issues.some((i) => i.includes('unknown field "nonsense"'))).toBe(
+    expect(issues.some((i) => i.includes('Unrecognized key: "nonsense"'))).toBe(
       true,
     );
-    expect(issues.some((i) => i.includes('missing field "state"'))).toBe(true);
-    expect(issues.some((i) => i.includes('missing field "todos"'))).toBe(true);
+    expect(issues.some((i) => i.startsWith("state:"))).toBe(true);
+    expect(issues.some((i) => i.startsWith("todos:"))).toBe(true);
   });
 
   test("every violation is reported at once, not just the first", () => {
@@ -289,17 +358,17 @@ describe("schema", () => {
       });
       expect.unreachable();
     } catch (err) {
-      expect((err as TaskSchemaError).issues.length).toBeGreaterThanOrEqual(4);
+      expect((err as SchemaError).issues.length).toBeGreaterThanOrEqual(4);
     }
   });
 
   test("a claim must have both claimed_by and claimed_pid", () => {
     expect(() =>
       parseTaskMeta(raw(baseMeta({ claimed_by: "a", claimed_pid: null }))),
-    ).toThrow(TaskSchemaError);
+    ).toThrow(SchemaError);
     expect(() =>
       parseTaskMeta(raw(baseMeta({ claimed_by: null, claimed_pid: 12 }))),
-    ).toThrow(TaskSchemaError);
+    ).toThrow(SchemaError);
   });
 
   test("task graph update ops are discriminated on op", () => {
@@ -310,7 +379,7 @@ describe("schema", () => {
           { op: "add", task_id: "000007", message: "m", done: false },
         ],
       }),
-    ).toThrow(/must not have a task_id/);
+    ).toThrow(/task_graph_updates\[0\]: Unrecognized key: "task_id"/);
 
     for (const op of ["update", "delete"]) {
       expect(() =>
@@ -318,7 +387,9 @@ describe("schema", () => {
           ...baseMeta(),
           task_graph_updates: [{ op, message: "m", done: false }],
         }),
-      ).toThrow(/requires a six-digit task_id/);
+      ).toThrow(
+        /task_graph_updates\[0\]\.task_id: must be a quoted six-digit string/,
+      );
     }
 
     const ok = parseTaskMeta({
@@ -354,12 +425,12 @@ describe("schema", () => {
         ],
       }),
     ).toThrow(/todos\[0\]\.done/);
+    expect(() => parseTaskMeta({ ...baseMeta(), checks: [""] })).toThrow(
+      /checks\[0\]: Too small/,
+    );
     expect(() =>
-      parseTaskMeta({ ...baseMeta(), checks: [{ command: "", done: false }] }),
-    ).toThrow(/checks\[0\]\.command/);
-    expect(() =>
-      parseTaskMeta({ ...baseMeta(), checks: [{ command: "x", done: "yes" }] }),
-    ).toThrow(/checks\[0\]\.done/);
+      parseTaskMeta({ ...baseMeta(), checks: [{ command: "bun test" }] }),
+    ).toThrow(/checks\[0\]: Invalid input: expected string/);
   });
 
   test("empty lists serialize as [] and parse back as empty", () => {
@@ -367,6 +438,7 @@ describe("schema", () => {
     expect(doc).toContain("depends_on: []");
     expect(doc).toContain("todos: []");
     expect(doc).toContain("checks: []");
+    expect(doc).toContain("failures: []");
     expect(doc).toContain("task_graph_updates: []");
     expect(parseTaskMeta(parseDocument(doc).raw).todos).toEqual([]);
   });
@@ -384,8 +456,11 @@ describe("schema", () => {
       "depends_on",
       "claimed_by",
       "claimed_pid",
+      "held_reason",
+      "workspace",
       "todos",
       "checks",
+      "failures",
       "task_graph_updates",
     ]);
   });
@@ -525,7 +600,7 @@ describe("createTask", () => {
       Bun.spawn([
         "bun",
         "-e",
-        `const { createTask } = await import(${JSON.stringify(CREATE_PATH)});
+        `const { createTask } = await import(${JSON.stringify(TASK_PATH)});
          createTask(${JSON.stringify(dir)}, "concurrent ${i}");`,
       ]),
     );
@@ -639,10 +714,6 @@ describe("transitions: dependencies", () => {
       /not valid from state "BLOCKED"/,
     );
   });
-
-  test("malformed dependency ids are rejected", () => {
-    expect(() => parseArgs("addDependencies", ["42"])).toThrow(/six-digit/);
-  });
 });
 
 describe("transitions: claim and release", () => {
@@ -693,17 +764,11 @@ describe("transitions: claim and release", () => {
     );
     expect(run(dir, id, "release").to).toBe("READY_CHECK");
   });
-
-  test("an invalid pid is rejected", () => {
-    expect(() => parseArgs("claim", ["agent", "not-a-pid"])).toThrow(
-      /Invalid PID/,
-    );
-  });
 });
 
 describe("transitions: todos", () => {
-  test("addTodo from CHECKING sends the task back to READY_WORK", () => {
-    const { dir, id } = toChecking();
+  test("addTodo from AGENT_REVIEWING sends the task back to READY_WORK", () => {
+    const { dir, id } = toAgentReview();
     expect(run(dir, id, "addTodo", "fix null handling").to).toBe("READY_WORK");
 
     const todo = metaOf(dir, id).todos[0]!;
@@ -711,8 +776,8 @@ describe("transitions: todos", () => {
     expect(todo.done).toBe(false);
   });
 
-  test("addTodo from REVIEWING sends the task back to READY_WORK", () => {
-    const { dir, id } = toReviewing();
+  test("addTodo from MANAGER_REVIEWING sends the task back to READY_WORK", () => {
+    const { dir, id } = toManagerReview();
     expect(run(dir, id, "addTodo", "restructure the parser").to).toBe(
       "READY_WORK",
     );
@@ -720,7 +785,7 @@ describe("transitions: todos", () => {
   });
 
   test("addTodo self-loops in READY_WORK and WORKING so more can be filed", () => {
-    const { dir, id } = toChecking();
+    const { dir, id } = toAgentReview();
     run(dir, id, "addTodo", "first");
     expect(run(dir, id, "addTodo", "second").to).toBeNull();
     run(dir, id, "claim", "agent-1", String(process.pid));
@@ -774,7 +839,7 @@ describe("transitions: todos", () => {
   });
 
   test("todos are never cleared, so the record survives to close", () => {
-    const { dir, id } = toChecking();
+    const { dir, id } = toAgentReview();
     run(dir, id, "addTodo", "keep me");
     run(dir, id, "claim", "agent-1", String(process.pid));
     run(dir, id, "doneTodo", "0");
@@ -782,7 +847,9 @@ describe("transitions: todos", () => {
     run(dir, id, "claim", "checker", String(process.pid));
     run(dir, id, "pass");
     run(dir, id, "claim", "reviewer", String(process.pid));
-    const { closedPath } = run(dir, id, "pass");
+    run(dir, id, "submit");
+    run(dir, id, "claim", "manager", String(process.pid));
+    const { closedPath } = run(dir, id, "merged");
 
     expect(readTaskFile(closedPath!).meta.todos[0]!.message).toBe("keep me");
   });
@@ -795,9 +862,7 @@ describe("transitions: checks", () => {
     expect(() => run(dir, id, "addCheck", "bun test")).toThrow(
       /already has check/,
     );
-    expect(metaOf(dir, id).checks).toEqual([
-      { command: "bun test", done: false },
-    ]);
+    expect(metaOf(dir, id).checks).toEqual(["bun test"]);
   });
 
   test("addCheck self-loops in NEW and the checks survive into READY_WORK", () => {
@@ -806,73 +871,119 @@ describe("transitions: checks", () => {
     expect(metaOf(dir, id).state).toBe("NEW");
 
     expect(run(dir, id, "noDependencies").to).toBe("READY_WORK");
-    expect(metaOf(dir, id).checks).toEqual([
-      { command: "bun test", done: false },
+    expect(metaOf(dir, id).checks).toEqual(["bun test"]);
+  });
+
+  test("a check is a command and nothing else, so nothing records a stale pass", () => {
+    const { dir, id } = toChecking();
+    run(dir, id, "addCheck", "bun test");
+    expect(run(dir, id, "pass").to).toBe("READY_AGENT_REVIEW");
+    expect(metaOf(dir, id).checks).toEqual(["bun test"]);
+  });
+});
+
+describe("transitions: failures", () => {
+  test("fail from CHECKING sends the task back to READY_WORK with what failed", () => {
+    const { dir, id } = toChecking();
+    const result = applyTransition(dir, id, "fail", {
+      failures: [
+        { type: "check", command: "bun test", exit_code: 1, output: "1 fail" },
+      ],
+    });
+
+    expect(result.to).toBe("READY_WORK");
+    expect(metaOf(dir, id).failures).toEqual([
+      { type: "check", command: "bun test", exit_code: 1, output: "1 fail" },
     ]);
   });
 
-  test("pass from CHECKING is refused while a check has not been run", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addCheck", "bun test");
-    run(dir, id, "submit");
-    run(dir, id, "claim", "checker", String(process.pid));
-
-    expect(() => run(dir, id, "pass")).toThrow(/1 check\(s\) not yet run/);
-    run(dir, id, "doneCheck", "0");
-    expect(run(dir, id, "pass").to).toBe("READY_REVIEW");
+  test("every failing check is recorded, not just the first", () => {
+    const { dir, id } = toChecking();
+    applyTransition(dir, id, "fail", {
+      failures: [
+        { type: "check", command: "bun test", exit_code: 1, output: "a" },
+        { type: "check", command: "tsc", exit_code: 2, output: "b" },
+      ],
+    });
+    expect(metaOf(dir, id).failures.length).toBe(2);
   });
 
-  test("doneCheck rejects an out-of-range or already-done index", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addCheck", "bun test");
-    run(dir, id, "submit");
-    run(dir, id, "claim", "checker", String(process.pid));
-
-    expect(() => run(dir, id, "doneCheck", "5")).toThrow(/out of range/);
-    run(dir, id, "doneCheck", "0");
-    expect(() => run(dir, id, "doneCheck", "0")).toThrow(/already done/);
+  test("fail is only for the checks; a review cannot fail its own task", () => {
+    const { dir, id } = toAgentReview();
+    expect(() =>
+      applyTransition(dir, id, "fail", {
+        failures: [{ type: "result", message: "result.type was missing" }],
+      }),
+    ).toThrow(/not valid from state/);
   });
 
-  test("check results reset whenever the task returns to READY_WORK", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addCheck", "bun test");
-    run(dir, id, "submit");
-    run(dir, id, "claim", "checker", String(process.pid));
-    run(dir, id, "doneCheck", "0");
-    expect(metaOf(dir, id).checks[0]!.done).toBe(true);
+  test("a submit clears the failures it was sent back to fix", () => {
+    const { dir, id } = toChecking();
+    applyTransition(dir, id, "fail", {
+      failures: [
+        { type: "check", command: "bun test", exit_code: 1, output: "x" },
+      ],
+    });
+    run(dir, id, "claim", "agent-1", String(process.pid));
+    expect(metaOf(dir, id).failures.length).toBe(1);
 
-    run(dir, id, "addTodo", "found a bug");
-    expect(metaOf(dir, id).state).toBe("READY_WORK");
-    expect(metaOf(dir, id).checks[0]!.done).toBe(false);
+    run(dir, id, "submit");
+    expect(metaOf(dir, id).failures).toEqual([]);
   });
 
-  test("checks reset when a review sends the task back too", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addCheck", "bun test");
-    run(dir, id, "submit");
-    run(dir, id, "claim", "checker", String(process.pid));
-    run(dir, id, "doneCheck", "0");
-    run(dir, id, "pass");
-    run(dir, id, "claim", "reviewer", String(process.pid));
-    run(dir, id, "addTodo", "needs rework");
+  test("a hold clears them too, because held_reason is the record then", () => {
+    const { dir, id } = toChecking();
+    applyTransition(dir, id, "fail", {
+      failures: [
+        { type: "check", command: "bun test", exit_code: 1, output: "x" },
+      ],
+    });
+    run(dir, id, "claim", "agent-1", String(process.pid));
+    run(dir, id, "hold", "the fix needs a decision");
 
-    expect(metaOf(dir, id).checks[0]!.done).toBe(false);
+    expect(metaOf(dir, id).failures).toEqual([]);
+  });
+
+  test("fail refuses an empty or malformed list and writes nothing", () => {
+    const { dir, id } = toChecking();
+    const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
+
+    expect(() => applyTransition(dir, id, "fail", {})).toThrow(/non-empty/);
+    expect(() => applyTransition(dir, id, "fail", { failures: [] })).toThrow(
+      /non-empty/,
+    );
+    expect(() =>
+      applyTransition(dir, id, "fail", {
+        failures: [{ type: "nonsense" } as never],
+      }),
+    ).toThrow(/type of check, result/);
+    expect(() =>
+      applyTransition(dir, id, "fail", {
+        failures: [
+          { type: "check", command: "x", exit_code: 1.5, output: "" } as never,
+        ],
+      }),
+    ).toThrow(/exit_code/);
+
+    expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
   });
 });
 
 describe("transitions: task graph updates", () => {
-  test("addTaskGraph moves REVIEWING to READY_TASK_GRAPH_UPDATE then self-loops", () => {
-    const { dir, id } = toReviewing();
+  test("addTaskGraph self-loops in MANAGER_REVIEWING, so a review can queue several", () => {
+    const { dir, id } = toManagerReview();
     const target = createTask(dir, "a task to retarget").id;
     const doomed = createTask(dir, "a task to supersede").id;
 
-    expect(run(dir, id, "addTaskGraph", "add", "split the parser").to).toBe(
-      "READY_TASK_GRAPH_UPDATE",
-    );
+    expect(
+      run(dir, id, "addTaskGraph", "add", "split the parser").to,
+    ).toBeNull();
     expect(
       run(dir, id, "addTaskGraph", "update", target, "retarget").to,
     ).toBeNull();
+    expect(metaOf(dir, id).state).toBe("MANAGER_REVIEWING");
 
+    run(dir, id, "abort");
     run(dir, id, "claim", "graph-agent", String(process.pid));
     expect(
       run(dir, id, "addTaskGraph", "delete", doomed, "superseded").to,
@@ -885,34 +996,35 @@ describe("transitions: task graph updates", () => {
   });
 
   test("an update or delete op naming a task that does not exist is refused", () => {
-    const { dir, id } = toReviewing();
+    const { dir, id } = toManagerReview();
     expect(() =>
       run(dir, id, "addTaskGraph", "update", "000999", "retarget"),
     ).toThrow(/Task "000999" does not exist/);
     expect(metaOf(dir, id).task_graph_updates).toEqual([]);
-    expect(metaOf(dir, id).state).toBe("REVIEWING");
+    expect(metaOf(dir, id).state).toBe("MANAGER_REVIEWING");
   });
 
   test("update and delete require a task id, add takes a bare message", () => {
-    expect(() => parseArgs("addTaskGraph", ["update", "message only"])).toThrow(
-      /six-digit/,
-    );
-    expect(() => parseArgs("addTaskGraph", ["delete", "nope", "m"])).toThrow(
-      /six-digit/,
-    );
-    expect(parseArgs("addTaskGraph", ["add", "just", "a", "message"])).toEqual({
-      op: "add",
-      message: "just a message",
-    });
-    expect(() => parseArgs("addTaskGraph", ["rename", "m"])).toThrow(
-      /requires an op/,
-    );
+    const { dir, id } = toManagerReview();
+
+    for (const op of ["update", "delete"] as const) {
+      expect(() =>
+        applyTransition(dir, id, "addTaskGraph", { op, message: "no target" }),
+      ).toThrow(/must be a six-digit task ID/);
+    }
+    expect(metaOf(dir, id).task_graph_updates).toEqual([]);
+
+    expect(run(dir, id, "addTaskGraph", "add", "just a message").to).toBeNull();
+    expect(metaOf(dir, id).task_graph_updates).toEqual([
+      { op: "add", message: "just a message", done: false },
+    ]);
   });
 
   test("doneTaskGraph marks by index and closes only on the last one", () => {
-    const { dir, id } = toReviewing();
+    const { dir, id } = toManagerReview();
     run(dir, id, "addTaskGraph", "add", "first");
     run(dir, id, "addTaskGraph", "add", "second");
+    run(dir, id, "merged");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
     expect(run(dir, id, "doneTaskGraph", "1").to).toBeNull();
@@ -922,8 +1034,9 @@ describe("transitions: task graph updates", () => {
   });
 
   test("doneTaskGraph rejects an unknown or negative index", () => {
-    const { dir, id } = toReviewing();
+    const { dir, id } = toManagerReview();
     run(dir, id, "addTaskGraph", "add", "only one");
+    run(dir, id, "merged");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
     expect(() => run(dir, id, "doneTaskGraph", "7")).toThrow(/out of range/);
@@ -932,14 +1045,64 @@ describe("transitions: task graph updates", () => {
 });
 
 describe("transitions: closing", () => {
-  test("pass from REVIEWING closes the task and moves the file", () => {
-    const { dir, id } = toReviewing();
-    const result = run(dir, id, "pass");
+  test("merged from MANAGER_REVIEWING closes the task and moves the file", () => {
+    const { dir, id } = toManagerReview();
+    const result = run(dir, id, "merged");
 
     expect(result.to).toBe("CLOSED");
     expect(fs.existsSync(path.join(dir, `${id}.md`))).toBe(false);
     expect(fs.existsSync(path.join(dir, "closed", `${id}.md`))).toBe(true);
     expect(readTaskFile(result.closedPath!).meta.state).toBe("CLOSED");
+  });
+
+  test("merged with queued graph updates goes to the update state, not to CLOSED", () => {
+    const { dir, id } = toManagerReview();
+    run(dir, id, "addTaskGraph", "add", "the follow-up this uncovered");
+
+    expect(run(dir, id, "merged").to).toBe("READY_TASK_GRAPH_UPDATE");
+    expect(fs.existsSync(path.join(dir, `${id}.md`))).toBe(true);
+  });
+
+  test("abort always goes to the update state and refuses an empty queue", () => {
+    const { dir, id } = toManagerReview();
+    expect(() => run(dir, id, "abort")).toThrow(/no task graph updates/);
+
+    run(dir, id, "addTaskGraph", "add", "this task was the wrong shape");
+    expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
+  });
+
+  test("abort throws away a task still queued in READY_WORK", () => {
+    const { dir, id } = newTask("the wrong shape");
+    run(dir, id, "noDependencies");
+    expect(() => run(dir, id, "abort")).toThrow(/no task graph updates/);
+
+    expect(
+      run(dir, id, "addTaskGraph", "add", "two tasks instead of this one").to,
+    ).toBeNull();
+    expect(metaOf(dir, id).state).toBe("READY_WORK");
+
+    expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
+  });
+
+  test("a task sent back by a failed check can be aborted from READY_WORK", () => {
+    const { dir, id } = toChecking();
+    run(dir, id, "fail", "check", "1", "bun test");
+    expect(metaOf(dir, id).state).toBe("READY_WORK");
+
+    run(dir, id, "addTaskGraph", "add", "the task this should have been");
+    run(dir, id, "abort");
+    run(dir, id, "claim", "graph-agent", String(process.pid));
+
+    expect(run(dir, id, "doneTaskGraph", "0").to).toBe("CLOSED");
+  });
+
+  test("an aborted task still closes once the graph has been rewritten", () => {
+    const { dir, id } = toManagerReview();
+    run(dir, id, "addTaskGraph", "add", "split this in two");
+    run(dir, id, "abort");
+    run(dir, id, "claim", "graph-agent", String(process.pid));
+
+    expect(run(dir, id, "doneTaskGraph", "0").to).toBe("CLOSED");
   });
 
   test("closing removes the id from dependents and unblocks them", () => {
@@ -973,8 +1136,8 @@ describe("transitions: closing", () => {
   });
 
   test("a closed task has no further transitions", () => {
-    const { dir, id } = toReviewing();
-    run(dir, id, "pass");
+    const { dir, id } = toManagerReview();
+    run(dir, id, "merged");
 
     for (const name of TRANSITION_NAMES) {
       expect(() => applyTransition(dir, id, name, {})).toThrow(/is CLOSED/);
@@ -1065,7 +1228,7 @@ describe("transitions: argument validation", () => {
   });
 
   test("addTaskGraph rejects an unknown op", () => {
-    const { dir, id } = toReviewing();
+    const { dir, id } = toManagerReview();
 
     expect(() =>
       apply(dir, id, "addTaskGraph", { op: "rename", message: "m" }),
@@ -1106,10 +1269,12 @@ describe("transitions: document integrity", () => {
       ["doneTodo", ["0"]],
       ["submit", []],
       ["claim", ["checker", String(process.pid)]],
-      ["doneCheck", ["0"]],
       ["pass", []],
       ["claim", ["reviewer", String(process.pid)]],
+      ["submit", []],
+      ["claim", ["manager", String(process.pid)]],
       ["addTaskGraph", ["add", "follow-up work"]],
+      ["merged", []],
       ["claim", ["graph-agent", String(process.pid)]],
     ];
 
@@ -1185,481 +1350,589 @@ describe("transitions: table", () => {
   });
 });
 
-describe("state report", () => {
-  test("an empty project reports one empty group per state and nothing else", () => {
-    const report = buildReport(makeTasksDir());
+describe("transitions: the whole state machine", () => {
+  interface Case {
+    to: string;
+    prepare?: string[][];
+    args?: (dep: string) => string[];
+  }
 
-    const empty = {} as Record<ValidState, string[]>;
-    for (const state of VALID_STATES) {
-      empty[state] = [];
+  const MACHINE: Record<ValidState, Partial<Record<TransitionName, Case>>> = {
+    NEW: {
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      noDependencies: { to: "READY_WORK" },
+      addTodo: { to: "NEW", args: () => ["a todo"] },
+      addCheck: { to: "NEW", args: () => ["bun test"] },
+    },
+    BLOCKED: {
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      removeDependencies: { to: "READY_WORK", args: (dep) => [dep] },
+    },
+    HELD: {
+      resume: { to: "READY_WORK" },
+      addTodo: { to: "READY_WORK", args: () => ["the missing piece"] },
+      addCheck: { to: "HELD", args: () => ["bun test"] },
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      addTaskGraph: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        args: () => ["add", "the graph was wrong"],
+      },
+    },
+    READY_WORK: {
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      addTodo: { to: "READY_WORK", args: () => ["a todo"] },
+      addCheck: { to: "READY_WORK", args: () => ["bun test"] },
+      addTaskGraph: {
+        to: "READY_WORK",
+        args: () => ["add", "a follow-up"],
+      },
+      abort: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
+      },
+      claim: { to: "WORKING", args: () => ["agent-1", String(process.pid)] },
+    },
+    WORKING: {
+      addTodo: { to: "WORKING", args: () => ["a todo"] },
+      doneTodo: {
+        to: "WORKING",
+        prepare: [["addTodo", "something"]],
+        args: () => ["0"],
+      },
+      addCheck: { to: "WORKING", args: () => ["bun test"] },
+      submit: { to: "READY_CHECK" },
+      hold: { to: "HELD", args: () => ["waiting on a person"] },
+      release: { to: "READY_WORK" },
+    },
+    READY_CHECK: {
+      claim: { to: "CHECKING", args: () => ["server", String(process.pid)] },
+    },
+    CHECKING: {
+      addCheck: { to: "CHECKING", args: () => ["tsc --noEmit"] },
+      pass: { to: "READY_AGENT_REVIEW" },
+      fail: { to: "READY_WORK", args: () => ["check", "1", "bun test"] },
+      release: { to: "READY_CHECK" },
+    },
+    READY_AGENT_REVIEW: {
+      claim: {
+        to: "AGENT_REVIEWING",
+        args: () => ["reviewer", String(process.pid)],
+      },
+    },
+    AGENT_REVIEWING: {
+      addTodo: { to: "READY_WORK", args: () => ["a finding"] },
+      submit: { to: "READY_MANAGER_REVIEW" },
+      hold: { to: "HELD", args: () => ["the range does not exist"] },
+      release: { to: "READY_AGENT_REVIEW" },
+    },
+    READY_MANAGER_REVIEW: {
+      claim: {
+        to: "MANAGER_REVIEWING",
+        args: () => ["manager", String(process.pid)],
+      },
+    },
+    MANAGER_REVIEWING: {
+      addTodo: { to: "READY_WORK", args: () => ["not acceptable yet"] },
+      addCheck: { to: "MANAGER_REVIEWING", args: () => ["tsc --noEmit"] },
+      addTaskGraph: {
+        to: "MANAGER_REVIEWING",
+        args: () => ["add", "a follow-up"],
+      },
+      merged: { to: "CLOSED" },
+      abort: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
+      },
+      release: { to: "READY_MANAGER_REVIEW" },
+    },
+    READY_TASK_GRAPH_UPDATE: {
+      addTaskGraph: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        args: () => ["add", "one more"],
+      },
+      claim: {
+        to: "TASK_GRAPH_UPDATING",
+        args: () => ["graph-agent", String(process.pid)],
+      },
+    },
+    TASK_GRAPH_UPDATING: {
+      addTaskGraph: {
+        to: "TASK_GRAPH_UPDATING",
+        args: () => ["add", "one more"],
+      },
+      doneTaskGraph: { to: "CLOSED", args: () => ["0"] },
+      release: { to: "READY_TASK_GRAPH_UPDATE" },
+    },
+  };
+
+  async function build(
+    state: ValidState,
+    live: boolean,
+  ): Promise<{ dir: string; id: string; dep: string }> {
+    const pid = String(live ? process.pid : await deadPid());
+    const dir = makeTasksDir();
+    const dep = createTask(dir, "a dependency").id;
+    const id = createTask(dir, "the task under test").id;
+    const walk = (steps: string[][]) => {
+      for (const [name, ...args] of steps) {
+        run(dir, id, name as TransitionName, ...args);
+      }
+    };
+
+    if (state === "NEW") return { dir, id, dep };
+    if (state === "BLOCKED") {
+      walk([["addDependencies", dep]]);
+      return { dir, id, dep };
     }
 
-    expect(report.tasks).toEqual(empty);
-    expect(report.open).toEqual({});
-    expect(report.problems).toEqual([]);
+    walk([["noDependencies"]]);
+    if (state === "READY_WORK") return { dir, id, dep };
+
+    walk([["claim", "agent-1", pid]]);
+    if (state === "WORKING") return { dir, id, dep };
+    if (state === "HELD") {
+      walk([["hold", "waiting on a person"]]);
+      return { dir, id, dep };
+    }
+
+    walk([["submit"]]);
+    if (state === "READY_CHECK") return { dir, id, dep };
+
+    walk([["claim", "server", pid]]);
+    if (state === "CHECKING") return { dir, id, dep };
+
+    walk([["pass"]]);
+    if (state === "READY_AGENT_REVIEW") return { dir, id, dep };
+
+    walk([["claim", "reviewer", pid]]);
+    if (state === "AGENT_REVIEWING") return { dir, id, dep };
+
+    walk([["submit"]]);
+    if (state === "READY_MANAGER_REVIEW") return { dir, id, dep };
+
+    walk([["claim", "manager", pid]]);
+    if (state === "MANAGER_REVIEWING") return { dir, id, dep };
+
+    walk([["addTaskGraph", "add", "the follow-up this uncovered"], ["merged"]]);
+    if (state === "READY_TASK_GRAPH_UPDATE") return { dir, id, dep };
+
+    walk([["claim", "graph-agent", pid]]);
+    return { dir, id, dep };
+  }
+
+  test("the table covers every state and nothing but the allowed transitions", () => {
+    expect(Object.keys(MACHINE).sort()).toEqual([...VALID_STATES].sort());
+
+    for (const state of VALID_STATES) {
+      expect(Object.keys(MACHINE[state]).sort()).toEqual(
+        [...ALLOWED_TRANSITIONS[state]].sort(),
+      );
+    }
+
+    const exercised = new Set(
+      VALID_STATES.flatMap((state) => Object.keys(MACHINE[state])),
+    );
+    expect([...exercised].sort()).toEqual([...TRANSITION_NAMES].sort());
   });
 
-  test("tasks are grouped by state, and template.md contributes no task", () => {
-    const dir = makeTasksDir();
-    const a = createTask(dir, "a").id;
-    const b = createTask(dir, "b").id;
-    const c = createTask(dir, "c").id;
-    run(dir, c, "noDependencies");
+  test("every allowed transition lands where the machine says it does", async () => {
+    for (const state of VALID_STATES) {
+      for (const [name, expected] of Object.entries(MACHINE[state]) as [
+        TransitionName,
+        Case,
+      ][]) {
+        const { dir, id, dep } = await build(state, name !== "release");
+        expect(metaOf(dir, id).state).toBe(state);
 
-    const report = buildReport(dir);
-    expect(report.tasks.NEW).toEqual([a, b]);
-    expect(report.tasks.READY_WORK).toEqual([c]);
-    expect(Object.values(report.tasks).flat()).toHaveLength(3);
-    expect(Object.keys(report.open)).toEqual([a, b, c]);
-    expect(report.problems).toEqual([]);
+        for (const [step, ...args] of expected.prepare ?? []) {
+          run(dir, id, step as TransitionName, ...args);
+        }
+
+        const result = run(dir, id, name, ...(expected.args?.(dep) ?? []));
+        const landed = result.to ?? state;
+
+        expect(`${state} --${name}--> ${landed}`).toBe(
+          `${state} --${name}--> ${expected.to}`,
+        );
+
+        if (expected.to === "CLOSED") {
+          expect(fs.existsSync(result.closedPath!)).toBe(true);
+        } else {
+          expect(metaOf(dir, id).state as string).toBe(expected.to);
+        }
+      }
+    }
   });
 
-  test("closing clears the reference, leaving no MissingDependency", () => {
-    const dir = makeTasksDir();
-    const dep = createTask(dir, "dependency").id;
-    const main = createTask(dir, "main").id;
+  test("every transition the machine does not allow is refused", async () => {
+    for (const state of VALID_STATES) {
+      const allowed = new Set<string>(ALLOWED_TRANSITIONS[state]);
+      const refused = TRANSITION_NAMES.filter((name) => !allowed.has(name));
 
-    run(dir, main, "addDependencies", dep);
-    closeTask(dir, dep);
+      const { dir, id, dep } = await build(state, true);
+      const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
 
-    const report = buildReport(dir);
-    expect(metaOf(dir, main).depends_on).toEqual([]);
-    expect(report.problems).toEqual([]);
-    expect(report.tasks.READY_WORK).toEqual([main]);
+      for (const name of refused) {
+        const args = MACHINE[state][name]?.args?.(dep) ?? cliArgs(name, dep);
+        expect(() => run(dir, id, name, ...args)).toThrow(
+          /not valid from state/,
+        );
+      }
+
+      expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+    }
   });
 
-  test("a reference that outlives the task it names is reported", () => {
-    const dir = makeTasksDir();
-    const dep = createTask(dir, "dependency").id;
-    const main = createTask(dir, "main").id;
+  function cliArgs(name: TransitionName, dep: string): string[] {
+    switch (name) {
+      case "addDependencies":
+      case "removeDependencies":
+        return [dep];
+      case "claim":
+        return ["agent-1", String(process.pid)];
+      case "hold":
+        return ["a reason"];
+      case "addTodo":
+        return ["a todo"];
+      case "addCheck":
+        return ["bun test"];
+      case "doneTodo":
+      case "doneTaskGraph":
+        return ["0"];
+      case "addTaskGraph":
+        return ["add", "a message"];
+      case "fail":
+        return ["check", "1", "bun test"];
+      default:
+        return [];
+    }
+  }
+});
 
-    run(dir, main, "addDependencies", dep);
-    fs.rmSync(path.join(dir, `${dep}.md`));
+describe("transitions: the split review", () => {
+  test("a task walks CHECKING to CLOSED through both reviews", () => {
+    const { dir, id } = toChecking();
 
-    const problems = buildReport(dir).problems;
-    expect(problems).toHaveLength(1);
-    expect(problems[0]!.type).toBe("MissingDependency");
-    expect(problems[0]!.task_id).toBe(main);
+    expect(run(dir, id, "pass").to).toBe("READY_AGENT_REVIEW");
+    expect(run(dir, id, "claim", "reviewer", String(process.pid)).to).toBe(
+      "AGENT_REVIEWING",
+    );
+    expect(run(dir, id, "submit").to).toBe("READY_MANAGER_REVIEW");
+    expect(run(dir, id, "claim", "manager", String(process.pid)).to).toBe(
+      "MANAGER_REVIEWING",
+    );
+    expect(run(dir, id, "merged").to).toBe("CLOSED");
   });
 
-  test("a hand-written dependency that never existed is reported", () => {
+  test("submit from AGENT_REVIEWING hands the task straight to the manager", () => {
+    const { dir, id } = toAgentReview();
+    expect(run(dir, id, "submit").to).toBe("READY_MANAGER_REVIEW");
+    expect(metaOf(dir, id).claimed_by).toBeNull();
+  });
+
+  test("a finding applied in AGENT_REVIEWING lands the task in READY_WORK", () => {
+    const { dir, id } = toAgentReview();
+
+    expect(run(dir, id, "addTodo", "the null case is untested").to).toBe(
+      "READY_WORK",
+    );
+    expect(run(dir, id, "addTodo", "the error message is wrong").to).toBeNull();
+    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
+      "the null case is untested",
+      "the error message is wrong",
+    ]);
+    expect(metaOf(dir, id).claimed_by).toBeNull();
+  });
+
+  test("an agent reviewer cannot close the task or fail it", () => {
+    const { dir, id } = toAgentReview();
+    expect(ALLOWED_TRANSITIONS.AGENT_REVIEWING).toEqual([
+      "addTodo",
+      "submit",
+      "hold",
+      "release",
+    ]);
+    expect(() => run(dir, id, "pass")).toThrow(/not valid from state/);
+    expect(() => run(dir, id, "merged")).toThrow(/not valid from state/);
+  });
+
+  test("a review release returns the task to its own ready state", async () => {
     const dir = makeTasksDir();
     const id = writeTask(dir, {
       id: "000001",
-      state: "BLOCKED",
-      depends_on: ["000999"],
-    });
-
-    const problems = buildReport(dir).problems;
-    expect(problems).toHaveLength(1);
-    expect(problems[0]!.type).toBe("MissingDependency");
-    expect(problems[0]!.task_id).toBe(id);
-  });
-
-  test("a dependency cycle is reported once", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, { id: "000001", state: "BLOCKED", depends_on: ["000002"] });
-    writeTask(dir, { id: "000002", state: "BLOCKED", depends_on: ["000001"] });
-
-    const cycles = buildReport(dir).problems.filter(
-      (p) => p.type === "DependencyCycle",
-    );
-    expect(cycles).toHaveLength(1);
-    expect(cycles[0]!.message).toContain("000001, 000002");
-    expect(cycles[0]!.task_id).toBeUndefined();
-  });
-
-  test("a malformed document is reported without stopping the report", () => {
-    const dir = makeTasksDir();
-    const good = createTask(dir, "good").id;
-    fs.writeFileSync(path.join(dir, "000999.md"), "no frontmatter at all");
-
-    const report = buildReport(dir);
-    expect(report.tasks.NEW).toEqual([good]);
-    expect(
-      report.problems.some((p) => p.type === "MalformedTaskDocument"),
-    ).toBe(true);
-  });
-
-  test("a schema violation is reported as InvalidMetadata", () => {
-    const dir = makeTasksDir();
-    fs.writeFileSync(
-      path.join(dir, "000001.md"),
-      `---\nid: "000001"\ntitle: t\nstate: NONSENSE\nstate_entered: null\ndepends_on: []\nclaimed_by: null\nclaimed_pid: null\ntodos: []\nchecks: []\ntask_graph_updates: []\n---\n`,
-    );
-
-    const problems = buildReport(dir).problems;
-    expect(problems[0]!.type).toBe("InvalidMetadata");
-    expect(problems[0]!.message).toContain("NONSENSE");
-  });
-
-  test("a filename that disagrees with the id is reported", () => {
-    const dir = makeTasksDir();
-    const meta = baseMeta({ id: "000042" });
-    fs.writeFileSync(path.join(dir, "000007.md"), rebuildDocument(meta, "\n"));
-
-    const problems = buildReport(dir).problems;
-    expect(problems[0]!.type).toBe("MalformedTaskDocument");
-    expect(problems[0]!.message).toContain("000042");
-  });
-
-  test("BLOCKED with no dependencies is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, { id: "000001", state: "BLOCKED", depends_on: [] });
-
-    const problems = buildReport(dir).problems;
-    expect(problems[0]!.type).toBe("InvalidMetadata");
-    expect(problems[0]!.message).toContain("no dependencies");
-  });
-
-  test("a claimed state with no claim is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      claimed_by: null,
-      claimed_pid: null,
-    });
-
-    const problems = buildReport(dir).problems;
-    expect(problems.some((p) => p.type === "InvalidStateTransition")).toBe(
-      true,
-    );
-  });
-
-  test("an unclaimed state holding a claim is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "READY_WORK",
-      claimed_by: "ghost",
-      claimed_pid: process.pid,
-    });
-
-    const problems = buildReport(dir).problems;
-    expect(problems.some((p) => p.type === "InvalidStateTransition")).toBe(
-      true,
-    );
-  });
-
-  test("a dead claiming process is reported", async () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      claimed_by: "dead-agent",
+      state: "AGENT_REVIEWING",
+      claimed_by: "dead-reviewer",
       claimed_pid: await deadPid(),
     });
 
-    const problems = buildReport(dir).problems;
-    expect(problems.some((p) => p.type === "MissingClaimProcess")).toBe(true);
-    expect(
-      problems.find((p) => p.type === "MissingClaimProcess")!.message,
-    ).toContain("release");
+    expect(run(dir, id, "release").to).toBe("READY_AGENT_REVIEW");
   });
+});
 
-  test("a task past its stuck threshold is reported", () => {
-    const dir = makeTasksDir();
-    const longAgo = new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      state_entered: longAgo,
-      claimed_by: "agent-1",
-      claimed_pid: process.pid,
-    });
-
-    const stuck = buildReport(dir).problems.find((p) => p.type === "StuckTask");
-    expect(stuck).toBeDefined();
-    expect(stuck!.message).toContain("threshold: 12h");
-  });
-
-  test("a task within its threshold is not reported as stuck", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      state_entered: new Date().toISOString(),
-      claimed_by: "agent-1",
-      claimed_pid: process.pid,
-    });
-
-    expect(buildReport(dir).problems.some((p) => p.type === "StuckTask")).toBe(
-      false,
-    );
-  });
-
-  test("open todo and check counts are reported per task", () => {
+describe("transitions: hold and resume", () => {
+  test("hold from WORKING parks the task with its reason and clears the claim", () => {
     const { dir, id } = toWorking();
-    run(dir, id, "addCheck", "bun test");
-    run(dir, id, "addCheck", "tsc --noEmit");
-    run(dir, id, "addTodo", "one");
-    run(dir, id, "addTodo", "two");
-    run(dir, id, "doneTodo", "0");
 
-    expect(buildReport(dir).open[id]).toEqual({
-      open_todos: 1,
-      open_checks: 2,
-      open_task_graph_updates: 0,
-    });
+    expect(run(dir, id, "hold", "the staging database is down").to).toBe(
+      "HELD",
+    );
+
+    const meta = metaOf(dir, id);
+    expect(meta.held_reason).toBe("the staging database is down");
+    expect(meta.claimed_by).toBeNull();
+    expect(meta.claimed_pid).toBeNull();
   });
 
-  test("a CLOSED document left in the active directory is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, { id: "000001", state: "CLOSED" });
+  test("hold from AGENT_REVIEWING works the same way", () => {
+    const { dir, id } = toAgentReview();
+    expect(run(dir, id, "hold", "the diff does not apply").to).toBe("HELD");
+    expect(metaOf(dir, id).held_reason).toBe("the diff does not apply");
+  });
 
-    const problems = buildReport(dir).problems;
-    expect(problems[0]!.type).toBe("InvalidMetadata");
-    expect(problems[0]!.message).toContain("still in the active directory");
+  test("hold requires a reason", () => {
+    const { dir, id } = toWorking();
+    expect(() => run(dir, id, "hold")).toThrow(
+      /"reason" must be a non-empty string/,
+    );
+    expect(metaOf(dir, id).state).toBe("WORKING");
+  });
+
+  test("resume clears the reason and returns the task to READY_WORK", () => {
+    const { dir, id } = toHeld();
+
+    expect(run(dir, id, "resume").to).toBe("READY_WORK");
+    expect(metaOf(dir, id).held_reason).toBeNull();
+  });
+
+  test("every exit from HELD clears held_reason", () => {
+    for (const exit of ["resume", "addTodo", "addTaskGraph"] as const) {
+      const { dir, id } = toHeld();
+      const extra =
+        exit === "addTodo"
+          ? ["here is the missing piece"]
+          : exit === "addTaskGraph"
+            ? ["add", "the graph was wrong"]
+            : [];
+
+      run(dir, id, exit, ...extra);
+      expect(metaOf(dir, id).held_reason).toBeNull();
+    }
+  });
+
+  test("addDependencies moves a held task to BLOCKED and clears the reason", () => {
+    const { dir, id } = toHeld();
+    const dep = createTask(dir, "the thing it was waiting on").id;
+
+    expect(run(dir, id, "addDependencies", dep).to).toBe("BLOCKED");
+    expect(metaOf(dir, id).held_reason).toBeNull();
+    expect(metaOf(dir, id).depends_on).toEqual([dep]);
+  });
+
+  test("addTaskGraph moves a held task to READY_TASK_GRAPH_UPDATE", () => {
+    const { dir, id } = toHeld();
+    expect(run(dir, id, "addTaskGraph", "add", "split this task").to).toBe(
+      "READY_TASK_GRAPH_UPDATE",
+    );
+  });
+
+  test("a held task keeps its open todos", () => {
+    const { dir, id } = toWorking();
+    run(dir, id, "addTodo", "half of the work");
+    run(dir, id, "hold", "blocked on a decision");
+
+    expect(metaOf(dir, id).todos).toHaveLength(1);
+    expect(metaOf(dir, id).state).toBe("HELD");
+  });
+
+  test("the dispatcher queue never contains a held task", () => {
+    const { dir, id } = toHeld();
+    expect(metaOf(dir, id).state).toBe("HELD");
+    expect(ALLOWED_TRANSITIONS.HELD).not.toContain("claim");
   });
 });
 
-describe("state report: tooling blocked", () => {
-  test("a lock held by a dead process is reported", async () => {
-    const dir = makeTasksDir();
-    fs.writeFileSync(path.join(dir, LOCK_FILENAME), `${await deadPid()}\n`);
-
-    const problem = buildReport(dir).problems.find(
-      (p) => p.type === "ToolingBlocked",
-    );
-    expect(problem).toBeDefined();
-    expect(problem!.message).toContain("no longer exists");
-    expect(problem!.task_id).toBeUndefined();
+describe("transitions: the workspace block", () => {
+  test("a task has no workspace before its first claim", () => {
+    const { dir, id } = newTask();
+    run(dir, id, "noDependencies");
+    expect(metaOf(dir, id).workspace).toBeNull();
   });
 
-  test("a lock held by a live process is not reported", () => {
-    const dir = makeTasksDir();
-    fs.writeFileSync(path.join(dir, LOCK_FILENAME), `${process.pid}\n`);
-
-    expect(buildReport(dir).problems).toEqual([]);
-  });
-
-  test("a fresh lock with no recorded pid is tolerated", () => {
-    const dir = makeTasksDir();
-    fs.writeFileSync(path.join(dir, LOCK_FILENAME), "");
-
-    expect(buildReport(dir).problems).toEqual([]);
-  });
-
-  test("an old lock with no recorded pid is reported", () => {
-    const dir = makeTasksDir();
-    const lock = path.join(dir, LOCK_FILENAME);
-    fs.writeFileSync(lock, "");
-    const longAgo = new Date(Date.now() - 5 * 60 * 1000);
-    fs.utimesSync(lock, longAgo, longAgo);
-
-    const problem = buildReport(dir).problems.find(
-      (p) => p.type === "ToolingBlocked",
-    );
-    expect(problem).toBeDefined();
-    expect(problem!.message).toContain("no owning PID");
-  });
-
-  test("a counter at or below the highest existing id is reported", () => {
-    const dir = makeTasksDir();
-    createTask(dir, "a");
-    createTask(dir, "b");
-    fs.writeFileSync(path.join(dir, "next-task-id"), "2\n");
-
-    const problem = buildReport(dir).problems.find(
-      (p) => p.type === "ToolingBlocked",
-    );
-    expect(problem).toBeDefined();
-    expect(problem!.message).toContain("000002 already exists");
-  });
-
-  test("the counter check matches the failure it predicts", () => {
-    const dir = makeTasksDir();
-    createTask(dir, "a");
-    fs.writeFileSync(path.join(dir, "next-task-id"), "1\n");
-
-    expect(
-      buildReport(dir).problems.some((p) => p.type === "ToolingBlocked"),
-    ).toBe(true);
-    expect(() => createTask(dir, "collides")).toThrow();
-  });
-
-  test("a missing or unparseable counter is reported", () => {
-    const dir = makeTasksDir();
-    fs.rmSync(path.join(dir, "next-task-id"));
-    expect(buildReport(dir).problems[0]!.message).toContain(
-      "next-task-id is missing",
+  test("claim records branch, worktree, agent and session", () => {
+    const { dir, id } = newTask();
+    run(dir, id, "noDependencies");
+    run(
+      dir,
+      id,
+      "claim",
+      "pi-anthropic-claude-sonnet-4-5-2",
+      String(process.pid),
+      "work/000001",
+      "/tmp/task-graph-server/-repo/000001/worktree",
+      "/tmp/task-graph-server/-repo/000001/session/work/019f.jsonl",
     );
 
-    const other = makeTasksDir();
-    fs.writeFileSync(path.join(other, "next-task-id"), "banana\n");
-    expect(buildReport(other).problems[0]!.message).toContain(
-      "not a positive integer",
-    );
-  });
-
-  test("a completed create releases the lock and leaves no tooling problem", () => {
-    const dir = makeTasksDir();
-    createTask(dir, "a");
-
-    expect(fs.existsSync(path.join(dir, LOCK_FILENAME))).toBe(false);
-    expect(buildReport(dir).problems).toEqual([]);
-  });
-});
-
-describe("state report: queue invariants", () => {
-  test("an open todo downstream of submit is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "READY_REVIEW",
-      todos: [
-        {
-          at: "2026-07-27T12:00:00Z",
-          message: "unresolved",
-          done: false,
-        },
-      ],
+    expect(metaOf(dir, id).workspace).toEqual({
+      branch: "work/000001",
+      worktree: "/tmp/task-graph-server/-repo/000001/worktree",
+      agent: "pi-anthropic-claude-sonnet-4-5-2",
+      session: "/tmp/task-graph-server/-repo/000001/session/work/019f.jsonl",
     });
+  });
 
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("open todo"),
+  test("a claim with no workspace args leaves the recorded one alone", () => {
+    const { dir, id } = newTask();
+    run(dir, id, "noDependencies");
+    run(
+      dir,
+      id,
+      "claim",
+      "pi-1",
+      String(process.pid),
+      "work/000001",
+      "/tmp/wt",
+      "/tmp/session.jsonl",
     );
-    expect(problem).toBeDefined();
-    expect(problem!.type).toBe("InvalidMetadata");
-    expect(problem!.message).toContain("submit should have blocked this");
-  });
+    const before = metaOf(dir, id).workspace;
 
-  test("an unrun check downstream of pass is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "REVIEWING",
-      claimed_by: "reviewer",
-      claimed_pid: process.pid,
-      checks: [{ command: "bun test", done: false }],
-    });
-
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("not yet run"),
-    );
-    expect(problem).toBeDefined();
-    expect(problem!.message).toContain("pass should have blocked this");
-  });
-
-  test("a done todo downstream of submit is fine", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "READY_REVIEW",
-      todos: [
-        {
-          at: "2026-07-27T12:00:00Z",
-          message: "resolved",
-          done: true,
-        },
-      ],
-      checks: [{ command: "bun test", done: true }],
-    });
-
-    expect(buildReport(dir).problems).toEqual([]);
-  });
-
-  test("a NEW task carrying todos and checks is fine, since NEW is where it is filled in", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "NEW",
-      todos: [
-        {
-          at: "2026-07-27T12:00:00Z",
-          message: "early",
-          done: false,
-        },
-      ],
-      checks: [{ command: "bun test", done: false }],
-    });
-
-    expect(buildReport(dir).problems).toEqual([]);
-  });
-
-  test("open task graph updates outside the update states are reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "READY_WORK",
-      task_graph_updates: [{ op: "add", message: "orphaned", done: false }],
-    });
-
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("open task graph update"),
-    );
-    expect(problem).toBeDefined();
-  });
-
-  test("an update state with nothing queued is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "TASK_GRAPH_UPDATING",
-      claimed_by: "agent",
-      claimed_pid: process.pid,
-      task_graph_updates: [],
-    });
-
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("no task graph updates queued"),
-    );
-    expect(problem).toBeDefined();
-  });
-
-  test("a task driven through the real transitions violates no queue invariant", () => {
-    const { dir, id } = toChecking();
-    run(dir, id, "addTodo", "found something");
-    run(dir, id, "claim", "agent-1", String(process.pid));
-    run(dir, id, "doneTodo", "0");
     run(dir, id, "submit");
+    run(dir, id, "claim", "server", String(process.pid));
 
-    expect(buildReport(dir).problems).toEqual([]);
-    expect(buildReport(dir).tasks.READY_CHECK).toEqual([id]);
+    expect(metaOf(dir, id).workspace).toEqual(before);
+  });
+
+  test("the session is null when the claim does not carry one", () => {
+    const { dir, id } = newTask();
+    run(dir, id, "noDependencies");
+    run(
+      dir,
+      id,
+      "claim",
+      "pi-1",
+      String(process.pid),
+      "work/000001",
+      "/tmp/wt",
+    );
+
+    expect(metaOf(dir, id).workspace!.session).toBeNull();
+  });
+
+  test("a branch without a worktree is refused and writes nothing", () => {
+    const { dir, id } = newTask();
+    run(dir, id, "noDependencies");
+
+    expect(() =>
+      run(dir, id, "claim", "pi-1", String(process.pid), "work/000001"),
+    ).toThrow(/"worktree" must be a non-empty string/);
+    expect(metaOf(dir, id).state).toBe("READY_WORK");
+    expect(metaOf(dir, id).workspace).toBeNull();
+  });
+
+  test("the workspace survives a release and round-trips through the schema", async () => {
+    const dir = makeTasksDir();
+    const workspace = {
+      branch: "work/000001",
+      worktree: "/tmp/task-graph-server/-repo/000001/worktree",
+      agent: "pi-anthropic-claude-sonnet-4-5-2",
+      session: "/tmp/task-graph-server/-repo/000001/session/work/019f.jsonl",
+    };
+    const id = writeTask(dir, {
+      id: "000001",
+      state: "WORKING",
+      claimed_by: "pi-anthropic-claude-sonnet-4-5-2",
+      claimed_pid: await deadPid(),
+      workspace,
+    });
+
+    expect(metaOf(dir, id).workspace).toEqual(workspace);
+    run(dir, id, "release");
+    expect(metaOf(dir, id).workspace).toEqual(workspace);
+  });
+
+  test("closing clears the workspace", () => {
+    const dir = makeTasksDir();
+    const id = createTask(dir, "a task").id;
+    run(dir, id, "noDependencies");
+    run(
+      dir,
+      id,
+      "claim",
+      "pi-1",
+      String(process.pid),
+      "work/000001",
+      "/tmp/wt",
+    );
+    run(dir, id, "submit");
+    run(dir, id, "claim", "c", String(process.pid));
+    run(dir, id, "pass");
+    run(dir, id, "claim", "r", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "m", String(process.pid));
+    const { closedPath } = run(dir, id, "merged");
+
+    expect(readTaskFile(closedPath!).meta.workspace).toBeNull();
+  });
+
+  test("a workspace missing a key or holding an unknown one is rejected", () => {
+    const partial = raw(baseMeta());
+    partial.workspace = { branch: "work/000001" };
+    expect(() => parseTaskMeta(partial)).toThrow(/workspace\.worktree/);
+
+    const extra = raw(baseMeta());
+    extra.workspace = {
+      branch: "b",
+      worktree: "w",
+      agent: "a",
+      session: null,
+      pid: 1,
+    };
+    expect(() => parseTaskMeta(extra)).toThrow(/Unrecognized key: "pid"/);
   });
 });
 
-describe("state report: state_entered", () => {
-  test("a null state_entered in a stuck-tracked state is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      state_entered: null,
-      claimed_by: "agent",
-      claimed_pid: process.pid,
-    });
+describe("writeTaskBody", () => {
+  test("the body is replaced and the frontmatter is untouched", () => {
+    const { dir, id } = toWorking();
+    const before = metaOf(dir, id);
 
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("never be reported as stuck"),
+    writeTaskBody(dir, id, "# Goal\n\nA rewritten goal.");
+
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(
+      "\n\n# Goal\n\nA rewritten goal.\n",
     );
-    expect(problem).toBeDefined();
+    expect(metaOf(dir, id)).toEqual(before);
   });
 
-  test("a null state_entered in an untracked state is tolerated", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, { id: "000001", state: "NEW", state_entered: null });
+  test("a body is normalized to one leading blank line and one trailing newline", () => {
+    const { dir, id } = newTask();
+    writeTaskBody(dir, id, "\n\n\n# Goal\n\n\n");
 
-    expect(buildReport(dir).problems).toEqual([]);
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe("\n\n# Goal\n");
   });
 
-  test("a state_entered in the future is reported", () => {
-    const dir = makeTasksDir();
-    writeTask(dir, {
-      id: "000001",
-      state: "WORKING",
-      state_entered: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      claimed_by: "agent",
-      claimed_pid: process.pid,
-    });
+  test("an empty body is refused and the document is left alone", () => {
+    const { dir, id } = newTask();
+    const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
 
-    const problem = buildReport(dir).problems.find((p) =>
-      p.message.includes("in the future"),
+    expect(() => writeTaskBody(dir, id, "   \n ")).toThrow(/body is required/);
+    expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+  });
+
+  test("an unknown task is refused", () => {
+    const dir = makeTasksDir();
+    expect(() => writeTaskBody(dir, "000999", "# Goal")).toThrow(/not found/);
+  });
+
+  test("a body written under the lock is not lost to a concurrent transition", () => {
+    const { dir, id } = toWorking();
+
+    run(dir, id, "addTodo", "a todo filed by the server");
+    writeTaskBody(dir, id, "# Goal\n\nprose the manager wrote");
+    run(dir, id, "addTodo", "another todo filed by the server");
+
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(
+      "\n\n# Goal\n\nprose the manager wrote\n",
     );
-    expect(problem).toBeDefined();
-    expect(buildReport(dir).problems.some((p) => p.type === "StuckTask")).toBe(
-      false,
-    );
+    expect(metaOf(dir, id).todos).toHaveLength(2);
   });
 });

@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
+  type Failure,
+  FAILURE_TYPES,
+  type FailureType,
   type TaskGraphUpdate,
   type TaskId,
   type TaskMeta,
@@ -14,6 +15,7 @@ import {
   findTaskFile,
   isProcessAlive,
   isValidId,
+  openCount,
   readTaskFile,
   withLock,
   writeTaskFile,
@@ -27,12 +29,16 @@ export const TRANSITION_NAMES = [
   "release",
   "submit",
   "pass",
+  "fail",
+  "hold",
+  "resume",
   "addTodo",
   "doneTodo",
   "addCheck",
-  "doneCheck",
   "addTaskGraph",
   "doneTaskGraph",
+  "merged",
+  "abort",
 ] as const;
 
 export type TransitionName = (typeof TRANSITION_NAMES)[number];
@@ -40,12 +46,29 @@ export type TransitionName = (typeof TRANSITION_NAMES)[number];
 export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
   NEW: ["addDependencies", "noDependencies", "addTodo", "addCheck"],
   BLOCKED: ["addDependencies", "removeDependencies"],
-  READY_WORK: ["addDependencies", "addTodo", "addCheck", "claim"],
-  WORKING: ["addTodo", "doneTodo", "addCheck", "submit", "release"],
+  HELD: ["resume", "addTodo", "addCheck", "addDependencies", "addTaskGraph"],
+  READY_WORK: [
+    "addDependencies",
+    "addTodo",
+    "addCheck",
+    "addTaskGraph",
+    "abort",
+    "claim",
+  ],
+  WORKING: ["addTodo", "doneTodo", "addCheck", "submit", "hold", "release"],
   READY_CHECK: ["claim"],
-  CHECKING: ["addCheck", "doneCheck", "addTodo", "pass", "release"],
-  READY_REVIEW: ["claim"],
-  REVIEWING: ["addTodo", "addTaskGraph", "pass", "release"],
+  CHECKING: ["addCheck", "pass", "fail", "release"],
+  READY_AGENT_REVIEW: ["claim"],
+  AGENT_REVIEWING: ["addTodo", "submit", "hold", "release"],
+  READY_MANAGER_REVIEW: ["claim"],
+  MANAGER_REVIEWING: [
+    "addTodo",
+    "addCheck",
+    "addTaskGraph",
+    "merged",
+    "abort",
+    "release",
+  ],
   READY_TASK_GRAPH_UPDATE: ["addTaskGraph", "claim"],
   TASK_GRAPH_UPDATING: ["addTaskGraph", "doneTaskGraph", "release"],
 };
@@ -53,23 +76,46 @@ export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
 const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
   READY_WORK: "WORKING",
   READY_CHECK: "CHECKING",
-  READY_REVIEW: "REVIEWING",
+  READY_AGENT_REVIEW: "AGENT_REVIEWING",
+  READY_MANAGER_REVIEW: "MANAGER_REVIEWING",
   READY_TASK_GRAPH_UPDATE: "TASK_GRAPH_UPDATING",
 };
 
 const RELEASE_TARGETS: Partial<Record<ValidState, ValidState>> = {
   WORKING: "READY_WORK",
   CHECKING: "READY_CHECK",
-  REVIEWING: "READY_REVIEW",
+  AGENT_REVIEWING: "READY_AGENT_REVIEW",
+  MANAGER_REVIEWING: "READY_MANAGER_REVIEW",
   TASK_GRAPH_UPDATING: "READY_TASK_GRAPH_UPDATE",
 };
+
+const SUBMIT_TARGETS: Partial<Record<ValidState, ValidState>> = {
+  WORKING: "READY_CHECK",
+  AGENT_REVIEWING: "READY_MANAGER_REVIEW",
+};
+
+const PASS_TARGETS: Partial<Record<ValidState, TaskState>> = {
+  CHECKING: "READY_AGENT_REVIEW",
+};
+
+const FAIL_TARGETS: Partial<Record<ValidState, ValidState>> = {
+  CHECKING: "READY_WORK",
+};
+
+const TODO_SENDS_BACK_FROM: ValidState[] = [
+  "AGENT_REVIEWING",
+  "MANAGER_REVIEWING",
+  "HELD",
+];
 
 const UNCLAIMED_STATES: TaskState[] = [
   "NEW",
   "BLOCKED",
+  "HELD",
   "READY_WORK",
   "READY_CHECK",
-  "READY_REVIEW",
+  "READY_AGENT_REVIEW",
+  "READY_MANAGER_REVIEW",
   "READY_TASK_GRAPH_UPDATE",
   "CLOSED",
 ];
@@ -78,11 +124,16 @@ export interface TransitionArgs {
   taskIds?: TaskId[];
   agentName?: string;
   pid?: number;
+  branch?: string;
+  worktree?: string;
+  session?: string;
+  reason?: string;
   message?: string;
   command?: string;
   index?: number;
   op?: UpdateOp;
   taskId?: TaskId;
+  failures?: Failure[];
 }
 
 export interface TransitionResult {
@@ -110,6 +161,31 @@ function requirePid(value: unknown): number {
     );
   }
   return value as number;
+}
+
+function requireFailures(value: unknown): Failure[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`"failures" must be a non-empty list`);
+  }
+  for (const failure of value as Record<string, unknown>[]) {
+    if (!FAILURE_TYPES.includes(failure.type as FailureType)) {
+      throw new Error(
+        `"failures" entries must have a type of ${FAILURE_TYPES.join(", ")}`,
+      );
+    }
+    if (failure.type === "check") {
+      requireText(failure.command, "command");
+      if (!Number.isInteger(failure.exit_code)) {
+        throw new Error(`"exit_code" must be an integer`);
+      }
+      if (typeof failure.output !== "string") {
+        throw new Error(`"output" must be a string`);
+      }
+    } else {
+      requireText(failure.message, "message");
+    }
+  }
+  return value as Failure[];
 }
 
 function requireOp(value: unknown): UpdateOp {
@@ -180,10 +256,6 @@ function requireIndex(
   return index as number;
 }
 
-function openCount(list: { done: boolean }[]): number {
-  return list.filter((item) => !item.done).length;
-}
-
 function mutate(
   tasksDir: string,
   meta: TaskMeta,
@@ -229,6 +301,14 @@ function mutate(
       }
       meta.claimed_by = requireText(args.agentName, "agentName");
       meta.claimed_pid = requirePid(args.pid);
+      if (args.branch !== undefined || args.worktree !== undefined) {
+        meta.workspace = {
+          branch: requireText(args.branch, "branch"),
+          worktree: requireText(args.worktree, "worktree"),
+          agent: meta.claimed_by,
+          session: args.session === undefined ? null : args.session,
+        };
+      }
       return CLAIM_TARGETS[state]!;
     }
 
@@ -253,24 +333,33 @@ function mutate(
           `Task "${meta.id}" has ${open} open todo(s); resolve them first`,
         );
       }
-      return "READY_CHECK";
+      meta.failures = [];
+      return SUBMIT_TARGETS[state]!;
     }
 
     case "pass": {
-      if (state === "CHECKING") {
-        const open = openCount(meta.checks);
-        if (open > 0) {
-          throw new Error(`Task "${meta.id}" has ${open} check(s) not yet run`);
-        }
-        return "READY_REVIEW";
-      }
       const open = openCount(meta.todos);
       if (open > 0) {
         throw new Error(
-          `Task "${meta.id}" has ${open} open todo(s); cannot close`,
+          `Task "${meta.id}" has ${open} open todo(s); cannot pass`,
         );
       }
-      return "CLOSED";
+      return PASS_TARGETS[state]!;
+    }
+
+    case "fail": {
+      meta.failures = requireFailures(args.failures);
+      return FAIL_TARGETS[state]!;
+    }
+
+    case "hold": {
+      meta.held_reason = requireText(args.reason, "reason");
+      meta.failures = [];
+      return "HELD";
+    }
+
+    case "resume": {
+      return "READY_WORK";
     }
 
     case "addTodo": {
@@ -279,9 +368,7 @@ function mutate(
         message: requireText(args.message, "message"),
         done: false,
       });
-      return state === "CHECKING" || state === "REVIEWING"
-        ? "READY_WORK"
-        : null;
+      return TODO_SENDS_BACK_FROM.includes(state) ? "READY_WORK" : null;
     }
 
     case "doneTodo": {
@@ -292,16 +379,10 @@ function mutate(
 
     case "addCheck": {
       const command = requireText(args.command, "command");
-      if (meta.checks.some((c) => c.command === command)) {
+      if (meta.checks.includes(command)) {
         throw new Error(`Task "${meta.id}" already has check "${command}"`);
       }
-      meta.checks.push({ command, done: false });
-      return null;
-    }
-
-    case "doneCheck": {
-      const index = requireIndex(meta.checks, args.index, "check");
-      meta.checks[index]!.done = true;
+      meta.checks.push(command);
       return null;
     }
 
@@ -323,7 +404,7 @@ function mutate(
             }
       ) as TaskGraphUpdate;
       meta.task_graph_updates.push(update);
-      return state === "REVIEWING" ? "READY_TASK_GRAPH_UPDATE" : null;
+      return state === "HELD" ? "READY_TASK_GRAPH_UPDATE" : null;
     }
 
     case "doneTaskGraph": {
@@ -334,6 +415,27 @@ function mutate(
       );
       meta.task_graph_updates[index]!.done = true;
       return openCount(meta.task_graph_updates) === 0 ? "CLOSED" : null;
+    }
+
+    case "merged": {
+      const open = openCount(meta.todos);
+      if (open > 0) {
+        throw new Error(
+          `Task "${meta.id}" has ${open} open todo(s); cannot be merged`,
+        );
+      }
+      return meta.task_graph_updates.length === 0
+        ? "CLOSED"
+        : "READY_TASK_GRAPH_UPDATE";
+    }
+
+    case "abort": {
+      if (meta.task_graph_updates.length === 0) {
+        throw new Error(
+          `Task "${meta.id}" has no task graph updates; an abort must say what the graph should become`,
+        );
+      }
+      return "READY_TASK_GRAPH_UPDATE";
     }
   }
 }
@@ -362,9 +464,6 @@ function propagateClose(
 
     if (meta.state === "BLOCKED" && meta.depends_on.length === 0) {
       meta.state = "READY_WORK";
-      for (const check of meta.checks) {
-        check.done = false;
-      }
       unblocked.push(meta.id);
     }
     meta.state_entered = now;
@@ -419,13 +518,12 @@ export function applyTransition(
       meta.claimed_pid = null;
     }
 
-    if (target === "READY_WORK") {
-      for (const check of meta.checks) {
-        check.done = false;
-      }
+    if (target !== null && target !== "HELD") {
+      meta.held_reason = null;
     }
 
     if (target === "CLOSED") {
+      meta.workspace = null;
       const closedPath = closeTaskFile(filePath, tasksDir, meta, body);
       const { unblocked, dependentsUpdated } = propagateClose(
         tasksDir,
@@ -445,169 +543,4 @@ export function applyTransition(
     writeTaskFile(filePath, meta, body);
     return { taskId, from, to: target, unblocked: [], dependentsUpdated: [] };
   });
-}
-
-const USAGE = `Usage: bun tasks/transition.ts <task-id> <transition> [args...]
-
-Transitions:
-  addDependencies     <taskId1> [taskId2 ...]
-  removeDependencies  <taskId1> [taskId2 ...]
-  noDependencies
-  claim               <agentName> <pid>
-  release
-  submit
-  pass
-  addTodo             <message>
-  doneTodo            <index>
-  addCheck            <command>
-  doneCheck           <index>
-  addTaskGraph        add <message>
-  addTaskGraph        update|delete <taskId> <message>
-  doneTaskGraph       <index>`;
-
-export function parseArgs(
-  name: TransitionName,
-  extra: string[],
-): TransitionArgs {
-  switch (name) {
-    case "addDependencies":
-    case "removeDependencies": {
-      if (extra.length < 1) {
-        throw new Error(`"${name}" requires at least one task ID`);
-      }
-      for (const id of extra) {
-        if (!isValidId(id)) {
-          throw new Error(
-            `Invalid dependency ID "${id}". Must be a six-digit number.`,
-          );
-        }
-      }
-      return { taskIds: extra };
-    }
-
-    case "noDependencies":
-    case "release":
-    case "submit":
-    case "pass": {
-      return {};
-    }
-
-    case "claim": {
-      if (extra.length < 2) {
-        throw new Error('"claim" requires <agentName> <pid>');
-      }
-      const pid = Number(extra[1]);
-      if (!Number.isInteger(pid) || pid <= 0) {
-        throw new Error(`Invalid PID "${extra[1]}"`);
-      }
-      return { agentName: extra[0], pid };
-    }
-
-    case "addTodo": {
-      const message = extra.join(" ").trim();
-      if (message.length === 0) {
-        throw new Error('"addTodo" requires a <message>');
-      }
-      return { message };
-    }
-
-    case "addCheck": {
-      const command = extra.join(" ").trim();
-      if (command.length === 0) {
-        throw new Error('"addCheck" requires a <command>');
-      }
-      return { command };
-    }
-
-    case "doneTodo":
-    case "doneCheck":
-    case "doneTaskGraph": {
-      const index = Number(extra[0]);
-      if (!Number.isInteger(index) || index < 0) {
-        throw new Error(`"${name}" requires a non-negative integer index`);
-      }
-      return { index };
-    }
-
-    case "addTaskGraph": {
-      const op = extra[0] as UpdateOp;
-      if (!UPDATE_OPS.includes(op)) {
-        throw new Error(
-          `"addTaskGraph" requires an op of ${UPDATE_OPS.join(", ")}`,
-        );
-      }
-      if (op === "add") {
-        const message = extra.slice(1).join(" ").trim();
-        if (message.length === 0) {
-          throw new Error('"addTaskGraph add" requires a <message>');
-        }
-        return { op, message };
-      }
-      const taskId = extra[1];
-      if (!isValidId(taskId)) {
-        throw new Error(`"addTaskGraph ${op}" requires a six-digit <taskId>`);
-      }
-      const message = extra.slice(2).join(" ").trim();
-      if (message.length === 0) {
-        throw new Error(`"addTaskGraph ${op}" requires a <message>`);
-      }
-      return { op, taskId, message };
-    }
-  }
-}
-
-function describe(result: TransitionResult, name: TransitionName): string {
-  const lines: string[] = [];
-
-  if (result.to === "CLOSED") {
-    lines.push(
-      `Task "${result.taskId}" transitioned to CLOSED → ${result.closedPath}`,
-    );
-  } else if (result.to === null) {
-    lines.push(
-      `Task "${result.taskId}" stayed in ${result.from} (${name} applied)`,
-    );
-  } else {
-    lines.push(`Task "${result.taskId}" ${result.from} → ${result.to}`);
-  }
-
-  for (const id of result.dependentsUpdated) {
-    const note = result.unblocked.includes(id) ? " → READY_WORK" : "";
-    lines.push(`  dependency removed from "${id}"${note}`);
-  }
-
-  return lines.join("\n");
-}
-
-function main(): void {
-  const argv = process.argv.slice(2);
-
-  if (argv.length < 2) {
-    console.error(USAGE);
-    process.exit(1);
-  }
-
-  const taskId = argv[0]!;
-  const name = argv[1] as TransitionName;
-  const tasksDir = path.dirname(fileURLToPath(import.meta.url));
-
-  try {
-    if (!isValidId(taskId)) {
-      throw new Error(
-        `Invalid task ID "${taskId}". Must be a six-digit number.`,
-      );
-    }
-    if (!TRANSITION_NAMES.includes(name)) {
-      throw new Error(`Unknown transition "${name}"`);
-    }
-    const args = parseArgs(name, argv.slice(2));
-    console.log(describe(applyTransition(tasksDir, taskId, name, args), name));
-  } catch (err) {
-    console.error(`Error: ${(err as Error).message}`);
-    process.exit(1);
-  }
-}
-
-if (import.meta.main) {
-  main();
 }

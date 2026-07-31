@@ -14,5 +14,5 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true
   },
-  "include": ["tasks/**/*.ts"]
+  "include": ["orchestrator/**/*.ts"]
 }
