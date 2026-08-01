@@ -25,7 +25,7 @@ import {
 import { CheckRunner, tailOf } from "./checks.ts";
 import { blockingCounts } from "./graph.ts";
 import { inbox } from "./inbox.ts";
-import { ISSUES } from "./prompts.ts";
+import { ISSUES, Prompts } from "./prompts.ts";
 import { SchemaError } from "./schema.ts";
 import { render } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
@@ -38,7 +38,13 @@ import {
 } from "./rpc.ts";
 import { candidates, pickSlot, plan } from "./scheduler.ts";
 import { type TaskMeta, isProcessAlive } from "./task.ts";
-import { Runtime, branchName, repoKey, writeAtomic } from "./runtime.ts";
+import {
+  ROLE_STATE,
+  Runtime,
+  branchName,
+  repoKey,
+  writeAtomic,
+} from "./runtime.ts";
 import * as git from "./git.ts";
 import {
   CACHE_HOME,
@@ -350,8 +356,8 @@ describe("the runtime directory", () => {
     expect(runtime.worktree("000042")).toBe(
       path.join(runtime.root, "000042", "worktree"),
     );
-    expect(runtime.sessionDir("000042", "review")).toBe(
-      path.join(runtime.root, "000042", "session", "review"),
+    expect(runtime.sessionDir("000042", "agent_reviewer")).toBe(
+      path.join(runtime.root, "000042", "session", "agent_reviewer"),
     );
     expect(runtime.checkLog("000042", 1)).toBe(
       path.join(runtime.root, "000042", "check-1.log"),
@@ -379,8 +385,12 @@ describe("the runtime directory", () => {
     runtime.prepare("000042");
 
     expect(fs.existsSync(runtime.history("000042"))).toBe(true);
-    expect(fs.existsSync(runtime.sessionDir("000042", "work"))).toBe(true);
-    expect(fs.existsSync(runtime.sessionDir("000042", "review"))).toBe(true);
+    expect(fs.existsSync(runtime.sessionDir("000042", "agent_worker"))).toBe(
+      true,
+    );
+    expect(fs.existsSync(runtime.sessionDir("000042", "agent_reviewer"))).toBe(
+      true,
+    );
   });
 
   test("an atomic write never leaves a partial document", () => {
@@ -395,7 +405,7 @@ describe("the runtime directory", () => {
   });
 
   test("the branch is named for the work, not for the graph", () => {
-    expect(branchName("000042")).toBe("work/000042");
+    expect(branchName("000042")).toBe("task/000042");
   });
 });
 
@@ -496,9 +506,88 @@ describe("the transition log", () => {
   });
 });
 
+describe("prompt and template overrides", () => {
+  function overrides(files: Record<string, string>): string {
+    const dir = tempDir("orchestrator-overrides-");
+    for (const [name, contents] of Object.entries(files)) {
+      const file = path.join(dir, name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, contents, "utf-8");
+    }
+    return dir;
+  }
+
+  test("with no overrides directory every file comes from the orchestrator", () => {
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    expect(prompts.systemPrompt("agent_worker")).toBe(
+      path.join(ORCHESTRATOR_DIR, "prompts", "WORKING.md"),
+    );
+    expect(prompts.fragment("dispatch")).toBe(
+      templateOf("prompts/dispatch.md"),
+    );
+  });
+
+  test("an override wins over the orchestrator's own copy", () => {
+    const dir = overrides({
+      "prompts/dispatch.md": "Read ../ASSIGNMENT.md and do it.\n",
+      "prompts/WORKING.md": "you are an implementer\n",
+      "templates/WORKING.md": '---\nassignment: "{{id}}"\n---\n\n# {{title}}\n',
+    });
+    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+
+    expect(prompts.fragment("dispatch")).toBe(
+      "Read ../ASSIGNMENT.md and do it.\n",
+    );
+    expect(prompts.systemPrompt("agent_worker")).toBe(
+      path.join(dir, "prompts", "WORKING.md"),
+    );
+    expect(
+      prompts.template("WORKING", { id: "000042", title: "A task" }),
+    ).toContain("# A task");
+  });
+
+  test("a directory that overrides one file leaves the rest alone", () => {
+    const dir = overrides({ "prompts/dispatch.md": "do it\n" });
+    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+
+    expect(prompts.fragment("dispatch")).toBe("do it\n");
+    expect(prompts.systemPrompt("agent_reviewer")).toBe(
+      path.join(ORCHESTRATOR_DIR, "prompts", "AGENT_REVIEWING.md"),
+    );
+    const vars = { command: "bun test", limit: LOOP_LIMIT };
+    expect(prompts.issue("looping", "agent_worker", vars)).toBe(
+      render(templateOf("prompts/looping.md"), vars),
+    );
+  });
+
+  test("an override is rendered with the same variables as the file it replaces", () => {
+    const dir = overrides({
+      "prompts/check-failed.md":
+        "{{#failures}}\nbroke {{command}}\n{{/failures}}\n",
+    });
+
+    expect(
+      new Prompts(ORCHESTRATOR_DIR, dir).fragment("check-failed", {
+        failures: [{ command: "bun test", exit_code: "1", output: "boom" }],
+      }),
+    ).toBe("broke bun test\n");
+  });
+
+  test("a file missing from both directories names both", () => {
+    const dir = overrides({});
+
+    expect(() => new Prompts(ORCHESTRATOR_DIR, dir).fragment("nope")).toThrow(
+      new RegExp(
+        `no prompts/nope.md in ${path.join(dir, "prompts")} or ${path.join(ORCHESTRATOR_DIR, "prompts")}`,
+      ),
+    );
+  });
+});
+
 describe("template rendering", () => {
   test("a work assignment carries the todos and checks it was given", () => {
-    const out = render(templateOf("templates/working.md"), {
+    const out = render(templateOf("templates/WORKING.md"), {
       id: "000042",
       title: "Parse frontmatter with Bun.YAML",
       body: "# Goal\n\nParse it.",
@@ -506,7 +595,7 @@ describe("template rendering", () => {
       checks: [{ command: "bun test" }, { command: "bun run typecheck" }],
     });
 
-    const { meta, body } = parseAssignment(out, "work");
+    const { meta, body } = parseAssignment(out, "agent_worker");
     expect(meta.assignment).toBe("000042");
     expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
     expect(meta.checks).toEqual(["bun test", "bun run typecheck"]);
@@ -517,7 +606,7 @@ describe("template rendering", () => {
   });
 
   test("an empty list is emitted as [] rather than a bare key", () => {
-    const out = render(templateOf("templates/working.md"), {
+    const out = render(templateOf("templates/WORKING.md"), {
       id: "000042",
       title: "A task",
       body: "# Goal",
@@ -528,12 +617,12 @@ describe("template rendering", () => {
     expect(out).toContain("todos: []");
     expect(out).toContain("checks: []");
     expect(out).not.toMatch(/^todos:$/m);
-    expect(parseAssignment(out, "work").meta.todos).toEqual([]);
+    expect(parseAssignment(out, "agent_worker").meta.todos).toEqual([]);
   });
 
   test("a message with quotes and newlines survives into the parse", () => {
     const message = 'the "null" case\nbreaks on \\n';
-    const out = render(templateOf("templates/working.md"), {
+    const out = render(templateOf("templates/WORKING.md"), {
       id: "000042",
       title: "A task",
       body: "# Goal",
@@ -541,11 +630,13 @@ describe("template rendering", () => {
       checks: [],
     });
 
-    expect(parseAssignment(out, "work").meta.todos[0]!.message).toBe(message);
+    expect(parseAssignment(out, "agent_worker").meta.todos[0]!.message).toBe(
+      message,
+    );
   });
 
   test("a review assignment names the commit range and the worktree", () => {
-    const out = render(templateOf("templates/agent-review.md"), {
+    const out = render(templateOf("templates/AGENT_REVIEWING.md"), {
       id: "000042",
       title: "A task",
       body: "# Goal",
@@ -554,7 +645,7 @@ describe("template rendering", () => {
       worktree: "/tmp/task-graph-server/-repo/000042/worktree",
     });
 
-    const { meta, body } = parseAssignment(out, "review");
+    const { meta, body } = parseAssignment(out, "agent_reviewer");
     expect(meta.todos).toEqual([]);
     expect(meta.checks).toEqual(["bun test"]);
     expect(meta.result).toBeNull();
@@ -595,24 +686,27 @@ describe("assignment parsing", () => {
   }
 
   test("a well-formed assignment parses with no result yet", () => {
-    const { meta } = parseAssignment(valid, "work");
+    const { meta } = parseAssignment(valid, "agent_worker");
     expect(meta.assignment).toBe("000042");
     expect(meta.result).toBeNull();
   });
 
   test("an unquoted six-digit assignment id is rejected", () => {
     expect(() =>
-      parseAssignment(valid.replace('"000042"', "000042"), "work"),
+      parseAssignment(valid.replace('"000042"', "000042"), "agent_worker"),
     ).toThrow(/quoted six-digit/);
   });
 
   test("a submitted work result carries nothing at all", () => {
     expect(
-      parseAssignment(withResult("  type: submit"), "work").meta.result,
+      parseAssignment(withResult("  type: submit"), "agent_worker").meta.result,
     ).toEqual({ type: "submit" });
 
     expect(() =>
-      parseAssignment(withResult("  type: submit", "  findings: []"), "work"),
+      parseAssignment(
+        withResult("  type: submit", "  findings: []"),
+        "agent_worker",
+      ),
     ).toThrow(/result: Unrecognized key: "findings"/);
   });
 
@@ -625,7 +719,7 @@ describe("assignment parsing", () => {
         "  delegations:",
         '    - "the same bug lives in fetch.ts"',
       ),
-      "review",
+      "agent_reviewer",
     ).meta;
 
     expect(meta.result).toEqual({
@@ -637,7 +731,10 @@ describe("assignment parsing", () => {
 
   test("a review that submits without both lists is rejected", () => {
     expect(() =>
-      parseAssignment(withResult("  type: submit", "  findings: []"), "review"),
+      parseAssignment(
+        withResult("  type: submit", "  findings: []"),
+        "agent_reviewer",
+      ),
     ).toThrow(/result\.delegations: Invalid input/);
   });
 
@@ -645,13 +742,13 @@ describe("assignment parsing", () => {
     expect(() =>
       parseAssignment(
         withResult("  type: submit", '  findings: ["  "]', "  delegations: []"),
-        "review",
+        "agent_reviewer",
       ),
     ).toThrow(/result\.findings\[0\]: Too small/);
   });
 
   test("blocked requires a message, in either role", () => {
-    for (const role of ["work", "review"] as const) {
+    for (const role of ["agent_worker", "agent_reviewer"] as const) {
       expect(() =>
         parseAssignment(withResult("  type: blocked"), role),
       ).toThrow(/result\.message: Invalid input/);
@@ -666,7 +763,9 @@ describe("assignment parsing", () => {
   });
 
   test("a result type outside the two legal values is rejected", () => {
-    expect(() => parseAssignment(withResult("  type: done"), "work")).toThrow(
+    expect(() =>
+      parseAssignment(withResult("  type: done"), "agent_worker"),
+    ).toThrow(
       /result\.type: Invalid discriminator value\. Expected 'submit' \| 'blocked'/,
     );
   });
@@ -676,7 +775,7 @@ describe("assignment parsing", () => {
     try {
       parseAssignment(
         valid.replace("checks: []\n", "").replace("todos: []", "notes: mine"),
-        "work",
+        "agent_worker",
       );
     } catch (err) {
       issues = (err as SchemaError).issues;
@@ -687,7 +786,7 @@ describe("assignment parsing", () => {
   });
 
   test("a document with no frontmatter is rejected", () => {
-    expect(() => parseAssignment("# Just a heading", "work")).toThrow(
+    expect(() => parseAssignment("# Just a heading", "agent_worker")).toThrow(
       /no YAML frontmatter/,
     );
   });
@@ -708,7 +807,7 @@ describe("settle validation", () => {
       "",
       "## Notes",
     ].join("\n"),
-    "work",
+    "agent_worker",
   ).meta;
 
   function settled(mutate: (meta: AssignmentMeta) => void) {
@@ -780,7 +879,7 @@ describe("repairing what the agent changed", () => {
     "what I tried.",
   ].join("\n");
 
-  const dispatched = parseAssignment(source, "work").meta;
+  const dispatched = parseAssignment(source, "agent_worker").meta;
 
   function write(text: string): string {
     const filePath = path.join(tempDir("orchestrator-"), "ASSIGNMENT.md");
@@ -797,7 +896,7 @@ describe("repairing what the agent changed", () => {
     const { restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "work").meta,
+      readAssignment(filePath, "agent_worker").meta,
     );
 
     expect(restored).toEqual([]);
@@ -814,13 +913,13 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "work").meta,
+      readAssignment(filePath, "agent_worker").meta,
     );
 
     expect(restored).toEqual(["todos[0].message was reworded"]);
     expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
     expect(meta.result).toEqual({ type: "submit" });
-    expect(readAssignment(filePath, "work").meta).toEqual(meta);
+    expect(readAssignment(filePath, "agent_worker").meta).toEqual(meta);
   });
 
   test("a todo the agent added is dropped and the notes survive", () => {
@@ -834,7 +933,7 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "work").meta,
+      readAssignment(filePath, "agent_worker").meta,
     );
 
     expect(restored).toEqual([`"todos" was 1 entries and is now 2`]);
@@ -848,7 +947,7 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "work").meta,
+      readAssignment(filePath, "agent_worker").meta,
     );
 
     expect(restored).toEqual(["checks[0] was rewritten"]);
@@ -903,7 +1002,7 @@ describe("the issues an agent can be sent back for", () => {
 
   test("each issue names a fragment that exists, per role", () => {
     for (const issue of Object.values(ISSUES)) {
-      for (const role of ["work", "review"] as const) {
+      for (const role of ["agent_worker", "agent_reviewer"] as const) {
         expect(
           fs.existsSync(
             path.join(
@@ -959,7 +1058,8 @@ describe("rotation", () => {
       "ASSIGNMENT.2.md",
     ]);
     expect(
-      readAssignment(path.join(history, "ASSIGNMENT.1.md"), "work").body,
+      readAssignment(path.join(history, "ASSIGNMENT.1.md"), "agent_worker")
+        .body,
     ).toContain("the first attempt");
     expect(attemptOf(history)).toBe(3);
   });
@@ -1219,15 +1319,15 @@ describe("the rpc stream", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       sessionDir: "/tmp/s",
-      name: "000042 work",
+      name: "000042 agent_worker",
       cwd: "/tmp/wt",
-      systemPrompt: "/repo/orchestrator/prompts/work.md",
+      systemPrompt: "/repo/orchestrator/prompts/WORKING.md",
       log: "/tmp/rpc.jsonl",
     });
 
     expect(args.slice(0, 2)).toEqual(["--mode", "rpc"]);
     expect(args).toContain("--approve");
-    expect(args).toContain("@/repo/orchestrator/prompts/work.md");
+    expect(args).toContain("@/repo/orchestrator/prompts/WORKING.md");
     expect(args).not.toContain("-p");
     expect(args).not.toContain("--thinking");
     expect(args).not.toContain("--tools");
@@ -1235,14 +1335,14 @@ describe("the rpc stream", () => {
   });
 
   test("each role is given its own system prompt", () => {
-    for (const role of ["work", "review"] as const) {
+    for (const role of ["agent_worker", "agent_reviewer"] as const) {
       const prompt = fs.readFileSync(
-        path.join(ORCHESTRATOR_DIR, "prompts", `${role}.md`),
+        path.join(ORCHESTRATOR_DIR, "prompts", `${ROLE_STATE[role]}.md`),
         "utf-8",
       );
       expect(prompt).toContain("result");
-      expect(prompt.includes("findings")).toBe(role === "review");
-      expect(prompt.includes("Commit as you go")).toBe(role === "work");
+      expect(prompt.includes("findings")).toBe(role === "agent_reviewer");
+      expect(prompt.includes("Commit as you go")).toBe(role === "agent_worker");
     }
   });
 });
@@ -1638,9 +1738,9 @@ describe("resetting a result", () => {
 
   test("a resumed assignment comes back with no result to stand on", () => {
     const filePath = write(assignment);
-    resetResult(filePath, "work");
+    resetResult(filePath, "agent_worker");
 
-    const { meta, body } = readAssignment(filePath, "work");
+    const { meta, body } = readAssignment(filePath, "agent_worker");
     expect(meta.result).toBeNull();
     expect(meta.checks).toEqual(["bun test"]);
     expect(body).toContain("I ran the check and it passed.");
@@ -1648,7 +1748,7 @@ describe("resetting a result", () => {
 
   test("nothing else in the file moves", () => {
     const filePath = write(assignment);
-    resetResult(filePath, "work");
+    resetResult(filePath, "agent_worker");
 
     expect(fs.readFileSync(filePath, "utf-8")).toBe(
       assignment.replace("result:\n  type: submit", "result: null"),
@@ -1670,7 +1770,7 @@ describe("resetting a result", () => {
       ),
     );
 
-    resetResult(filePath, "review");
+    resetResult(filePath, "agent_reviewer");
     expect(fs.readFileSync(filePath, "utf-8")).toBe(
       assignment.replace("result:\n  type: submit", "result: null"),
     );
@@ -1683,7 +1783,7 @@ describe("resetting a result", () => {
     );
     const filePath = write(already);
 
-    resetResult(filePath, "work");
+    resetResult(filePath, "agent_worker");
     expect(fs.readFileSync(filePath, "utf-8")).toBe(already);
   });
 
@@ -1691,7 +1791,7 @@ describe("resetting a result", () => {
     const filePath = write(
       assignment.replace("result:\n  type: submit", "x: 1"),
     );
-    expect(() => resetResult(filePath, "work")).toThrow(/result/);
+    expect(() => resetResult(filePath, "agent_worker")).toThrow(/result/);
   });
 });
 

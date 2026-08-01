@@ -72,7 +72,7 @@ function busyRow(overrides: Partial<AgentRow> = {}): AgentRow {
     ...idleRow(SLOTS[0]!),
     state: "BUSY",
     task_id: "000123",
-    role: "work",
+    role: "agent_worker",
     pid: 4242,
     started_at: new Date(1000).toISOString(),
     activity: "tool: bash — bun test",
@@ -407,7 +407,9 @@ describe("panes", () => {
     expect(pane.task?.state).toBe("WORKING");
     expect(pane.check?.command).toBe("bun test");
     expect(pane.sinceMs).toBe(1000);
-    expect(detailLine(pane)).toBe("task 000123 · work · WORKING · pid 4242");
+    expect(detailLine(pane)).toBe(
+      "task 000123 · agent_worker · WORKING · pid 4242",
+    );
     expect(activityLine(pane)).toBe("check 1: bun test");
   });
 
@@ -426,7 +428,7 @@ describe("panes", () => {
     const pane = paneOf({ tasks: [] });
 
     expect(pane.task).toBeNull();
-    expect(detailLine(pane)).toBe("task 000123 · work · pid 4242");
+    expect(detailLine(pane)).toBe("task 000123 · agent_worker · pid 4242");
   });
 
   test("a retrying agent shows its attempt", () => {

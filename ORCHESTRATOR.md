@@ -44,10 +44,10 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`, where 
     history/
       ASSIGNMENT.1.md     # every superseded assignment, in order
       ASSIGNMENT.2.md
-    worktree/             # clone of the repo, branch work/000042
+    worktree/             # clone of the repo, branch task/000042
     session/
-      work/019fac03-fee6-7444-89f7-e643e848eba4.jsonl
-      review/019fb1d4-2a0c-7c19-9e11-77c0a5b1e332.jsonl
+      agent_worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl
+      agent_reviewer/019fb1d4-2a0c-7c19-9e11-77c0a5b1e332.jsonl
     agent-rpc.jsonl       # pi's rpc stream, appended across every process
     check-1.log           # stdout + stderr of checks[1]
 ```
@@ -74,7 +74,7 @@ Five snapshots, each written to a temp file and renamed, so a reader always sees
       "blocking": 3,
       "open_todos": 0,
       "held_reason": null,
-      "branch": "work/000042",
+      "branch": "task/000042",
       "waiting_since": "2026-07-29T02:11:44.002Z"
     }
   ]
@@ -96,13 +96,13 @@ Five snapshots, each written to a temp file and renamed, so a reader always sees
       "slot": 1,
       "state": "BUSY",
       "task_id": "000042",
-      "role": "work",
+      "role": "agent_worker",
       "pid": 91733,
       "started_at": "2026-07-29T01:58:02.004Z",
       "activity": "tool: bash — bun test",
       "tokens": 105000,
       "context_percent": 30,
-      "session": "/tmp/task-graph-server/-home-model-task-graph-template/000042/session/work/019fac03-fee6-7444-89f7-e643e848eba4.jsonl",
+      "session": "/tmp/task-graph-server/-home-model-task-graph-template/000042/session/agent_worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl",
       "log": "/tmp/task-graph-server/-home-model-task-graph-template/000042/agent-rpc.jsonl"
     },
     {
@@ -113,7 +113,7 @@ Five snapshots, each written to a temp file and renamed, so a reader always sees
       "slot": 1,
       "state": "WAITING",
       "task_id": "000057",
-      "role": "review",
+      "role": "agent_reviewer",
       "pid": 92014,
       "started_at": "2026-07-29T02:09:44.221Z",
       "activity": "provider: 503 model loading",
@@ -395,7 +395,7 @@ The graph carries the failure rather than the server holding it in memory, becau
 
 An agent that cannot finish sets `result.type: blocked` with a message. The server asks once whether it really is a wall — for a reviewer, a blocker that is work outside this task's scope is a `delegation`; for an implementer, a wall it can work around is not a wall — and if the next settle is blocked again it applies `hold`, which clears the claim, moves the task to `HELD`, and records the message verbatim in `held_reason`. A person is the most expensive thing the system can spend, so it is worth one prompt to be sure.
 
-The two halves of that question are two files, `blocked-work.md` and `blocked-review.md`, each with its alternative already written into it. There is no shared fragment with a hole in it: the alternatives have nothing in common but their position in the sentence, and a template that interpolates one prose paragraph into another is a worse way to read either of them.
+The two halves of that question are two files, `blocked-WORKING.md` and `blocked-AGENT_REVIEWING.md`, each with its alternative already written into it. There is no shared fragment with a hole in it: the alternatives have nothing in common but their position in the sentence, and a template that interpolates one prose paragraph into another is a worse way to read either of them.
 
 `HELD` is a state rather than a flag on `READY_WORK`, and that is the whole point of it. A flag needs the scheduler to remember to check it and leaves a task sitting in a queue it is not eligible for. A state cannot be forgotten: the dispatcher pulls from `READY_WORK`, a held task is not in `READY_WORK`, and nothing has to be careful.
 
@@ -441,11 +441,11 @@ on agent_settled:
     if result = null               → raise "no-result"
     if result.type = blocked       → raise "blocked"
 
-    if role = review:
+    if role = agent_reviewer:
         findings ← result.findings (+ the tasks/ guard)
         addTodo each, or submit if there are none, release the slot, done
 
-    # role = work
+    # role = agent_worker
     if any assigned todo is still open            → raise "open-todos"
     if the workspace is dirty, or the branch carries no commit of its own
                                                   → raise "uncommitted"
@@ -470,14 +470,14 @@ A `length` or resultless outcome still keeps the branch, so the next attempt sta
 
 Everything the server can find wrong with a settle — and one thing it can find wrong before the settle — is a **named issue** with its own prompt fragment and its own number of attempts. Raising one prompts the live session with that fragment; the attempt after the last one is a `hold` whose reason names the issue.
 
-| Issue               | Attempts | Fragment                                                       | Held as                                     |
-| ------------------- | -------- | -------------------------------------------------------------- | ------------------------------------------- |
-| `unreadable-result` | 4        | `unreadable-result-<role>.md`, rendered from the schema issues | the agent never wrote a readable result     |
-| `no-result`         | 4        | `no-result-<role>.md`                                          | the agent stopped without setting a result  |
-| `open-todos`        | 4        | `open-todos.md`, rendered from the open count                  | the agent submitted with _n_ todo(s) open   |
-| `uncommitted`       | 4        | `uncommitted.md`, rendered from `git status`                   | the agent submitted work it never committed |
-| `looping`           | 3        | `looping.md`, rendered from the repeated command               | the agent kept repeating one command        |
-| `blocked`           | 1        | `blocked-work.md` or `blocked-review.md`                       | the agent's own `message`, verbatim         |
+| Issue               | Attempts | Fragment                                                        | Held as                                     |
+| ------------------- | -------- | --------------------------------------------------------------- | ------------------------------------------- |
+| `unreadable-result` | 4        | `unreadable-result-<state>.md`, rendered from the schema issues | the agent never wrote a readable result     |
+| `no-result`         | 4        | `no-result-<state>.md`                                          | the agent stopped without setting a result  |
+| `open-todos`        | 4        | `open-todos.md`, rendered from the open count                   | the agent submitted with _n_ todo(s) open   |
+| `uncommitted`       | 4        | `uncommitted.md`, rendered from `git status`                    | the agent submitted work it never committed |
+| `looping`           | 3        | `looping.md`, rendered from the repeated command                | the agent kept repeating one command        |
+| `blocked`           | 1        | `blocked-WORKING.md` or `blocked-AGENT_REVIEWING.md`            | the agent's own `message`, verbatim         |
 
 Attempts are counted per issue per dispatch, not per settle, so an agent that fails a parse twice and then stops without a result has spent two of one budget and one of another.
 
@@ -500,7 +500,7 @@ Naming the issues is what makes any of this legible. `server.log` says which iss
 
 Neither is a judgement, which is why it is the server's to enforce. Everything downstream is a commit range: the checks run in the workspace, the reviewer is given `<base>..HEAD`, and the merge is a fast-forward of the branch. A submit with a dirty tree hands all three the wrong thing — the checks pass against files nobody will ever see again, the reviewer reads an empty diff, and the work goes when the worktree does. The base is read as a remote-tracking ref for the reason every base read inside a workspace is — see [The workspace is a clone](#the-workspace-is-a-clone).
 
-The fragment quotes the `git status` output back — the first 20 entries, because a prompt is not a place to paste a thousand paths — and the attempt lands in the session that still holds every reason the agent had for what it wrote, so the usual outcome is one `git commit` and a second `submit`. The agent was told this in `prompts/work.md` before it started; the check is there because "commit as you go" is an instruction, and a fast-forward merge needs a fact.
+The fragment quotes the `git status` output back — the first 20 entries, because a prompt is not a place to paste a thousand paths — and the attempt lands in the session that still holds every reason the agent had for what it wrote, so the usual outcome is one `git commit` and a second `submit`. The agent was told this in `prompts/WORKING.md` before it started; the check is there because "commit as you go" is an instruction, and a fast-forward merge needs a fact.
 
 Untracked counts, which is the point: a new file the agent wrote and never `git add`ed is the failure this catches most often. The cost of that is build output the project does not ignore coming back as uncommitted work, and the fix for it is a `.gitignore` entry in the project rather than a looser check here.
 
@@ -643,8 +643,8 @@ The retention sweep stays as the second half of the same rule, covering the dire
 ```mermaid
 stateDiagram-v2
     [*] --> NONE
-    NONE --> LIVE : claim into WORKING (clone --shared, branch work/<id>)
-    LIVE --> LIVE : commits, checks, reviews, rotations, fetch back to work/<id>
+    NONE --> LIVE : claim into WORKING (clone --shared, branch task/<id>)
+    LIVE --> LIVE : commits, checks, reviews, rotations, fetch back to task/<id>
     LIVE --> MISSING : /tmp cleared
     MISSING --> LIVE : recreate from branch (server startup)
     LIVE --> INTEGRATING : merged
@@ -754,7 +754,7 @@ The process is started **before** the claim. It has a pid the moment it exists, 
 
 ### Roles never share a session
 
-Session directories are per role: `session/work`, `session/review`. A reviewer is given a new session that has never seen the implementer's.
+Session directories are per role: `session/agent_worker`, `session/agent_reviewer`. A reviewer is given a new session that has never seen the implementer's.
 
 This is not tidiness. An implementer's session contains every rationalisation it built while convincing itself the work was done — the shortcut it decided was acceptable, the test it decided was flaky, the edge case it decided was out of scope. A reviewer that inherits that context inherits the conclusions with it, and agrees. The entire value of the review is that it is an independent read of the commits against the acceptance criteria by something that was not there.
 
@@ -863,7 +863,7 @@ Neither ever exhausts. There is no retry limit, because the failure is not the t
 # claim, then create
 git clone --quiet --shared --branch master <repo> \
   /tmp/task-graph-server/-home-model-task-graph-template/000042/worktree
-git -C …/000042/worktree checkout -b work/000042
+git -C …/000042/worktree checkout -b task/000042
 
 # inside the workspace: the range to review, and what a submit is checked against
 git log --patch $(git merge-base refs/remotes/origin/master HEAD)..HEAD
@@ -871,12 +871,12 @@ git rev-list --count refs/remotes/origin/master..HEAD
 git status --porcelain
 
 # whenever an agent finishes, bring the branch back
-git -C <repo> fetch --force …/000042/worktree work/000042:work/000042
+git -C <repo> fetch --force …/000042/worktree task/000042:task/000042
 
 # accept
-git merge --ff-only work/000042        # after rebase + recheck
+git merge --ff-only task/000042        # after rebase + recheck
 rm -rf /tmp/task-graph-server/-home-model-task-graph-template/000042/worktree
-git branch -D work/000042
+git branch -D task/000042
 
 # close: the whole runtime directory goes, worktree and all
 rm -rf /tmp/task-graph-server/-home-model-task-graph-template/000042
@@ -888,11 +888,11 @@ A linked worktree keeps its refs, its index and its objects in the repo's `.git`
 
 `--shared` points the clone's `objects/info/alternates` at the repo's object store. No history is copied, the clone costs a checkout, and nothing is written to the repo to create one. What a clone does _not_ copy is local config, so the commit identity is read out of the repo and set in the clone; without that, the first commit fails in any repo that keeps `user.email` local.
 
-Objects only flow the other way on a `fetch`. The server fetches `work/<id>` out of the workspace whenever an agent finishes and again after the merge rebase, so the branch is a fact in the repo rather than in a directory under `/tmp`: everything the server and the manager read — `diff --name-only`, `merge-base --is-ancestor`, `merge --ff-only`, the reclone after a cleared `/tmp` — reads the repo's own refs. It is also what makes the work durable, since a `git gc --prune` in the repo can collect objects that only a clone's alternates still reach.
+Objects only flow the other way on a `fetch`. The server fetches `task/<id>` out of the workspace whenever an agent finishes and again after the merge rebase, so the branch is a fact in the repo rather than in a directory under `/tmp`: everything the server and the manager read — `diff --name-only`, `merge-base --is-ancestor`, `merge --ff-only`, the reclone after a cleared `/tmp` — reads the repo's own refs. It is also what makes the work durable, since a `git gc --prune` in the repo can collect objects that only a clone's alternates still reach.
 
-Inside a workspace the base is always `refs/remotes/origin/<base>`, never the bare name. A clone made from the base has a local branch of that name, but one recloned from a surviving `work/<id>` after `/tmp` was cleared has only the remote-tracking ref — and `git merge-base master HEAD` in that clone is a fatal error, not a fallback. The remote-tracking ref is there in both cases, so the review range and the commit count read the same way whether the workspace is the original or a reclone. (The one exception is the merge rebase, which `fetch origin <base>:<base>` right before it, precisely to have a local ref to rebase onto.)
+Inside a workspace the base is always `refs/remotes/origin/<base>`, never the bare name. A clone made from the base has a local branch of that name, but one recloned from a surviving `task/<id>` after `/tmp` was cleared has only the remote-tracking ref — and `git merge-base master HEAD` in that clone is a fatal error, not a fallback. The remote-tracking ref is there in both cases, so the review range and the commit count read the same way whether the workspace is the original or a reclone. (The one exception is the merge rebase, which `fetch origin <base>:<base>` right before it, precisely to have a local ref to rebase onto.)
 
-The branch is `work/<id>` rather than `task/<id>` for the same reason the file is `ASSIGNMENT.md`: everything an agent reads is phrased in terms of the work in front of it, never in terms of the graph it is not allowed to see.
+The branch is `task/<id>`, and that name is minted exactly once — at the claim that creates the workspace. Everything afterwards reads `workspace.branch` out of the task document: the fetch back, the reclone, the review guard, the fast-forward merge, the abort check and the teardown. Nothing derives the name a second time, so the prefix is a fact about new workspaces rather than a rule the whole system has to agree on, and a task already carrying a branch keeps it. Changing the prefix needs no migration and no code that knows the old one.
 
 Two commit streams that never collide:
 
@@ -907,15 +907,15 @@ The manager's checkout is the only graph that matters. Every worktree is created
 pi --mode rpc \
    --provider  <agent.provider> \
    --model     <agent.model> \
-   --session-dir /tmp/task-graph-server/<repo>/000042/session/work \
-   --name      "000042 work" \
+   --session-dir /tmp/task-graph-server/<repo>/000042/session/agent_worker \
+   --name      "000042 agent_worker" \
    --approve \
-   --append-system-prompt @/path/to/task-graph-template/orchestrator/prompts/work.md
+   --append-system-prompt @/path/to/task-graph-template/orchestrator/prompts/WORKING.md
 ```
 
 - No `-p` and no positional message. `--mode rpc` is a run mode, not an output mode: the process reads commands from stdin until stdin closes, and the work is requested with a `prompt` command.
 - There is no `--cwd`. The working directory is set at spawn, as `--chdir <workspace>` on the sandbox around it.
-- The system prompt is the **role's**: `prompts/work.md` or `prompts/review.md`. The path is absolute and points into the orchestrator's own checkout, because the child's cwd is the worktree and the prompts do not live in the driven repo.
+- The system prompt is the **role's**: `prompts/WORKING.md` or `prompts/AGENT_REVIEWING.md`. The path is absolute and points into the orchestrator's own checkout, because the child's cwd is the worktree and the prompts do not live in the driven repo.
 - The prompt stays one line on purpose. The work lives in `ASSIGNMENT.md`, where it can be re-read after compaction; a brief pasted into the conversation cannot be re-read once it scrolls out.
 - `pi` has no MCP client — the project rejects MCP by design and expects agents to drive CLI tools over bash. That and the manager-owns-the-graph rule point the same way: the agent's interface to the outside world is a file, not a tool.
 - Spawn detached, tee stdout to `/tmp/task-graph-server/<repo>/000042/agent-rpc.jsonl`, appending. Every process that ever ran against this task writes to that one file, in order, so the record of an assignment that took four attempts across two roles reads as one stream.
@@ -930,6 +930,7 @@ systemd-run --user --scope --quiet --collect \
 choom -n <300 agent | 400 check> -- \
 bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
       --ro-bind <repo> <repo> \
+      --ro-bind <orchestrator> <orchestrator> \
       --overlay-src ~/.cache --tmp-overlay ~/.cache \
       --overlay-src ~/.pi --tmp-overlay ~/.pi \
       --bind  /tmp/task-graph-server/<repo>/000042 \
@@ -940,7 +941,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 ```
 
 - `--ro-bind / /` is recursive, so everything an agent needs to read stays readable — toolchains under `/usr/local`, the prompts in the orchestrator's own checkout — and everything not named below is unwritable. `--approve` auto-approves every tool call, so this is the only boundary there is.
-- The repo is re-bound read-only **after** `--tmpfs /tmp`, because a repo can sit under `/tmp`.
+- The repo is re-bound read-only **after** `--tmpfs /tmp`, because a repo can sit under `/tmp`. The orchestrator's own checkout is re-bound for the same reason and only for agents: `pi` reads the system prompt file from inside the sandbox, and a checkout under `/tmp` would otherwise be behind the tmpfs. A check runs no prompt, so it does not get that bind.
 - The bound-writable set is one directory: the task's own runtime directory. That is the workspace, `ASSIGNMENT.md` and the session files — not the repo, not another task's directory, not the views, not the manager's home.
 - `/tmp` is a private tmpfs, so whatever an agent or a check scribbles there goes when the process does.
 - `GIT_EDITOR`, `EDITOR` and `VISUAL` are all forced to `true`, the command that does nothing and succeeds. An agent that runs `git commit` without `-m` otherwise gets whatever editor the host has configured, and an editor waiting for input on a stdin the agent is not driving is a wedge with no timeout behind it: the slot is held, the rpc stream is silent, and the only evidence is a `nvim …/COMMIT_EDITMSG` under the workspace. With the no-op editor the same command fails in under a second with `Aborting commit due to empty commit message`, which the agent can read and correct. The same applies to `git rebase -i` and to any tool that reaches for `$EDITOR`.
@@ -1048,26 +1049,36 @@ This is safe because ownership follows the claim. The server applies no transiti
 
 Every word an agent reads is a file. Nothing in `orchestrator/*.ts` builds a sentence, so a prompt can be rewritten without a diff to the server, and reading the thirteen files is reading everything the agents are told.
 
-| File                                  | Kind            | Given to                                            |
-| ------------------------------------- | --------------- | --------------------------------------------------- |
-| `prompts/work.md`                     | system prompt   | every `WORKING` agent                               |
-| `prompts/review.md`                   | system prompt   | every `AGENT_REVIEWING` agent                       |
-| `prompts/dispatch.md`                 | prompt fragment | every agent, as the first thing it is asked         |
-| `prompts/check-failed.md`             | prompt fragment | a resumed implementer, rendered from `failures`     |
-| `prompts/no-result-work.md`           | prompt fragment | an implementer that settled without a result        |
-| `prompts/no-result-review.md`         | prompt fragment | a reviewer that settled without a result            |
-| `prompts/unreadable-result-work.md`   | prompt fragment | an implementer whose frontmatter did not parse      |
-| `prompts/unreadable-result-review.md` | prompt fragment | a reviewer whose frontmatter did not parse          |
-| `prompts/open-todos.md`               | prompt fragment | an implementer that submitted with todos open       |
-| `prompts/uncommitted.md`              | prompt fragment | an implementer that submitted uncommitted work      |
-| `prompts/looping.md`                  | prompt fragment | either role, caught repeating one command           |
-| `prompts/blocked-work.md`             | prompt fragment | an implementer that came back blocked               |
-| `prompts/blocked-review.md`           | prompt fragment | a reviewer that came back blocked                   |
-| `prompts/wrote-to-tasks.md`           | finding         | appended by the server when a diff touches `tasks/` |
-| `templates/working.md`                | state template  | generated at every work dispatch                    |
-| `templates/agent-review.md`           | state template  | generated at every review dispatch                  |
+| File                                           | Kind            | Given to                                            |
+| ---------------------------------------------- | --------------- | --------------------------------------------------- |
+| `prompts/WORKING.md`                           | system prompt   | every `WORKING` agent                               |
+| `prompts/AGENT_REVIEWING.md`                   | system prompt   | every `AGENT_REVIEWING` agent                       |
+| `prompts/dispatch.md`                          | prompt fragment | every agent, as the first thing it is asked         |
+| `prompts/check-failed.md`                      | prompt fragment | a resumed implementer, rendered from `failures`     |
+| `prompts/no-result-WORKING.md`                 | prompt fragment | an implementer that settled without a result        |
+| `prompts/no-result-AGENT_REVIEWING.md`         | prompt fragment | a reviewer that settled without a result            |
+| `prompts/unreadable-result-WORKING.md`         | prompt fragment | an implementer whose frontmatter did not parse      |
+| `prompts/unreadable-result-AGENT_REVIEWING.md` | prompt fragment | a reviewer whose frontmatter did not parse          |
+| `prompts/open-todos.md`                        | prompt fragment | an implementer that submitted with todos open       |
+| `prompts/uncommitted.md`                       | prompt fragment | an implementer that submitted uncommitted work      |
+| `prompts/looping.md`                           | prompt fragment | either role, caught repeating one command           |
+| `prompts/blocked-WORKING.md`                   | prompt fragment | an implementer that came back blocked               |
+| `prompts/blocked-AGENT_REVIEWING.md`           | prompt fragment | a reviewer that came back blocked                   |
+| `prompts/wrote-to-tasks.md`                    | finding         | appended by the server when a diff touches `tasks/` |
+| `templates/WORKING.md`                         | state template  | generated at every work dispatch                    |
+| `templates/AGENT_REVIEWING.md`                 | state template  | generated at every review dispatch                  |
 
 There are no templates for `CHECKING`, `MANAGER_REVIEWING` or `TASK_GRAPH_UPDATING`: the first is the server, and the last two are the manager, which has the graph and does not need a file handed to it.
+
+### A project can replace any of them
+
+The driven repo's own `orchestrator/prompts/` and `orchestrator/templates/` are searched before the orchestrator's, by the same file name. `<repo>/orchestrator/prompts/WORKING.md` becomes the implementer's system prompt for that project and nothing else changes; a name with no file there resolves in the checkout as before. Neither directory has to exist, and a file present in both is not merged — the repo's copy is the whole file.
+
+The unit of override is the file rather than the directory because the sixteen files are not equally project-specific. A house style, a build command an implementer should know about or a review that has to name a project's own invariants belongs to the project; `open-todos.md` telling an agent which three edits end a hold does not, and a project that had to copy all sixteen to change one would carry fifteen stale files the moment the orchestrator's own moved on.
+
+An override is rendered by the same `render()` with the same variables as the file it replaces, so a template still has to emit an assignment the parser accepts — a `templates/WORKING.md` without `result: null` in its frontmatter fails at the first dispatch, not at load. A `{{…}}` naming something the server does not pass throws there too. This is deliberate: the file is read at each dispatch, so an edit takes effect on the next one and a broken edit is reported against the task it broke.
+
+`agents.json` goes the other way — it is read from the launch directory, because the pool is a property of the machine and the overrides are a property of the project. They are committed with it.
 
 ### A fragment names the edit, not the mistake
 
@@ -1091,7 +1102,7 @@ They are not one file with a conditional. An implementer is told to commit as it
 
 The overlap — read `ASSIGNMENT.md` first, keep `## Notes` current, ignore `tasks/`, stopping without a result is the only unrecoverable failure — is short enough to state twice and worth stating in each role's own terms.
 
-### `templates/working.md`
+### `templates/WORKING.md`
 
 ```markdown
 ---
@@ -1119,7 +1130,7 @@ result: null
 
 An empty list is emitted as `todos: []`, not as a bare `todos:` with nothing under it — the second parses as null and every reader downstream has to guess.
 
-### `templates/agent-review.md`
+### `templates/AGENT_REVIEWING.md`
 
 ```markdown
 ---
@@ -1182,7 +1193,7 @@ cp ../task-graph-template/agents.example.json agents.json   # the pool, read fro
 bun ../task-graph-template/orchestrator/mcp.ts [repo]       # stdio; repo defaults to the cwd
 ```
 
-Prompts and templates are read from beside the server's own source, not from the driven repo, which is what lets the checkout be shared. Register it with the manager as an MCP server — `claude mcp add task-graph -- bun ../task-graph-template/orchestrator/mcp.ts`, run from the project root, since Claude Code spawns the server there. It owns the graph from that moment: the manager creates tasks, writes bodies and applies judgement transitions through the tools, and reads `inbox`, `agents`, `checks` and `tasks` as resources or by watching the files under `workspace_path`.
+Prompts and templates are read from beside the server's own source unless the driven repo overrides them under its own `orchestrator/`, which is what lets the checkout be shared. Register it with the manager as an MCP server — `claude mcp add task-graph -- bun ../task-graph-template/orchestrator/mcp.ts`, run from the project root, since Claude Code spawns the server there. It owns the graph from that moment: the manager creates tasks, writes bodies and applies judgement transitions through the tools, and reads `inbox`, `agents`, `checks` and `tasks` as resources or by watching the files under `workspace_path`.
 
 Files are laid out by feature, not by kind. There is no `views.ts` holding every view and no `types.ts` holding every interface: the agent pool's row and the pool's config are both in `agents.ts`, the inbox's row and its ranking are both in `inbox.ts`, and what the four views share — an `{at, seq, rows}` envelope written atomically — is three lines in `runtime.ts`.
 
@@ -1191,7 +1202,8 @@ Files are laid out by feature, not by kind. There is no `views.ts` holding every
 | `agents.json` in the cwd         | the pool; rejected on load, not at spawn time                         |
 | `agents.example.json`            | the pool config to copy into a launch directory                       |
 | `orchestrator/prompts/`          | every word an agent is given, system prompts and fragments alike      |
-| `orchestrator/templates/`        | `working.md` and `agent-review.md`, the two state templates           |
+| `<repo>/orchestrator/`           | the driven project's overrides for either directory, file by file     |
+| `orchestrator/templates/`        | `WORKING.md` and `AGENT_REVIEWING.md`, the two state templates        |
 | `orchestrator/mcp.ts`            | the stdio server, its tools and its tick loop                         |
 | `orchestrator/server.ts`         | the scheduler, the check runner and the settle logic                  |
 | `orchestrator/agents.ts`         | the pool config and `agents.json`                                     |
@@ -1202,7 +1214,7 @@ Files are laid out by feature, not by kind. There is no `views.ts` holding every
 | `orchestrator/checks.ts`         | the check runner and `checks.json`                                    |
 | `orchestrator/scheduler.ts`      | the dispatch ranking                                                  |
 | `orchestrator/assignment.ts`     | parsing, repairing, serializing and rotating `ASSIGNMENT.md`          |
-| `orchestrator/prompts.ts`        | the issue registry and rendering the fragments                        |
+| `orchestrator/prompts.ts`        | the issue registry, the override lookup and rendering the fragments   |
 | `orchestrator/template.ts`       | the `{{…}}` renderer the templates and fragments share                |
 | `orchestrator/schema.ts`         | one zod-to-issue-list error shape for everything that parses          |
 | `orchestrator/rpc.ts`            | the `pi --mode rpc` client                                            |

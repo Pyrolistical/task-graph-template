@@ -28,7 +28,10 @@ export interface Step {
   break_git?: boolean;
 }
 
-export type Plan = Record<string, { work?: Step[]; review?: Step[] }>;
+export type Plan = Record<
+  string,
+  { agent_worker?: Step[]; agent_reviewer?: Step[] }
+>;
 
 export const FAKE_PI = `#!/usr/bin/env bun
 import fs from "node:fs";
@@ -90,7 +93,7 @@ function list(name, values) {
 }
 
 function submitBlock(step) {
-  if (role !== "review") return "result:\\n  type: submit";
+  if (role !== "agent_reviewer") return "result:\\n  type: submit";
   return [
     "result:",
     "  type: submit",
@@ -217,6 +220,10 @@ async function handle(command) {
       sessionFile = path.join(sessionDir, taskId + "-" + role + ".jsonl");
       fs.mkdirSync(sessionDir, { recursive: true });
       fs.writeFileSync(sessionFile, "");
+      fs.writeFileSync(
+        path.join(sessionDir, "system-prompt"),
+        fs.readFileSync((flag("--append-system-prompt") ?? "@").slice(1), "utf-8"),
+      );
       respond("new_session", command.id, { cancelled: false });
       break;
     }
@@ -306,6 +313,10 @@ export function promptsTo(sessionDir: string): string[] {
   return messagesIn(sessionDir, "prompts.jsonl");
 }
 
+export function systemPromptTo(sessionDir: string): string {
+  return fs.readFileSync(path.join(sessionDir, "system-prompt"), "utf-8");
+}
+
 export function promptsOverlapping(sessionDir: string): string[] {
   return messagesIn(sessionDir, "overlaps.jsonl");
 }
@@ -314,6 +325,7 @@ export interface Fixture {
   repo: string;
   tasksDir: string;
   orchestratorDir: string;
+  overridesDir: string;
   agentsPath: string;
   serverRoot: string;
   piCommand: string;
@@ -323,7 +335,8 @@ export interface Fixture {
 export function makeFixture(slots = 1): Fixture {
   const repo = tempDir("orchestrator-repo-");
   const tasksDir = path.join(repo, "tasks");
-  const orchestratorDir = path.join(repo, "orchestrator");
+  const orchestratorDir = tempDir("orchestrator-src-");
+  const overridesDir = path.join(repo, "orchestrator");
 
   fs.mkdirSync(tasksDir);
   fs.copyFileSync(
@@ -364,11 +377,22 @@ export function makeFixture(slots = 1): Fixture {
     repo,
     tasksDir,
     orchestratorDir,
+    overridesDir,
     agentsPath,
     serverRoot: tempDir("orchestrator-root-"),
     piCommand,
     planPath,
   };
+}
+
+export function writeOverride(
+  fixture: Fixture,
+  name: string,
+  contents: string,
+): void {
+  const file = path.join(fixture.overridesDir, name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, contents, "utf-8");
 }
 
 export function setPlan(fixture: Fixture, plan: Plan): void {

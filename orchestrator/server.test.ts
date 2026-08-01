@@ -16,6 +16,8 @@ import {
   promptsTo,
   readyTask,
   setPlan,
+  systemPromptTo,
+  writeOverride,
 } from "./fixture.ts";
 import { Server } from "./server.ts";
 import { writeCommand } from "./command.ts";
@@ -77,7 +79,7 @@ describe("the server: a task that goes all the way through", () => {
 
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             todos_done: true,
             submit: true,
@@ -85,7 +87,7 @@ describe("the server: a task that goes all the way through", () => {
             commit: { path: "hello.txt", contents: "hello\n" },
           },
         ],
-        review: [{ submit: true, notes: "the range is fine" }],
+        agent_reviewer: [{ submit: true, notes: "the range is fine" }],
       },
     });
 
@@ -110,7 +112,7 @@ describe("the server: a task that goes all the way through", () => {
       fs.existsSync(path.join(fixture.tasksDir, "closed", `${id}.md`)),
     ).toBe(true);
     expect(fs.existsSync(path.join(fixture.repo, "hello.txt"))).toBe(true);
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(false);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
     expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
 
     server.shutdown();
@@ -123,7 +125,7 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     fs.rmSync(fixture.orchestratorDir, { recursive: true });
 
-    setPlan(fixture, { [id]: { work: [{ notes: "still thinking" }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "still thinking" }] } });
 
     const server = await Server.start({
       repo: fixture.repo,
@@ -144,6 +146,98 @@ describe("the server: dispatch", () => {
     server.shutdown();
   }, 30000);
 
+  test("the driven repo's own orchestrator/ overrides the prompts and templates it names", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "Do a thing");
+
+    writeOverride(
+      fixture,
+      "prompts/WORKING.md",
+      "You are this project's implementer.\n",
+    );
+    writeOverride(
+      fixture,
+      "prompts/dispatch.md",
+      "Start on ../ASSIGNMENT.md.\n",
+    );
+    writeOverride(
+      fixture,
+      "templates/WORKING.md",
+      [
+        "---",
+        'assignment: "{{id}}"',
+        "todos: []",
+        "checks:",
+        "  {{#checks}}",
+        '  - "{{command}}"',
+        "  {{/checks}}",
+        "result: null",
+        "---",
+        "",
+        "# {{title}}",
+        "",
+        "House style: no comments.",
+        "",
+        "## Notes",
+        "",
+      ].join("\n"),
+    );
+
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "still thinking" }] } });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    await server.drain();
+
+    const sessionDir = server.runtime.sessionDir(id, "agent_worker");
+    expect(systemPromptTo(sessionDir)).toBe(
+      "You are this project's implementer.\n",
+    );
+    expect(promptsTo(sessionDir)[0]).toBe("Start on ../ASSIGNMENT.md.\n");
+
+    const assignment = fs.readFileSync(server.runtime.assignment(id), "utf-8");
+    expect(assignment).toContain("House style: no comments.");
+    expect(
+      readAssignment(server.runtime.assignment(id), "agent_worker").meta
+        .assignment,
+    ).toBe(id);
+
+    server.shutdown();
+  }, 30000);
+
+  test("an override of one file leaves every other prompt as the orchestrator ships it", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "Do a thing");
+
+    writeOverride(
+      fixture,
+      "prompts/dispatch.md",
+      "Start on ../ASSIGNMENT.md.\n",
+    );
+
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "still thinking" }] } });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    await server.drain();
+
+    const sessionDir = server.runtime.sessionDir(id, "agent_worker");
+    expect(promptsTo(sessionDir)[0]).toBe("Start on ../ASSIGNMENT.md.\n");
+    expect(systemPromptTo(sessionDir)).toBe(
+      fs.readFileSync(
+        path.join(fixture.orchestratorDir, "prompts", "WORKING.md"),
+        "utf-8",
+      ),
+    );
+    expect(
+      readAssignment(server.runtime.assignment(id), "agent_worker").meta.result,
+    ).toBeNull();
+
+    server.shutdown();
+  }, 30000);
+
   test("a dispatched task gets a worktree, a branch and an ASSIGNMENT.md beside it", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing", ["true"]);
@@ -152,7 +246,7 @@ describe("the server: dispatch", () => {
     });
     commitGraph(fixture, "todo");
 
-    setPlan(fixture, { [id]: { work: [{ notes: "still thinking" }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "still thinking" }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -165,9 +259,9 @@ describe("the server: dispatch", () => {
     expect(fs.existsSync(worktree)).toBe(true);
     expect(fs.existsSync(assignment)).toBe(true);
     expect(assignment.startsWith(worktree)).toBe(false);
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(true);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(true);
 
-    const { meta } = readAssignment(assignment, "work");
+    const { meta } = readAssignment(assignment, "agent_worker");
     expect(meta.assignment).toBe(id);
     expect(meta.todos).toEqual([{ message: "the null case", done: false }]);
     expect(meta.checks).toEqual(["true"]);
@@ -181,8 +275,10 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -193,7 +289,7 @@ describe("the server: dispatch", () => {
 
     const task = server.tasks().get(id)!;
     expect(task.workspace!.agent).toBe("pi-fake-fake-1");
-    expect(task.workspace!.branch).toBe(`work/${id}`);
+    expect(task.workspace!.branch).toBe(`task/${id}`);
     expect(task.workspace!.worktree).toBe(server.runtime.worktree(id));
     expect(fs.existsSync(task.workspace!.session!)).toBe(true);
 
@@ -207,12 +303,60 @@ describe("the server: dispatch", () => {
     server.shutdown();
   }, 30000);
 
+  test("a workspace claimed under an older branch prefix keeps the branch it recorded", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task from before the prefix changed");
+    setPlan(fixture, { [id]: { agent_reviewer: [{ submit: true }] } });
+
+    const server = await serverFor(fixture);
+    const legacy = `work/${id}`;
+    const worktree = server.runtime.worktree(id);
+    server.runtime.prepare(id);
+    git.addWorkspace(fixture.repo, legacy, worktree, "master");
+    fs.writeFileSync(path.join(worktree, "a.txt"), "a\n");
+    git.gitOrThrow(worktree, ["add", "-A"]);
+    git.gitOrThrow(worktree, ["commit", "-q", "-m", "work from before"]);
+    git.harvest(fixture.repo, worktree, legacy);
+
+    for (const [name, args] of [
+      [
+        "claim",
+        { agentName: "pi-old-1", pid: process.pid, branch: legacy, worktree },
+      ],
+      ["submit", {}],
+      ["claim", { agentName: "server", pid: process.pid }],
+      ["pass", {}],
+    ] as const) {
+      applyTransition(fixture.tasksDir, id, name, args);
+    }
+    expect(stateOf(server, id)).toBe("READY_AGENT_REVIEW");
+
+    server.setSchedulerEnabled(true);
+    await reaches(server, id, "READY_MANAGER_REVIEW");
+    server.setSchedulerEnabled(false);
+
+    expect(server.tasks().get(id)!.workspace!.branch).toBe(legacy);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+
+    server.transition(
+      id,
+      "claim",
+      { agentName: "manager", pid: process.pid },
+      "manager",
+    );
+    expect((await server.attemptMerge(id)).to).toBe("CLOSED");
+    expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
+    expect(git.branchExists(fixture.repo, legacy)).toBe(false);
+
+    server.shutdown();
+  }, 30000);
+
   test("two ticks in flight at once dispatch a task to one slot, not two", async () => {
     const fixture = makeFixture(2);
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ busy_ms: 200, submit: true }],
+        agent_worker: [{ busy_ms: 200, submit: true }],
       },
     });
 
@@ -236,7 +380,7 @@ describe("the server: dispatch", () => {
   test("nothing is dispatched while the scheduler is stopped", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
-    setPlan(fixture, { [id]: { work: [{ submit: true }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ submit: true }] } });
 
     const server = await serverFor(fixture);
     await settle(server, 2);
@@ -252,7 +396,9 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
       },
     });
 
@@ -276,7 +422,9 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["echo boom >&2; exit 3"]);
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
       },
     });
 
@@ -304,7 +452,9 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["exit 1", "true", "exit 2"]);
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
       },
     });
 
@@ -328,8 +478,10 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["true", "test -d ."]);
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -346,7 +498,9 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["echo written-to-the-log"]);
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
       },
     });
 
@@ -368,14 +522,16 @@ describe("the server: the agent review", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             notes: "I skipped the null case",
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        review: [{ submit: true, findings: ["the null case is untested"] }],
+        agent_reviewer: [
+          { submit: true, findings: ["the null case is untested"] },
+        ],
       },
     });
 
@@ -405,14 +561,14 @@ describe("the server: the agent review", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             notes: "I decided the flaky test was not mine to fix",
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -421,7 +577,10 @@ describe("the server: the agent review", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const { body } = readAssignment(server.runtime.assignment(id), "review");
+    const { body } = readAssignment(
+      server.runtime.assignment(id),
+      "agent_reviewer",
+    );
     const head = git
       .gitOrThrow(server.runtime.worktree(id), ["rev-parse", "HEAD"])
       .trim();
@@ -433,9 +592,11 @@ describe("the server: the agent review", () => {
     expect(body).toContain(server.runtime.worktree(id));
     expect(body).not.toContain("I decided the flaky test");
 
-    const workSessions = fs.readdirSync(server.runtime.sessionDir(id, "work"));
+    const workSessions = fs.readdirSync(
+      server.runtime.sessionDir(id, "agent_worker"),
+    );
     const reviewSessions = fs.readdirSync(
-      server.runtime.sessionDir(id, "review"),
+      server.runtime.sessionDir(id, "agent_reviewer"),
     );
     expect(workSessions.length).toBeGreaterThan(0);
     expect(reviewSessions.length).toBeGreaterThan(0);
@@ -449,13 +610,13 @@ describe("the server: the agent review", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             commit: { path: "tasks/000001.md", contents: "rewritten\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -487,11 +648,11 @@ describe("the server: a submit with nothing in the git history", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           { submit: true, notes: "I forgot to commit" },
           { submit: true, commit: { path: "a.txt", contents: "a\n" } },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -500,7 +661,7 @@ describe("the server: a submit with nothing in the git history", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("git commit");
     expect(prompts[1]).toContain("There is no commit of yours on this branch");
@@ -517,7 +678,7 @@ describe("the server: a submit with nothing in the git history", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             commit: { path: "a.txt", contents: "a\n" },
@@ -525,7 +686,7 @@ describe("the server: a submit with nothing in the git history", () => {
           },
           { submit: true, commit: { path: "b.txt", contents: "half a fix\n" } },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -534,7 +695,7 @@ describe("the server: a submit with nothing in the git history", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("`git status --porcelain` reports:");
     expect(prompts[1]).toContain("?? b.txt");
@@ -552,7 +713,7 @@ describe("the server: a submit with nothing in the git history", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
-      [id]: { work: [{ submit: true }] },
+      [id]: { agent_worker: [{ submit: true }] },
     });
 
     const server = await serverFor(fixture);
@@ -564,7 +725,9 @@ describe("the server: a submit with nothing in the git history", () => {
       "the agent submitted work it never committed: nothing is committed on the branch",
     );
     expect(task.claimed_by).toBeNull();
-    expect(promptsTo(server.runtime.sessionDir(id, "work"))).toHaveLength(5);
+    expect(
+      promptsTo(server.runtime.sessionDir(id, "agent_worker")),
+    ).toHaveLength(5);
     expect(server.agentRows()[0]!.state).toBe("IDLE");
 
     server.shutdown();
@@ -577,7 +740,7 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             blocked: "the staging database is unreachable",
             notes: "tried twice",
@@ -595,7 +758,7 @@ describe("the server: an agent that stops short", () => {
     expect(task.held_reason).toBe("the staging database is unreachable");
     expect(task.claimed_by).toBeNull();
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("worth one second look");
     expect(prompts[1]).toContain("A wall you can work around is not a wall");
@@ -608,11 +771,11 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           { loop: LOOP_LIMIT },
           { submit: true, commit: { path: "a.txt", contents: "a" } },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -621,7 +784,7 @@ describe("the server: an agent that stops short", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("zig build");
     expect(prompts[1]).toContain("type: blocked");
@@ -635,16 +798,16 @@ describe("the server: an agent that stops short", () => {
   test("an agent that keeps looping is held only once the nudges run out", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
-    setPlan(fixture, { [id]: { work: [{ loop: LOOP_LIMIT }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ loop: LOOP_LIMIT }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
     await reaches(server, id, "HELD");
 
     expect(server.tasks().get(id)!.held_reason).toContain("zig build");
-    expect(promptsTo(server.runtime.sessionDir(id, "work"))).toHaveLength(
-      ISSUES.looping.attempts + 1,
-    );
+    expect(
+      promptsTo(server.runtime.sessionDir(id, "agent_worker")),
+    ).toHaveLength(ISSUES.looping.attempts + 1);
 
     server.shutdown();
   }, 30000);
@@ -654,8 +817,10 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [
           { blocked: "the retry loop in fetch.ts has the same bug" },
           {
             submit: true,
@@ -670,7 +835,7 @@ describe("the server: an agent that stops short", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "review"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_reviewer"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("is a delegation, not a");
 
@@ -678,7 +843,8 @@ describe("the server: an agent that stops short", () => {
       false,
     );
     expect(
-      readAssignment(server.runtime.assignment(id), "review").meta.result,
+      readAssignment(server.runtime.assignment(id), "agent_reviewer").meta
+        .result,
     ).toEqual({
       type: "submit",
       findings: [],
@@ -692,7 +858,7 @@ describe("the server: an agent that stops short", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
-      [id]: { work: [{ blocked: "a wall" }] },
+      [id]: { agent_worker: [{ blocked: "a wall" }] },
     });
 
     const server = await serverFor(fixture);
@@ -712,7 +878,7 @@ describe("the server: an agent that stops short", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
-      [id]: { work: [{ notes: "I forgot to set a result" }] },
+      [id]: { agent_worker: [{ notes: "I forgot to set a result" }] },
     });
 
     const server = await serverFor(fixture);
@@ -723,7 +889,7 @@ describe("the server: an agent that stops short", () => {
     expect(task.state).toBe("HELD");
     expect(task.held_reason).toBe("the agent stopped without setting a result");
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(5);
     expect(prompts[1]).toContain("Edit `../ASSIGNMENT.md`");
     expect(prompts[1]).toContain("what you write in your reply is discarded");
@@ -737,7 +903,9 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ notes: "I forgot to set a result", start_delay_ms: 50 }],
+        agent_worker: [
+          { notes: "I forgot to set a result", start_delay_ms: 50 },
+        ],
       },
     });
 
@@ -745,7 +913,7 @@ describe("the server: an agent that stops short", () => {
     server.setSchedulerEnabled(true);
     await reaches(server, id, "HELD", 40);
 
-    const sessionDir = server.runtime.sessionDir(id, "work");
+    const sessionDir = server.runtime.sessionDir(id, "agent_worker");
     expect(promptsOverlapping(sessionDir)).toEqual([]);
     expect(promptsTo(sessionDir)).toHaveLength(5);
 
@@ -757,14 +925,14 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             edit_header: { assignment: '"000099"' },
             submit: true,
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -776,10 +944,12 @@ describe("the server: an agent that stops short", () => {
     expect(
       readAssignment(
         path.join(server.runtime.history(id), "ASSIGNMENT.1.md"),
-        "work",
+        "agent_worker",
       ).meta.assignment,
     ).toBe(id);
-    expect(promptsTo(server.runtime.sessionDir(id, "work"))).toHaveLength(1);
+    expect(
+      promptsTo(server.runtime.sessionDir(id, "agent_worker")),
+    ).toHaveLength(1);
 
     server.shutdown();
   }, 30000);
@@ -792,7 +962,7 @@ describe("the server: an agent that stops short", () => {
 
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             todos_done: true,
             add_todo: "and this too",
@@ -800,7 +970,7 @@ describe("the server: an agent that stops short", () => {
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -809,7 +979,10 @@ describe("the server: an agent that stops short", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const live = readAssignment(server.runtime.assignment(id), "review").meta;
+    const live = readAssignment(
+      server.runtime.assignment(id),
+      "agent_reviewer",
+    ).meta;
     expect(live.todos).toEqual([]);
     expect(
       server
@@ -827,7 +1000,7 @@ describe("the server: an agent that stops short", () => {
     applyTransition(fixture.tasksDir, id, "addTodo", { message: "the fix" });
     commitGraph(fixture, "todo");
 
-    setPlan(fixture, { [id]: { work: [{ submit: true }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ submit: true }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -837,7 +1010,9 @@ describe("the server: an agent that stops short", () => {
     expect(task.state).toBe("HELD");
     expect(task.held_reason).toContain("1 todo(s) still open");
     expect(task.todos[0]!.done).toBe(false);
-    expect(promptsTo(server.runtime.sessionDir(id, "work"))).toHaveLength(5);
+    expect(
+      promptsTo(server.runtime.sessionDir(id, "agent_worker")),
+    ).toHaveLength(5);
 
     server.shutdown();
   }, 30000);
@@ -849,7 +1024,7 @@ describe("the server: rotation and history", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             notes: "attempt one",
@@ -857,7 +1032,7 @@ describe("the server: rotation and history", () => {
           },
           { notes: "attempt two, still going" },
         ],
-        review: [{ submit: true, findings: ["not good enough"] }],
+        agent_reviewer: [{ submit: true, findings: ["not good enough"] }],
       },
     });
 
@@ -874,11 +1049,14 @@ describe("the server: rotation and history", () => {
     expect(
       readAssignment(
         path.join(server.runtime.history(id), "ASSIGNMENT.1.md"),
-        "work",
+        "agent_worker",
       ).body,
     ).toContain("attempt one");
 
-    const live = readAssignment(server.runtime.assignment(id), "work").meta;
+    const live = readAssignment(
+      server.runtime.assignment(id),
+      "agent_worker",
+    ).meta;
     expect(live.result).toBeNull();
     expect(live.todos.map((t) => t.message)).toEqual(["not good enough"]);
 
@@ -890,13 +1068,13 @@ describe("the server: rotation and history", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -934,7 +1112,7 @@ describe("the server: the views", () => {
   test("a busy slot names its task, role, pid and activity", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
-    setPlan(fixture, { [id]: { work: [{ notes: "still going" }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "still going" }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -947,7 +1125,7 @@ describe("the server: the views", () => {
       (agent: { task_id: string | null }) => agent.task_id === id,
     );
     expect(busy).toBeDefined();
-    expect(busy.role).toBe("work");
+    expect(busy.role).toBe("agent_worker");
     expect(busy.pid).toBeGreaterThan(0);
     expect(busy.log).toBe(server.runtime.rpcLog(id));
 
@@ -1104,8 +1282,10 @@ describe("the server: the transition log", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -1130,7 +1310,7 @@ describe("the server: startup recovery", () => {
   test("a worktree lost to a cleared /tmp is recreated from its branch", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
-    setPlan(fixture, { [id]: { work: [{ notes: "working" }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ notes: "working" }] } });
 
     const first = await serverFor(fixture);
     first.setSchedulerEnabled(true);
@@ -1181,13 +1361,13 @@ describe("the server: integration", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             commit: { path: "shared.txt", contents: "from the branch\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -1218,10 +1398,10 @@ describe("the server: integration", () => {
     const id = readyTask(fixture, "Do a thing", ["test -f wanted.txt"]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           { submit: true, commit: { path: "wanted.txt", contents: "here\n" } },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -1258,7 +1438,7 @@ describe("the server: integration", () => {
     ]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           { submit: true, commit: { path: "made.txt", contents: "here\n" } },
         ],
       },
@@ -1625,7 +1805,7 @@ describe("the server: the reaper", () => {
     applyTransition(fixture.tasksDir, id, "claim", {
       agentName: "pi-fake-fake-1",
       pid: dead.pid,
-      branch: `work/${id}`,
+      branch: `task/${id}`,
       worktree: "/tmp/gone",
     });
 
@@ -1647,7 +1827,7 @@ describe("the server: the reaper", () => {
   test("an agent that dies mid-task frees its slot and releases the task", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task the agent dies on");
-    setPlan(fixture, { [id]: { work: [{ die: true }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ die: true }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -1674,7 +1854,7 @@ describe("the server: the reaper", () => {
     applyTransition(fixture.tasksDir, id, "claim", {
       agentName: "pi-fake-fake-1",
       pid: dead.pid,
-      branch: `work/${id}`,
+      branch: `task/${id}`,
       worktree: "/tmp/gone",
     });
 
@@ -1707,7 +1887,7 @@ describe("the server: the reaper", () => {
   test("a slot whose process died no longer shields the task from the reaper", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task the agent dies on");
-    setPlan(fixture, { [id]: { work: [{ die: true }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ die: true }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -1729,14 +1909,14 @@ describe("the server: the reaper", () => {
     const id = readyTask(fixture, "A task being merged", ["true"]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             todos_done: true,
             submit: true,
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -1796,7 +1976,7 @@ describe("the server: an abort that races a dispatch", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task the manager throws away");
     setPlan(fixture, {
-      [id]: { work: [{ new_session_delay_ms: 500, submit: true }] },
+      [id]: { agent_worker: [{ new_session_delay_ms: 500, submit: true }] },
     });
     abortable(fixture, id);
 
@@ -1828,7 +2008,7 @@ describe("the server: an abort that races a dispatch", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task the manager throws away");
     setPlan(fixture, {
-      [id]: { work: [{ new_session_delay_ms: 500, submit: true }] },
+      [id]: { agent_worker: [{ new_session_delay_ms: 500, submit: true }] },
     });
     abortable(fixture, id);
 
@@ -1857,7 +2037,7 @@ describe("the server: an abort that races a dispatch", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task nobody aborts");
     setPlan(fixture, {
-      [id]: { work: [{ new_session_delay_ms: 200, submit: true }] },
+      [id]: { agent_worker: [{ new_session_delay_ms: 200, submit: true }] },
     });
     abortable(fixture, id);
 
@@ -1892,14 +2072,14 @@ describe("the server: a task file that does not parse", () => {
     const fine = readyTask(fixture, "A task that is fine", ["true"]);
     setPlan(fixture, {
       [fine]: {
-        work: [
+        agent_worker: [
           {
             todos_done: true,
             submit: true,
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
     corrupt(fixture, broken);
@@ -1924,7 +2104,7 @@ describe("the server: a task file that does not parse", () => {
     applyTransition(fixture.tasksDir, claimed, "claim", {
       agentName: "pi-fake-fake-1",
       pid: dead.pid,
-      branch: `work/${claimed}`,
+      branch: `task/${claimed}`,
       worktree: "/tmp/gone",
     });
     corrupt(fixture, broken);
@@ -1987,7 +2167,7 @@ describe("the server: enabling and disabling an agent", () => {
     pool(fixture, [
       { type: "pi", provider: "fake", model: "fake", enabled: false },
     ]);
-    setPlan(fixture, { [id]: { work: [{ submit: true }] } });
+    setPlan(fixture, { [id]: { agent_worker: [{ submit: true }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -2028,14 +2208,14 @@ describe("the server: enabling and disabling an agent", () => {
     const id = readyTask(fixture, "A task", ["true"]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             todos_done: true,
             submit: true,
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2057,7 +2237,7 @@ describe("the server: enabling and disabling an agent", () => {
     const id = readyTask(fixture, "A slow task");
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             start_delay_ms: 250,
             todos_done: true,
@@ -2126,7 +2306,7 @@ describe("the server: detaching", () => {
             slot: 1,
             state: "BUSY",
             task_id: id,
-            role: "work",
+            role: "agent_worker",
             pid: alive.pid,
             started_at: new Date().toISOString(),
             activity: null,
@@ -2166,7 +2346,7 @@ describe("the server: the agent view", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
-      [id]: { work: [{ notes: "still going", busy_ms: 3000 }] },
+      [id]: { agent_worker: [{ notes: "still going", busy_ms: 3000 }] },
     });
 
     const server = await serverFor(fixture);
@@ -2184,7 +2364,7 @@ describe("the server: the agent view", () => {
     expect(busy.tokens).toBe(105000);
     expect(busy.context_percent).toBe(30);
     expect(busy).not.toHaveProperty("cost");
-    expect(busy.session).toContain("session/work");
+    expect(busy.session).toContain("session/agent_worker");
 
     await server.drain();
     server.shutdown();
@@ -2195,8 +2375,10 @@ describe("the server: the agent view", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2231,7 +2413,7 @@ describe("the server: a throw while finishing an agent", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
-      [id]: { work: [{ stop_reason: "aborted", break_git: true }] },
+      [id]: { agent_worker: [{ stop_reason: "aborted", break_git: true }] },
     });
 
     const server = await serverFor(fixture);
@@ -2261,7 +2443,7 @@ describe("the server: resuming a failed check", () => {
     const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           {
             submit: true,
             notes: "first attempt",
@@ -2273,7 +2455,7 @@ describe("the server: resuming a failed check", () => {
             commit: { path: "fixed.txt", contents: "now it is here\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2306,14 +2488,14 @@ describe("the server: resuming a failed check", () => {
     const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
     setPlan(fixture, {
       [id]: {
-        work: [
+        agent_worker: [
           { submit: true, commit: { path: "a.txt", contents: "a" } },
           {
             submit: true,
             commit: { path: "fixed.txt", contents: "now it is here\n" },
           },
         ],
-        review: [{ submit: true }],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2322,10 +2504,53 @@ describe("the server: resuming a failed check", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "work"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("`test -f fixed.txt` (exit 1)");
     expect(prompts[1]).toContain("reset to null");
+
+    server.shutdown();
+  }, 30000);
+
+  test("a session opened under an older role directory is reopened where it lies", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
+    setPlan(fixture, {
+      [id]: {
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+          { busy_ms: 2000 },
+        ],
+      },
+    });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await until(server, () => server.tasks().get(id)!.failures.length > 0);
+    server.setSchedulerEnabled(false);
+
+    const opened = server.tasks().get(id)!.workspace!.session!;
+    const legacyDir = path.join(server.runtime.taskDir(id), "session", "work");
+    const legacy = path.join(legacyDir, path.basename(opened));
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.renameSync(opened, legacy);
+    const taskFile = path.join(fixture.tasksDir, `${id}.md`);
+    fs.writeFileSync(
+      taskFile,
+      fs.readFileSync(taskFile, "utf-8").replace(opened, legacy),
+    );
+
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    server.setSchedulerEnabled(false);
+
+    expect(stateOf(server, id)).toBe("WORKING");
+    const view = JSON.parse(
+      fs.readFileSync(server.runtime.agentsView, "utf-8"),
+    );
+    expect(view.agents[0].state).toBe("BUSY");
+    expect(view.agents[0].session).toBe(legacy);
+    expect(server.tasks().get(id)!.workspace!.session).toBe(legacy);
 
     server.shutdown();
   }, 30000);
@@ -2337,8 +2562,13 @@ describe("the server: a review that comes back unusable", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ raw_result: "result:\n  type: submit" }, { submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [
+          { raw_result: "result:\n  type: submit" },
+          { submit: true },
+        ],
       },
     });
 
@@ -2353,7 +2583,7 @@ describe("the server: a review that comes back unusable", () => {
       log.filter((e) => e.transition === "claim" && e.to === "AGENT_REVIEWING"),
     ).toHaveLength(1);
 
-    const prompts = promptsTo(server.runtime.sessionDir(id, "review"));
+    const prompts = promptsTo(server.runtime.sessionDir(id, "agent_reviewer"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("could not be read");
     expect(prompts[1]).toContain("result.findings");
@@ -2370,8 +2600,10 @@ describe("the server: a review that comes back unusable", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [
           { submit: true, delegations: ["the same bug lives in fetch.ts"] },
         ],
       },
@@ -2382,8 +2614,10 @@ describe("the server: a review that comes back unusable", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const result = readAssignment(server.runtime.assignment(id), "review").meta
-      .result;
+    const result = readAssignment(
+      server.runtime.assignment(id),
+      "agent_reviewer",
+    ).meta.result;
     expect(result).toEqual({
       type: "submit",
       findings: [],
@@ -2401,8 +2635,10 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2420,7 +2656,7 @@ describe("the server: closing", () => {
     expect((await server.attemptMerge(id)).to).toBe("CLOSED");
 
     expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(false);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
     expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
   }, 30000);
 
@@ -2429,8 +2665,10 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2454,7 +2692,7 @@ describe("the server: closing", () => {
     await server.attemptMerge(id);
 
     expect(stateOf(server, id)).toBe("READY_TASK_GRAPH_UPDATE");
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(false);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
   }, 30000);
 
   async function atManagerReview(): Promise<{
@@ -2466,8 +2704,10 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 
@@ -2495,7 +2735,7 @@ describe("the server: closing", () => {
     );
 
     expect(server.attemptAbort(id).to).toBe("READY_TASK_GRAPH_UPDATE");
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(true);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(true);
     expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(false);
 
     server.transition(
@@ -2507,7 +2747,7 @@ describe("the server: closing", () => {
     expect(
       server.transition(id, "doneTaskGraph", { index: 0 }, "manager").to,
     ).toBe("CLOSED");
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(false);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
     expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
   }, 30000);
 
@@ -2523,7 +2763,7 @@ describe("the server: closing", () => {
     );
 
     expect(server.attemptAbort(id).to).toBe("READY_TASK_GRAPH_UPDATE");
-    expect(git.branchExists(fixture.repo, `work/${id}`)).toBe(false);
+    expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
 
     server.transition(
       id,
@@ -2542,7 +2782,7 @@ describe("the server: closing", () => {
     applyTransition(fixture.tasksDir, id, "claim", {
       agentName: "pi-fake-fake-1",
       pid: process.pid,
-      branch: `work/${id}`,
+      branch: `task/${id}`,
       worktree: "/tmp/gone",
     });
 
@@ -2563,7 +2803,7 @@ describe("the server: closing", () => {
       { op: "add", message: "too late" },
       "manager",
     );
-    git.gitOrThrow(fixture.repo, ["merge", "--ff-only", `work/${id}`]);
+    git.gitOrThrow(fixture.repo, ["merge", "--ff-only", `task/${id}`]);
 
     expect(() => server.attemptAbort(id)).toThrow(/already part of master/);
     expect(stateOf(server, id)).toBe("MANAGER_REVIEWING");
@@ -2574,8 +2814,10 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        work: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        review: [{ submit: true }],
+        agent_worker: [
+          { submit: true, commit: { path: "a.txt", contents: "a" } },
+        ],
+        agent_reviewer: [{ submit: true }],
       },
     });
 

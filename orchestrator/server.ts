@@ -56,13 +56,14 @@ import {
   sandbox,
 } from "./sandbox.ts";
 import {
+  ROLE_STATE,
   Runtime,
   type Role,
   branchName,
   snapshot,
   writeAtomic,
 } from "./runtime.ts";
-import { type TemplateVars, render } from "./template.ts";
+import type { TemplateVars } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
 import { SchemaError } from "./schema.ts";
 
@@ -77,6 +78,7 @@ export interface ServerOptions {
   agentsPath: string;
   tasksDir?: string;
   orchestratorDir?: string;
+  overridesDir?: string;
   serverRoot?: string;
   piCommand?: string;
   sandboxCommand?: string;
@@ -126,6 +128,7 @@ export class Server {
   readonly repo: string;
   readonly tasksDir: string;
   readonly orchestratorDir: string;
+  readonly overridesDir: string;
   readonly transitions: TransitionLog;
   readonly checks = new CheckRunner();
   readonly prompts: Prompts;
@@ -150,11 +153,13 @@ export class Server {
     this.repo = path.resolve(options.repo);
     this.tasksDir = options.tasksDir ?? path.join(this.repo, "tasks");
     this.orchestratorDir = options.orchestratorDir ?? import.meta.dir;
+    this.overridesDir =
+      options.overridesDir ?? path.join(this.repo, "orchestrator");
     this.piCommand = options.piCommand ?? "pi";
     this.sandboxCommand = options.sandboxCommand ?? SANDBOX_COMMAND;
     this.runtime = new Runtime(this.repo, options.serverRoot);
     this.transitions = new TransitionLog(this.runtime.transitionLog);
-    this.prompts = new Prompts(this.orchestratorDir);
+    this.prompts = new Prompts(this.orchestratorDir, this.overridesDir);
     this.base = options.base ?? git.defaultBranch(this.repo);
     this.slots = slots;
 
@@ -354,12 +359,14 @@ export class Server {
   }
 
   private teardown(task: TaskMeta): void {
-    const worktree = task.workspace?.worktree ?? this.runtime.worktree(task.id);
-    const branch = task.workspace?.branch ?? branchName(task.id);
+    const workspace = task.workspace;
+    if (workspace === null) {
+      return;
+    }
 
-    git.removeWorkspace(worktree);
-    if (git.branchExists(this.repo, branch)) {
-      git.deleteBranch(this.repo, branch);
+    git.removeWorkspace(workspace.worktree);
+    if (git.branchExists(this.repo, workspace.branch)) {
+      git.deleteBranch(this.repo, workspace.branch);
     }
   }
 
@@ -537,8 +544,8 @@ export class Server {
 
   private roleOf(state: TaskState): Role {
     return state === "READY_AGENT_REVIEW" || state === "AGENT_REVIEWING"
-      ? "review"
-      : "work";
+      ? "agent_reviewer"
+      : "agent_worker";
   }
 
   private launch(taskId: TaskId, slot: AgentSlot, cwd: string): string[] {
@@ -546,7 +553,7 @@ export class Server {
       {
         cwd,
         writable: [this.runtime.taskDir(taskId)],
-        readable: [this.repo],
+        readable: [this.repo, this.orchestratorDir],
         overlay: agentWrite(slot),
         oomScoreAdjust: AGENT_OOM_SCORE_ADJUST,
       },
@@ -590,7 +597,7 @@ export class Server {
     const role = worker.role;
     this.runtime.prepare(task.id);
     const worktree = this.runtime.worktree(task.id);
-    const branch = branchName(task.id);
+    const branch = task.workspace?.branch ?? branchName(task.id);
 
     if (!fs.existsSync(worktree)) {
       git.addWorkspace(this.repo, branch, worktree, this.base);
@@ -628,7 +635,7 @@ export class Server {
     await process.switchSession(workspace.session!);
     worker.session = workspace.session;
     this.requireStill(task, slot);
-    if (role === "work") {
+    if (role === "agent_worker") {
       resetResult(live, role);
     }
     this.transition(
@@ -673,15 +680,6 @@ export class Server {
     const live = this.runtime.assignment(task.id);
     rotate(live, this.runtime.history(task.id));
 
-    const template = fs.readFileSync(
-      path.join(
-        this.orchestratorDir,
-        "templates",
-        role === "review" ? "agent-review.md" : "working.md",
-      ),
-      "utf-8",
-    );
-
     const vars: TemplateVars = {
       id: task.id,
       title: task.title,
@@ -689,7 +687,7 @@ export class Server {
       checks: task.checks.map((command) => ({ command })),
     };
 
-    if (role === "review") {
+    if (role === "agent_reviewer") {
       vars.worktree = worktree;
       vars.range = git.range(worktree, this.base);
     } else {
@@ -698,7 +696,11 @@ export class Server {
         .map((todo) => ({ message: todo.message }));
     }
 
-    fs.writeFileSync(live, render(template, vars), "utf-8");
+    fs.writeFileSync(
+      live,
+      this.prompts.template(ROLE_STATE[role], vars),
+      "utf-8",
+    );
     return readAssignment(live, role).meta;
   }
 
@@ -819,7 +821,7 @@ export class Server {
       return;
     }
 
-    if (role === "review") {
+    if (role === "agent_reviewer") {
       this.submitReview(worker, meta.result);
       return;
     }
@@ -876,7 +878,7 @@ export class Server {
   private submitReview(worker: Worker, result: AssignmentResult): void {
     const taskId = worker.task_id!;
     const task = this.tasks().get(taskId)!;
-    const branch = task.workspace?.branch ?? branchName(taskId);
+    const branch = task.workspace!.branch;
     const findings = [...("findings" in result ? result.findings : [])];
 
     if (
@@ -1039,8 +1041,7 @@ export class Server {
 
   async attemptMerge(taskId: TaskId): Promise<TransitionResult> {
     const task = this.requireManagerReview(taskId);
-    const branch = task.workspace?.branch ?? branchName(taskId);
-    const worktree = task.workspace?.worktree ?? this.runtime.worktree(taskId);
+    const { branch, worktree } = task.workspace!;
 
     if (fs.existsSync(worktree)) {
       git.syncBase(worktree, this.base);
@@ -1085,9 +1086,10 @@ export class Server {
 
   attemptAbort(taskId: TaskId): TransitionResult {
     const task = this.requireAbortable(taskId);
-    const branch = task.workspace?.branch ?? branchName(taskId);
+    const branch = task.workspace?.branch ?? null;
 
     if (
+      branch !== null &&
       git.branchExists(this.repo, branch) &&
       git.isAncestor(this.repo, branch, this.base)
     ) {

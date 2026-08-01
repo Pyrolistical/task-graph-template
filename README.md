@@ -76,6 +76,21 @@ my-project/
 
 The task graph is your project's data and belongs in its history, so `tasks/` is committed. Nothing executable is copied: the orchestrator reads its prompts and templates from beside its own source, so it never has to be vendored into a repo it drives, and one checkout of it can drive several projects.
 
+### Overriding a prompt or a template
+
+A project that wants its agents told something else adds `orchestrator/prompts/` or `orchestrator/templates/` to its own repo. Any file there is used in place of the one the orchestrator ships, matched by name; every file it does not contain still comes from the checkout.
+
+```text
+my-project/
+└── orchestrator/
+    ├── prompts/
+    │   └── WORKING.md   # this project's implementer system prompt
+    └── templates/
+        └── WORKING.md   # this project's work assignment
+```
+
+Overrides are per file, not per directory, so a project can replace `prompts/WORKING.md` alone and keep the other twelve. A template must still render the variables the server gives it and parse as an assignment afterwards — the names each one is handed are in [ORCHESTRATOR.md](ORCHESTRATOR.md). Unlike `agents.json`, these are read from the repo being driven rather than the launch directory, and belong in its history.
+
 ### The agent pool
 
 `agents.json` is read from the directory the server is launched from — your project root — rather than from the repo it drives, so the same orchestrator can be run against one project with a big pool and another with one slot. It is gitignored; `agents.example.json` is the one to copy.
@@ -179,10 +194,10 @@ claimed_by: agent-1
 claimed_pid: 48213
 held_reason: null
 workspace:
-  branch: "work/000042"
+  branch: "task/000042"
   worktree: "/tmp/task-graph-server/-home-user-project/000042/worktree"
   agent: "agent-1"
-  session: "/tmp/task-graph-server/-home-user-project/000042/session/work/019f.jsonl"
+  session: "/tmp/task-graph-server/-home-user-project/000042/session/agent_worker/019f.jsonl"
 todos:
   - at: "2026-07-27T12:30:00Z"
     message: "fix null handling in parser"

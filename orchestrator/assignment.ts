@@ -26,8 +26,8 @@ function frontmatter(submit: z.ZodObject) {
 }
 
 const SCHEMA: Record<Role, z.ZodType> = {
-  work: frontmatter(z.strictObject({ type: z.literal("submit") })),
-  review: frontmatter(
+  agent_worker: frontmatter(z.strictObject({ type: z.literal("submit") })),
+  agent_reviewer: frontmatter(
     z.strictObject({
       type: z.literal("submit"),
       findings: z.array(Text),
