@@ -98,7 +98,7 @@ An entry is a model on a provider and how many of it may run at once. Slot names
 
 ### What an agent may write
 
-Every agent and every check runs inside a `bwrap` sandbox where the whole filesystem is read-only. Two things are writable no matter what you configure: the task's own runtime directory — its worktree, `ASSIGNMENT.md` and session files — and `/tmp`, which is a private tmpfs that goes when the process does. The repo the worktree was cloned from stays read-only.
+Every agent and every check runs inside a `bwrap` sandbox where the whole filesystem is read-only. Two things are writable no matter what you configure: the task's own runtime directory — its worktree, `ASSIGNMENT.md` and session files — and `/tmp`, which is a private tmpfs that goes when the process does. The repo the worktree was cloned from stays read-only. `GIT_EDITOR`, `EDITOR` and `VISUAL` are forced to `true` inside it, so a `git commit` with no `-m` fails in a second instead of hanging forever on an editor nobody is typing into.
 
 `write` is the list of paths outside that worktree the agent is allowed to write to. Each one is mounted as a throwaway overlay: the host's contents read normally, and every write lands in an upper layer that is discarded when the sandbox exits. A build gets its warm cache; nothing it does can change yours.
 

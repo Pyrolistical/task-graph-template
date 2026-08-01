@@ -25,6 +25,12 @@ export const ZIG_WRITE = CACHE_HOME;
 
 export const DEFAULT_WRITE: string[] = [ZIG_WRITE];
 
+export const NON_INTERACTIVE_ENV: Record<string, string> = {
+  GIT_EDITOR: "true",
+  EDITOR: "true",
+  VISUAL: "true",
+};
+
 export interface SandboxPolicy {
   cwd: string;
   writable: string[];
@@ -75,6 +81,10 @@ export function sandboxArgs(policy: SandboxPolicy): string[] {
   }
   for (const target of policy.writable) {
     args.push("--bind", target, target);
+  }
+
+  for (const [name, value] of Object.entries(NON_INTERACTIVE_ENV)) {
+    args.push("--setenv", name, value);
   }
 
   args.push(

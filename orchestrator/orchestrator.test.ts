@@ -43,6 +43,7 @@ import * as git from "./git.ts";
 import {
   CACHE_HOME,
   DEFAULT_WRITE,
+  NON_INTERACTIVE_ENV,
   PI_HOME,
   SANDBOX_COMMAND,
   ZIG_WRITE,
@@ -1799,6 +1800,35 @@ describe("the sandbox an agent runs in", () => {
     expect(args).toContain("--new-session");
     expect(args).not.toContain("--unshare-net");
     expect(args).not.toContain("--unshare-all");
+  });
+
+  test("an editor never opens, so a bare git commit cannot wedge the agent", () => {
+    const args = sandboxArgs(policy);
+
+    for (const name of ["GIT_EDITOR", "EDITOR", "VISUAL"]) {
+      const at = args.indexOf(name);
+      expect(args[at - 1]).toBe("--setenv");
+      expect(args[at + 1]).toBe("true");
+    }
+    expect(args.indexOf("GIT_EDITOR")).toBeLessThan(args.indexOf("--chdir"));
+  });
+
+  test("git commit with no message under that editor fails instead of blocking", () => {
+    const repo = tempDir("sandbox-editor-");
+    git.gitOrThrow(repo, ["init"]);
+    fs.writeFileSync(path.join(repo, "a.txt"), "a", "utf-8");
+    git.gitOrThrow(repo, ["add", "a.txt"]);
+
+    const result = Bun.spawnSync({
+      cmd: ["git", "commit"],
+      cwd: repo,
+      env: { ...process.env, ...NON_INTERACTIVE_ENV },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("empty commit message");
   });
 
   test("the agent outlives the manager, so the sandbox is not tied to its parent", () => {

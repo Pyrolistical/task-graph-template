@@ -339,6 +339,7 @@ export class Server {
         worktree: null,
       });
       this.teardown(before);
+      this.runtime.discard(taskId);
     }
 
     this.transitions.append({

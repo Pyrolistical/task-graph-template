@@ -622,6 +622,9 @@ Reviews first because a finished branch is the most perishable thing in the syst
 
 ```text
 on every applied transition:
+    if the task reached CLOSED:
+        remove the worktree, delete the branch
+        delete /tmp/task-graph-server/<repo>/<id>/ entirely
     move the task to the front of the recent list
     while the list is longer than 100:
         drop the last one
@@ -629,7 +632,9 @@ on every applied transition:
             delete /tmp/task-graph-server/<repo>/<id>/ entirely
 ```
 
-`tasks.json` is that list. A closed task falling off it is the signal that nobody is coming back for its sessions, its rotated assignments or its check logs, so they go with it. An active task never loses its directory that way — its worktree is live, and it is only off the view because a hundred other tasks moved more recently.
+`CLOSED` is terminal: no agent is ever dispatched against that task again, and the branch is either in `master` or thrown away. So the sessions, the rotated assignments, the rpc log and the check logs go at that moment rather than sitting in `/tmp` until a hundred other tasks have pushed the id off the recent list. The row survives — `tasks.json` still shows it as `CLOSED` out of the in-memory archive, with `worktree` null — but nothing on disk backs it.
+
+The retention sweep stays as the second half of the same rule, covering the directory of a task that left the active set without a closing transition: a task file deleted by hand, or one closed by a server that died before it could clean up. An active task never loses its directory that way — its worktree is live, and it is only off the view because a hundred other tasks moved more recently.
 
 ## State machines
 
@@ -872,6 +877,9 @@ git -C <repo> fetch --force …/000042/worktree work/000042:work/000042
 git merge --ff-only work/000042        # after rebase + recheck
 rm -rf /tmp/task-graph-server/-home-model-task-graph-template/000042/worktree
 git branch -D work/000042
+
+# close: the whole runtime directory goes, worktree and all
+rm -rf /tmp/task-graph-server/-home-model-task-graph-template/000042
 ```
 
 ### The workspace is a clone
@@ -926,6 +934,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
       --overlay-src ~/.pi --tmp-overlay ~/.pi \
       --bind  /tmp/task-graph-server/<repo>/000042 \
               /tmp/task-graph-server/<repo>/000042 \
+      --setenv GIT_EDITOR true --setenv EDITOR true --setenv VISUAL true \
       --unshare-user --unshare-pid --unshare-ipc --unshare-uts --new-session \
       --chdir <workspace> -- pi --mode rpc …
 ```
@@ -934,6 +943,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 - The repo is re-bound read-only **after** `--tmpfs /tmp`, because a repo can sit under `/tmp`.
 - The bound-writable set is one directory: the task's own runtime directory. That is the workspace, `ASSIGNMENT.md` and the session files — not the repo, not another task's directory, not the views, not the manager's home.
 - `/tmp` is a private tmpfs, so whatever an agent or a check scribbles there goes when the process does.
+- `GIT_EDITOR`, `EDITOR` and `VISUAL` are all forced to `true`, the command that does nothing and succeeds. An agent that runs `git commit` without `-m` otherwise gets whatever editor the host has configured, and an editor waiting for input on a stdin the agent is not driving is a wedge with no timeout behind it: the slot is held, the rpc stream is silent, and the only evidence is a `nvim …/COMMIT_EDITMSG` under the workspace. With the no-op editor the same command fails in under a second with `Aborting commit due to empty commit message`, which the agent can read and correct. The same applies to `git rebase -i` and to any tool that reaches for `$EDITOR`.
 - Everything else an agent may write to is declared, not hardcoded: the `write` array on its `agents.json` entry, each path mounted as a throwaway overlay. Reads see the host, writes land in an upper layer that is discarded with the sandbox.
 - `~/.pi` is added to that list for any agent of type `pi`, declared or not. `pi` takes a lock under it at startup; reads see the real settings and writes are discarded, so an agent cannot edit the settings of the next one.
 - `~/.cache` is the default `write` entry, and its purpose is zig. A build tool keeps a cache outside the workspace — `zig` under `~/.cache/zig`, and cargo, go and npm under their own — and a read-only one is not a slow build but a hard failure: `zig build` cannot even compile `build.zig` and dies with `manifest_create ReadOnlyFileSystem`, which reads like a compile error and sends an agent hunting through its own diff. The overlay keeps the host's warm cache readable, so a build is not paying to rebuild the standard library, while every entry the task writes is discarded with the sandbox.

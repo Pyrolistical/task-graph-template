@@ -2569,7 +2569,7 @@ describe("the server: closing", () => {
     expect(stateOf(server, id)).toBe("MANAGER_REVIEWING");
   }, 30000);
 
-  test("a task that drops off the tasks view loses its runtime directory", async () => {
+  test("closing a task deletes its runtime directory", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
@@ -2590,8 +2590,10 @@ describe("the server: closing", () => {
       { agentName: "manager", pid: process.pid },
       "manager",
     );
-    await server.attemptMerge(id);
     expect(fs.existsSync(server.runtime.taskDir(id))).toBe(true);
+    await server.attemptMerge(id);
+    expect(stateOf(server, id)).toBe("CLOSED");
+    expect(fs.existsSync(server.runtime.taskDir(id))).toBe(false);
 
     for (let i = 0; i < 101; i++) {
       const other = readyTask(fixture, `filler ${i}`);
