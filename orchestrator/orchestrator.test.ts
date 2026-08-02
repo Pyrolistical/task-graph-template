@@ -1,12 +1,18 @@
-import { describe, expect, setSystemTime } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime } from "bun:test";
 import { tempDir, test } from "./temp.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-setSystemTime(new Date("2026-01-01").getTime());
-const NOW = Date.now();
+beforeAll(() => {
+  setSystemTime(new Date("2026-01-01").getTime());
+});
+
+afterAll(() => {
+  setSystemTime();
+});
 import {
+  type AgentSlot,
   agentModelKey,
   agentWrite,
   checkWrite,
@@ -41,14 +47,9 @@ import {
   spawnArgs,
 } from "./rpc.ts";
 import { candidates, pickSlot, plan } from "./scheduler.ts";
+import { ALL_ROLES } from "./runtime.ts";
 import { type TaskMeta, isProcessAlive } from "./task.ts";
-import {
-  ROLE_STATE,
-  Runtime,
-  branchName,
-  repoKey,
-  writeAtomic,
-} from "./runtime.ts";
+import { Runtime, branchName, repoKey, writeAtomic } from "./runtime.ts";
 import * as git from "./git.ts";
 import {
   CACHE_HOME,
@@ -152,6 +153,40 @@ describe("agent pool config", () => {
     expect(slots.map((slot) => slot.enabled)).toEqual([true, true, false]);
   });
 
+  test("a slot may take every role unless the pool says otherwise", () => {
+    const slots = parseAgents({
+      agents: [
+        { type: "pi", provider: "anthropic", model: "m", slots: 1 },
+        {
+          type: "pi",
+          provider: "openai",
+          model: "m",
+          slots: 1,
+          roles: ["reviewer"],
+        },
+      ],
+    });
+
+    expect(slots[0]!.roles).toEqual(["worker", "reviewer", "planner"]);
+    expect(slots[1]!.roles).toEqual(["reviewer"]);
+  });
+
+  test("an unknown role is rejected on load", () => {
+    expect(() =>
+      parseAgents({
+        agents: [
+          {
+            type: "pi",
+            provider: "anthropic",
+            model: "m",
+            slots: 1,
+            roles: ["agent_checker"],
+          },
+        ],
+      }),
+    ).toThrow(/Invalid option/);
+  });
+
   test("the model key drops only the slot number", () => {
     expect(agentModelKey("pi-anthropic-claude-sonnet-4-5-2")).toBe(
       "pi-anthropic-claude-sonnet-4-5",
@@ -205,6 +240,7 @@ describe("agent pool config", () => {
       slot: 1,
       enabled: true,
       write: DEFAULT_WRITE,
+      roles: ["worker", "reviewer", "planner"],
     });
   });
 
@@ -360,8 +396,8 @@ describe("the runtime directory", () => {
     expect(runtime.worktree("000042")).toBe(
       path.join(runtime.root, "000042", "worktree"),
     );
-    expect(runtime.sessionDir("000042", "agent_reviewer")).toBe(
-      path.join(runtime.root, "000042", "session", "agent_reviewer"),
+    expect(runtime.sessionDir("000042", "reviewer")).toBe(
+      path.join(runtime.root, "000042", "session", "reviewer"),
     );
     expect(runtime.checkLog("000042", 1)).toBe(
       path.join(runtime.root, "000042", "check-1.log"),
@@ -389,12 +425,8 @@ describe("the runtime directory", () => {
     runtime.prepare("000042");
 
     expect(fs.existsSync(runtime.history("000042"))).toBe(true);
-    expect(fs.existsSync(runtime.sessionDir("000042", "agent_worker"))).toBe(
-      true,
-    );
-    expect(fs.existsSync(runtime.sessionDir("000042", "agent_reviewer"))).toBe(
-      true,
-    );
+    expect(fs.existsSync(runtime.sessionDir("000042", "worker"))).toBe(true);
+    expect(fs.existsSync(runtime.sessionDir("000042", "reviewer"))).toBe(true);
   });
 
   test("an atomic write never leaves a partial document", () => {
@@ -524,7 +556,7 @@ describe("prompt and template overrides", () => {
   test("with no overrides directory every file comes from the orchestrator", () => {
     const prompts = new Prompts(ORCHESTRATOR_DIR);
 
-    expect(prompts.systemPrompt("agent_worker")).toBe(
+    expect(prompts.systemPrompt("WORKING")).toBe(
       path.join(ORCHESTRATOR_DIR, "prompts", "WORKING.md"),
     );
     expect(prompts.fragment("dispatch")).toBe(
@@ -543,7 +575,7 @@ describe("prompt and template overrides", () => {
     expect(prompts.fragment("dispatch")).toBe(
       "Read ../ASSIGNMENT.md and do it.\n",
     );
-    expect(prompts.systemPrompt("agent_worker")).toBe(
+    expect(prompts.systemPrompt("WORKING")).toBe(
       path.join(dir, "prompts", "WORKING.md"),
     );
     expect(
@@ -556,12 +588,12 @@ describe("prompt and template overrides", () => {
     const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
 
     expect(prompts.fragment("dispatch")).toBe("do it\n");
-    expect(prompts.systemPrompt("agent_reviewer")).toBe(
+    expect(prompts.systemPrompt("AGENT_REVIEWING")).toBe(
       path.join(ORCHESTRATOR_DIR, "prompts", "AGENT_REVIEWING.md"),
     );
     const vars = { command: "bun test", limit: LOOP_LIMIT };
-    expect(prompts.issue("looping", "agent_worker", vars)).toBe(
-      render(templateOf("prompts/looping.md"), vars),
+    expect(prompts.issue("looping", "WORKING", vars)).toBe(
+      render(templateOf("prompts/looping-WORKING.md"), vars),
     );
   });
 
@@ -576,6 +608,34 @@ describe("prompt and template overrides", () => {
         failures: [{ command: "bun test", exit_code: "1", output: "boom" }],
       }),
     ).toBe("broke bun test\n");
+  });
+
+  test("a file edited after construction stays the cached copy", () => {
+    const dir = overrides({ "prompts/dispatch.md": "one\n" });
+    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+
+    fs.writeFileSync(path.join(dir, "prompts", "dispatch.md"), "two\n");
+
+    expect(prompts.fragment("dispatch")).toBe("one\n");
+  });
+
+  test("reload re-reads an edited override and falls back when one is deleted", () => {
+    const dir = overrides({ "prompts/dispatch.md": "one\n" });
+    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+
+    fs.writeFileSync(path.join(dir, "prompts", "dispatch.md"), "two\n");
+    expect(prompts.reload()).toContain(
+      path.join(dir, "prompts", "dispatch.md"),
+    );
+    expect(prompts.fragment("dispatch")).toBe("two\n");
+
+    fs.rmSync(path.join(dir, "prompts", "dispatch.md"));
+    expect(prompts.reload()).not.toContain(
+      path.join(dir, "prompts", "dispatch.md"),
+    );
+    expect(prompts.fragment("dispatch")).toBe(
+      templateOf("prompts/dispatch.md"),
+    );
   });
 
   test("a file missing from both directories names both", () => {
@@ -599,7 +659,7 @@ describe("template rendering", () => {
       checks: [{ command: "bun test" }, { command: "bun run typecheck" }],
     });
 
-    const { meta, body } = parseAssignment(out, "agent_worker");
+    const { meta, body } = parseAssignment(out, "WORKING");
     expect(meta.assignment).toBe("000042");
     expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
     expect(meta.checks).toEqual(["bun test", "bun run typecheck"]);
@@ -621,7 +681,7 @@ describe("template rendering", () => {
     expect(out).toContain("todos: []");
     expect(out).toContain("checks: []");
     expect(out).not.toMatch(/^todos:$/m);
-    expect(parseAssignment(out, "agent_worker").meta.todos).toEqual([]);
+    expect(parseAssignment(out, "WORKING").meta.todos).toEqual([]);
   });
 
   test("a message with quotes and newlines survives into the parse", () => {
@@ -634,7 +694,7 @@ describe("template rendering", () => {
       checks: [],
     });
 
-    expect(parseAssignment(out, "agent_worker").meta.todos[0]!.message).toBe(
+    expect(parseAssignment(out, "WORKING").meta.todos[0]!.message).toBe(
       message,
     );
   });
@@ -644,18 +704,72 @@ describe("template rendering", () => {
       id: "000042",
       title: "A task",
       body: "# Goal",
+      todos: [{ message: "the fix", done: true }],
       checks: [{ command: "bun test" }],
       range: "a1b2c3d..e4f5a6b",
       worktree: "/tmp/task-graph-server/-repo/000042/worktree",
     });
 
-    const { meta, body } = parseAssignment(out, "agent_reviewer");
-    expect(meta.todos).toEqual([]);
+    const { meta, body } = parseAssignment(out, "AGENT_REVIEWING");
+    expect(meta.todos).toEqual([{ message: "the fix", done: true }]);
     expect(meta.checks).toEqual(["bun test"]);
     expect(meta.result).toBeNull();
     expect(body).toContain("a1b2c3d..e4f5a6b");
     expect(body).toContain("/tmp/task-graph-server/-repo/000042/worktree");
     expect(body).not.toContain("git diff");
+  });
+
+  test("a planning assignment carries the decided todos and renders plan feedback", () => {
+    const out = render(templateOf("templates/PLANNING.md"), {
+      id: "000042",
+      title: "Parse frontmatter with Bun.YAML",
+      body: "# Goal\n\nParse it.",
+      todos: [{ message: "fix null handling" }],
+      checks: [{ command: "bun test" }],
+      plan_feedback: [{ finding: "no todo covers the empty case" }],
+      plan_feedback_head: [{}],
+    });
+
+    const { meta, body } = parseAssignment(out, "PLANNING");
+    expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
+    expect(meta.checks).toEqual(["bun test"]);
+    expect(meta.result).toBeNull();
+    expect(body).toContain("no todo covers the empty case");
+    expect(body).toContain("Write down what you would do");
+  });
+
+  test("a planning assignment with no feedback renders none", () => {
+    const out = render(templateOf("templates/PLANNING.md"), {
+      id: "000042",
+      title: "A task",
+      body: "# Goal",
+      todos: [],
+      checks: [],
+      plan_feedback: [],
+      plan_feedback_head: [],
+    });
+
+    expect(out).toContain("todos: []");
+    expect(out).toContain("checks: []");
+    expect(out).not.toContain("previous plan was rejected");
+    expect(parseAssignment(out, "PLANNING").meta.result).toBeNull();
+  });
+
+  test("a plan review assignment carries the plan to review", () => {
+    const out = render(templateOf("templates/PLAN_REVIEWING.md"), {
+      id: "000042",
+      title: "Parse frontmatter with Bun.YAML",
+      body: "# Goal\n\nParse it.",
+      todos: [{ message: "parse the frontmatter" }],
+      checks: [{ command: "bun test" }],
+    });
+
+    const { meta, body } = parseAssignment(out, "PLAN_REVIEWING");
+    expect(meta.todos).toEqual([
+      { message: "parse the frontmatter", done: false },
+    ]);
+    expect(meta.result).toBeNull();
+    expect(body).toContain("the plan an implementer will work through");
   });
 
   test("a template referring to something it was not given fails loudly", () => {
@@ -690,26 +804,26 @@ describe("assignment parsing", () => {
   }
 
   test("a well-formed assignment parses with no result yet", () => {
-    const { meta } = parseAssignment(valid, "agent_worker");
+    const { meta } = parseAssignment(valid, "WORKING");
     expect(meta.assignment).toBe("000042");
     expect(meta.result).toBeNull();
   });
 
   test("an unquoted six-digit assignment id is rejected", () => {
     expect(() =>
-      parseAssignment(valid.replace('"000042"', "000042"), "agent_worker"),
+      parseAssignment(valid.replace('"000042"', "000042"), "WORKING"),
     ).toThrow(/quoted six-digit/);
   });
 
   test("a submitted work result carries nothing at all", () => {
     expect(
-      parseAssignment(withResult("  type: submit"), "agent_worker").meta.result,
+      parseAssignment(withResult("  type: submit"), "WORKING").meta.result,
     ).toEqual({ type: "submit" });
 
     expect(() =>
       parseAssignment(
         withResult("  type: submit", "  findings: []"),
-        "agent_worker",
+        "WORKING",
       ),
     ).toThrow(/result: Unrecognized key: "findings"/);
   });
@@ -723,7 +837,7 @@ describe("assignment parsing", () => {
         "  delegations:",
         '    - "the same bug lives in fetch.ts"',
       ),
-      "agent_reviewer",
+      "AGENT_REVIEWING",
     ).meta;
 
     expect(meta.result).toEqual({
@@ -737,30 +851,119 @@ describe("assignment parsing", () => {
     expect(() =>
       parseAssignment(
         withResult("  type: submit", "  findings: []"),
-        "agent_reviewer",
+        "AGENT_REVIEWING",
       ),
     ).toThrow(/result\.delegations: Invalid input/);
+  });
+
+  test("a plan result carries its additions and removals, both possibly empty", () => {
+    const meta = parseAssignment(
+      withResult(
+        "  type: submit",
+        "  addTodos:",
+        '    - "parse the frontmatter"',
+        "  removeTodos:",
+        "    - 0",
+      ),
+      "PLANNING",
+    ).meta;
+    expect(meta.result).toEqual({
+      type: "submit",
+      addTodos: ["parse the frontmatter"],
+      removeTodos: [0],
+    });
+
+    expect(
+      parseAssignment(
+        withResult("  type: submit", "  addTodos: []", "  removeTodos: []"),
+        "PLANNING",
+      ).meta.result,
+    ).toEqual({ type: "submit", addTodos: [], removeTodos: [] });
+  });
+
+  test("a plan result with unknown fields or a bad remove index is rejected", () => {
+    expect(() =>
+      parseAssignment(
+        withResult(
+          "  type: submit",
+          "  addTodos: []",
+          "  removeTodos: []",
+          "  findings: []",
+        ),
+        "PLANNING",
+      ),
+    ).toThrow(/result: Unrecognized key: "findings"/);
+
+    expect(() =>
+      parseAssignment(
+        withResult("  type: submit", "  addTodos: []", "  removeTodos: [0.5]"),
+        "PLANNING",
+      ),
+    ).toThrow(/result\.removeTodos\[0\]/);
+  });
+
+  test("a plan review result approves with empty findings", () => {
+    const meta = parseAssignment(
+      withResult("  type: submit", "  findings: []"),
+      "PLAN_REVIEWING",
+    ).meta;
+    expect(meta.result).toEqual({ type: "submit", findings: [] });
+  });
+
+  test("a plan review result carries its findings", () => {
+    const meta = parseAssignment(
+      withResult(
+        "  type: submit",
+        "  findings:",
+        '    - "no todo covers the empty case"',
+      ),
+      "PLAN_REVIEWING",
+    ).meta;
+    expect(meta.result).toEqual({
+      type: "submit",
+      findings: ["no todo covers the empty case"],
+    });
+  });
+
+  test("a plan review result missing findings is rejected", () => {
+    expect(() =>
+      parseAssignment(withResult("  type: submit"), "PLAN_REVIEWING"),
+    ).toThrow(/result\.findings: Invalid input/);
+  });
+
+  test("a plan review result cannot carry delegations", () => {
+    expect(() =>
+      parseAssignment(
+        withResult("  type: submit", "  findings: []", "  delegations: []"),
+        "PLAN_REVIEWING",
+      ),
+    ).toThrow(/result: Unrecognized key: "delegations"/);
   });
 
   test("a finding that is only whitespace is rejected", () => {
     expect(() =>
       parseAssignment(
         withResult("  type: submit", '  findings: ["  "]', "  delegations: []"),
-        "agent_reviewer",
+        "AGENT_REVIEWING",
       ),
     ).toThrow(/result\.findings\[0\]: Too small/);
   });
 
-  test("blocked requires a message, in either role", () => {
-    for (const role of ["agent_worker", "agent_reviewer"] as const) {
+  test("blocked requires a message, in every state", () => {
+    for (const state of [
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ] as const) {
       expect(() =>
-        parseAssignment(withResult("  type: blocked"), role),
+        parseAssignment(withResult("  type: blocked"), state),
       ).toThrow(/result\.message: Invalid input/);
 
       expect(
         parseAssignment(
           withResult("  type: blocked", '  message: "the box is down"'),
-          role,
+          state,
         ).meta.result,
       ).toEqual({ type: "blocked", message: "the box is down" });
     }
@@ -768,7 +971,7 @@ describe("assignment parsing", () => {
 
   test("a result type outside the two legal values is rejected", () => {
     expect(() =>
-      parseAssignment(withResult("  type: done"), "agent_worker"),
+      parseAssignment(withResult("  type: done"), "WORKING"),
     ).toThrow(
       /result\.type: Invalid discriminator value\. Expected 'submit' \| 'blocked'/,
     );
@@ -779,7 +982,7 @@ describe("assignment parsing", () => {
     try {
       parseAssignment(
         valid.replace("checks: []\n", "").replace("todos: []", "notes: mine"),
-        "agent_worker",
+        "WORKING",
       );
     } catch (err) {
       issues = (err as SchemaError).issues;
@@ -790,7 +993,7 @@ describe("assignment parsing", () => {
   });
 
   test("a document with no frontmatter is rejected", () => {
-    expect(() => parseAssignment("# Just a heading", "agent_worker")).toThrow(
+    expect(() => parseAssignment("# Just a heading", "WORKING")).toThrow(
       /no YAML frontmatter/,
     );
   });
@@ -811,7 +1014,7 @@ describe("settle validation", () => {
       "",
       "## Notes",
     ].join("\n"),
-    "agent_worker",
+    "WORKING",
   ).meta;
 
   function settled(mutate: (meta: AssignmentMeta) => void) {
@@ -883,7 +1086,7 @@ describe("repairing what the agent changed", () => {
     "what I tried.",
   ].join("\n");
 
-  const dispatched = parseAssignment(source, "agent_worker").meta;
+  const dispatched = parseAssignment(source, "WORKING").meta;
 
   function write(text: string): string {
     const filePath = path.join(tempDir("orchestrator-"), "ASSIGNMENT.md");
@@ -900,7 +1103,7 @@ describe("repairing what the agent changed", () => {
     const { restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "agent_worker").meta,
+      readAssignment(filePath, "WORKING").meta,
     );
 
     expect(restored).toEqual([]);
@@ -917,13 +1120,13 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "agent_worker").meta,
+      readAssignment(filePath, "WORKING").meta,
     );
 
     expect(restored).toEqual(["todos[0].message was reworded"]);
     expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
     expect(meta.result).toEqual({ type: "submit" });
-    expect(readAssignment(filePath, "agent_worker").meta).toEqual(meta);
+    expect(readAssignment(filePath, "WORKING").meta).toEqual(meta);
   });
 
   test("a todo the agent added is dropped and the notes survive", () => {
@@ -937,7 +1140,7 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "agent_worker").meta,
+      readAssignment(filePath, "WORKING").meta,
     );
 
     expect(restored).toEqual([`"todos" was 1 entries and is now 2`]);
@@ -951,7 +1154,7 @@ describe("repairing what the agent changed", () => {
     const { meta, restored } = repair(
       filePath,
       dispatched,
-      readAssignment(filePath, "agent_worker").meta,
+      readAssignment(filePath, "WORKING").meta,
     );
 
     expect(restored).toEqual(["checks[0] was rewritten"]);
@@ -984,19 +1187,86 @@ describe("repairing what the agent changed", () => {
       ].join("\n"),
     );
   });
+
+  test("a plan result round-trips through the serializer", () => {
+    expect(
+      serializeAssignment({
+        assignment: "000042",
+        todos: [],
+        checks: [],
+        result: {
+          type: "submit",
+          addTodos: ["parse the frontmatter"],
+          removeTodos: [0, 2],
+        },
+      }),
+    ).toBe(
+      [
+        'assignment: "000042"',
+        "todos: []",
+        "checks: []",
+        "result:",
+        "  type: submit",
+        "  addTodos:",
+        '    - "parse the frontmatter"',
+        "  removeTodos:",
+        "    - 0",
+        "    - 2",
+      ].join("\n"),
+    );
+  });
+
+  test("a plan review result round-trips through the serializer", () => {
+    expect(
+      serializeAssignment({
+        assignment: "000042",
+        todos: [],
+        checks: [],
+        result: {
+          type: "submit",
+          findings: ["the plan misses the empty case"],
+        },
+      }),
+    ).toBe(
+      [
+        'assignment: "000042"',
+        "todos: []",
+        "checks: []",
+        "result:",
+        "  type: submit",
+        "  findings:",
+        '    - "the plan misses the empty case"',
+      ].join("\n"),
+    );
+  });
 });
 
 describe("the issues an agent can be sent back for", () => {
   test("only a blocked result gets a single attempt", () => {
     expect(ISSUES.blocked.attempts).toBe(1);
     for (const name of [
-      "no-result",
-      "open-todos",
+      "missing-result",
+      "incomplete-todos",
       "uncommitted",
-      "unreadable-result",
+      "unparsable-result",
+      "missing-plan",
+      "invalid-remove-todo",
+      "modified-worktree",
     ] as const) {
       expect(ISSUES[name].attempts).toBe(4);
     }
+  });
+
+  test("the planning issues hold with reasons that name them", () => {
+    expect(ISSUES["missing-plan"].held("")).toBe(
+      "the planner submitted a plan with no todos",
+    );
+    expect(ISSUES["invalid-remove-todo"].held("an index outside 0..1")).toBe(
+      "the planner named removeTodos indices that do not exist: an index outside 0..1",
+    );
+    expect(ISSUES["modified-worktree"].held("2 files")).toBe(
+      "the agent wrote to the worktree during planning: 2 files",
+    );
   });
 
   test("a loop is worth fewer nudges than a bad result, being dearer to reach", () => {
@@ -1004,15 +1274,50 @@ describe("the issues an agent can be sent back for", () => {
     expect(ISSUES.looping.attempts).toBeGreaterThan(ISSUES.blocked.attempts);
   });
 
-  test("each issue names a fragment that exists, per role", () => {
+  test("each issue is scoped to the states that can raise it", () => {
+    expect(ISSUES["unparsable-result"].states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ]);
+    expect(ISSUES["missing-result"].states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ]);
+    expect(ISSUES.looping.states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ]);
+    expect(ISSUES.blocked.states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ]);
+    expect(ISSUES["incomplete-todos"].states).toEqual(["WORKING"]);
+    expect(ISSUES.uncommitted.states).toEqual(["WORKING"]);
+    expect(ISSUES["missing-plan"].states).toEqual(["PLANNING"]);
+    expect(ISSUES["invalid-remove-todo"].states).toEqual(["PLANNING"]);
+    expect(ISSUES["modified-worktree"].states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+    ]);
+  });
+
+  test("each issue names a fragment that exists for every state that can raise it", () => {
     for (const issue of Object.values(ISSUES)) {
-      for (const role of ["agent_worker", "agent_reviewer"] as const) {
+      for (const state of issue.states) {
         expect(
           fs.existsSync(
             path.join(
               ORCHESTRATOR_DIR,
               "prompts",
-              `${issue.fragment(role)}.md`,
+              `${issue.fragment(state)}.md`,
             ),
           ),
         ).toBe(true);
@@ -1062,8 +1367,7 @@ describe("rotation", () => {
       "ASSIGNMENT.2.md",
     ]);
     expect(
-      readAssignment(path.join(history, "ASSIGNMENT.1.md"), "agent_worker")
-        .body,
+      readAssignment(path.join(history, "ASSIGNMENT.1.md"), "WORKING").body,
     ).toContain("the first attempt");
     expect(attemptOf(history)).toBe(3);
   });
@@ -1225,7 +1529,7 @@ describe("the rpc stream", () => {
       kind: "tool-call",
       tool: "bash",
       target: "bun test",
-      started_at: NOW,
+      started_at: Date.now(),
     });
 
     stream.feed(
@@ -1234,7 +1538,7 @@ describe("the rpc stream", () => {
     expect(stream.state.activity).toEqual({
       kind: "compacting",
       reason: "overflow",
-      started_at: NOW,
+      started_at: Date.now(),
     });
   });
 
@@ -1246,7 +1550,10 @@ describe("the rpc stream", () => {
     stream.feed(
       `${JSON.stringify({ type: "tool_execution_end", toolCallId: "c1" })}\n`,
     );
-    expect(stream.state.activity).toEqual({ kind: "thinking", started_at: NOW });
+    expect(stream.state.activity).toEqual({
+      kind: "thinking",
+      started_at: Date.now(),
+    });
   });
 
   test("agent_settled sets activity to none", () => {
@@ -1254,16 +1561,17 @@ describe("the rpc stream", () => {
     stream.feed(
       `${JSON.stringify({ type: "tool_execution_start", toolName: "bash", args: {} })}\n`,
     );
-    stream.feed(
-      `${JSON.stringify({ type: "agent_settled" })}\n`,
-    );
+    stream.feed(`${JSON.stringify({ type: "agent_settled" })}\n`);
     expect(stream.state.activity).toEqual({ kind: "none" });
   });
 
   test("starting sets activity to thinking", () => {
     const stream = new PiStream();
     stream.starting();
-    expect(stream.state.activity).toEqual({ kind: "thinking", started_at: NOW });
+    expect(stream.state.activity).toEqual({
+      kind: "thinking",
+      started_at: Date.now(),
+    });
   });
 
   test("a tool call with args.path but no command targets the path", () => {
@@ -1279,7 +1587,7 @@ describe("the rpc stream", () => {
       kind: "tool-call",
       tool: "read",
       target: "/tmp/file.ts",
-      started_at: NOW,
+      started_at: Date.now(),
     });
   });
 
@@ -1296,7 +1604,7 @@ describe("the rpc stream", () => {
       kind: "tool-call",
       tool: "think",
       target: "think",
-      started_at: NOW,
+      started_at: Date.now(),
     });
   });
 
@@ -1319,8 +1627,7 @@ describe("the rpc stream", () => {
       ["bun"],
     );
 
-    const aborting = () =>
-      (proc as unknown as { aborting: boolean }).aborting;
+    const aborting = () => (proc as unknown as { aborting: boolean }).aborting;
 
     expect(aborting()).toBe(false);
     try {
@@ -1333,16 +1640,32 @@ describe("the rpc stream", () => {
   }, 10000);
 
   test("describeActivity formats all four kinds", () => {
-    expect(describeActivity({ kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW })).toBe(
-      "tool: bash — bun test (0s)",
+    expect(
+      describeActivity({
+        kind: "tool-call",
+        tool: "bash",
+        target: "bun test",
+        started_at: Date.now(),
+      }),
+    ).toBe("tool: bash — bun test (0s)");
+    expect(
+      describeActivity({
+        kind: "tool-call",
+        tool: "bash",
+        target: "bash",
+        started_at: Date.now(),
+      }),
+    ).toBe("tool: bash (0s)");
+    expect(describeActivity({ kind: "thinking", started_at: Date.now() })).toBe(
+      "thinking (0s)",
     );
     expect(
-      describeActivity({ kind: "tool-call", tool: "bash", target: "bash", started_at: NOW }),
-    ).toBe("tool: bash (0s)");
-    expect(describeActivity({ kind: "thinking", started_at: NOW })).toBe("thinking (0s)");
-    expect(describeActivity({ kind: "compacting", reason: "overflow", started_at: NOW })).toBe(
-      "compacting (overflow) (0s)",
-    );
+      describeActivity({
+        kind: "compacting",
+        reason: "overflow",
+        started_at: Date.now(),
+      }),
+    ).toBe("compacting (overflow) (0s)");
     expect(describeActivity({ kind: "none" })).toBe("");
   });
 
@@ -1440,7 +1763,7 @@ describe("the rpc stream", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       sessionDir: "/tmp/s",
-      name: "000042 agent_worker",
+      name: "000042 worker",
       cwd: "/tmp/wt",
       systemPrompt: "/repo/orchestrator/prompts/WORKING.md",
       log: "/tmp/rpc.jsonl",
@@ -1455,15 +1778,22 @@ describe("the rpc stream", () => {
     expect(args[args.length - 2]).toBe("--append-system-prompt");
   });
 
-  test("each role is given its own system prompt", () => {
-    for (const role of ["agent_worker", "agent_reviewer"] as const) {
+  test("each state is given its own system prompt", () => {
+    for (const state of [
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "AGENT_REVIEWING",
+    ] as const) {
       const prompt = fs.readFileSync(
-        path.join(ORCHESTRATOR_DIR, "prompts", `${ROLE_STATE[role]}.md`),
+        path.join(ORCHESTRATOR_DIR, "prompts", `${state}.md`),
         "utf-8",
       );
       expect(prompt).toContain("result");
-      expect(prompt.includes("findings")).toBe(role === "agent_reviewer");
-      expect(prompt.includes("Commit as you go")).toBe(role === "agent_worker");
+      expect(prompt.includes("findings")).toBe(
+        state === "PLAN_REVIEWING" || state === "AGENT_REVIEWING",
+      );
+      expect(prompt.includes("Commit as you go")).toBe(state === "WORKING");
     }
   });
 });
@@ -1482,6 +1812,7 @@ describe("the scheduler", () => {
       workspace: null,
       todos: [],
       checks: [],
+      plan_feedback: [],
       failures: [],
       task_graph_updates: [],
       ...overrides,
@@ -1510,6 +1841,7 @@ describe("the scheduler", () => {
     slot: 1,
     enabled: true,
     write: DEFAULT_WRITE,
+    roles: [...ALL_ROLES],
   });
 
   test("blocking counts every transitive dependent", () => {
@@ -1584,7 +1916,10 @@ describe("the scheduler", () => {
 
   test("a held task is never a candidate", () => {
     const queue = candidates(
-      graph(task({ id: "000001", state: "HELD", held_reason: "a wall" })),
+      graph(
+        task({ id: "000001", state: "HELD_WORK", held_reason: "a wall" }),
+        task({ id: "000002", state: "HELD_PLAN", held_reason: "no plan" }),
+      ),
       new Set(),
     );
     expect(queue).toEqual([]);
@@ -1643,6 +1978,43 @@ describe("the scheduler", () => {
     expect(dispatches[0]!.candidate.task_id).toBe("000001");
   });
 
+  test("a candidate carries the role its state claims", () => {
+    const queue = candidates(
+      graph(
+        task({ id: "000001", state: "READY_PLAN_REVIEW" }),
+        task({ id: "000002", state: "READY_PLAN" }),
+      ),
+      new Set(),
+    );
+
+    expect(queue.map((c) => c.role)).toEqual(["reviewer", "planner"]);
+  });
+
+  test("a slot that may not take the candidate's role is skipped", () => {
+    const free: AgentSlot[] = [
+      { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
+      slot("pi-anthropic-m-2"),
+    ];
+    const candidate = candidates(graph(task({ id: "000001" })), new Set())[0]!;
+
+    expect(pickSlot(free, candidate, true)!.name).toBe("pi-anthropic-m-2");
+  });
+
+  test("nothing is planned for a role the pool cannot serve", () => {
+    const free: AgentSlot[] = [
+      { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
+    ];
+
+    expect(
+      pickSlot(
+        free,
+        candidates(graph(task({ id: "000001" })), new Set())[0]!,
+        true,
+      ),
+    ).toBeNull();
+    expect(plan(graph(task({ id: "000001" })), new Set(), free)).toEqual([]);
+  });
+
   test("nothing is planned when the pool is saturated", () => {
     expect(plan(graph(task({ id: "000001" })), new Set(), [])).toEqual([]);
   });
@@ -1680,6 +2052,7 @@ describe("the manager inbox", () => {
       workspace: null,
       todos: [],
       checks: [],
+      plan_feedback: [],
       failures: [],
       task_graph_updates: [],
       ...overrides,
@@ -1694,17 +2067,19 @@ describe("the manager inbox", () => {
     const rows = inbox(
       graph(
         task({ id: "000001", state: "NEW" }),
-        task({ id: "000002", state: "HELD", held_reason: "a wall" }),
+        task({ id: "000002", state: "HELD_WORK", held_reason: "a wall" }),
+        task({ id: "000003", state: "HELD_PLAN", held_reason: "no plan" }),
         task({
-          id: "000003",
+          id: "000004",
           state: "READY_TASK_GRAPH_UPDATE",
           task_graph_updates: [{ op: "add", message: "m", done: false }],
         }),
-        task({ id: "000004", state: "READY_MANAGER_REVIEW" }),
+        task({ id: "000005", state: "READY_MANAGER_REVIEW" }),
       ),
     );
 
     expect(rows.map((row) => row.task_id)).toEqual([
+      "000005",
       "000004",
       "000003",
       "000002",
@@ -1713,7 +2088,8 @@ describe("the manager inbox", () => {
     expect(rows.map((row) => row.rank)).toEqual([
       "READY_MANAGER_REVIEW",
       "READY_TASK_GRAPH_UPDATE",
-      "HELD",
+      "HELD_PLAN",
+      "HELD_WORK",
       "NEW",
     ]);
   });
@@ -1754,7 +2130,7 @@ describe("the manager inbox", () => {
       graph(
         task({
           id: "000001",
-          state: "HELD",
+          state: "HELD_WORK",
           held_reason: "the staging database is down",
           state_entered: "2026-07-29T01:00:00Z",
         }),
@@ -1859,9 +2235,9 @@ describe("resetting a result", () => {
 
   test("a resumed assignment comes back with no result to stand on", () => {
     const filePath = write(assignment);
-    resetResult(filePath, "agent_worker");
+    resetResult(filePath, "WORKING");
 
-    const { meta, body } = readAssignment(filePath, "agent_worker");
+    const { meta, body } = readAssignment(filePath, "WORKING");
     expect(meta.result).toBeNull();
     expect(meta.checks).toEqual(["bun test"]);
     expect(body).toContain("I ran the check and it passed.");
@@ -1869,7 +2245,7 @@ describe("resetting a result", () => {
 
   test("nothing else in the file moves", () => {
     const filePath = write(assignment);
-    resetResult(filePath, "agent_worker");
+    resetResult(filePath, "WORKING");
 
     expect(fs.readFileSync(filePath, "utf-8")).toBe(
       assignment.replace("result:\n  type: submit", "result: null"),
@@ -1891,7 +2267,7 @@ describe("resetting a result", () => {
       ),
     );
 
-    resetResult(filePath, "agent_reviewer");
+    resetResult(filePath, "AGENT_REVIEWING");
     expect(fs.readFileSync(filePath, "utf-8")).toBe(
       assignment.replace("result:\n  type: submit", "result: null"),
     );
@@ -1904,7 +2280,7 @@ describe("resetting a result", () => {
     );
     const filePath = write(already);
 
-    resetResult(filePath, "agent_worker");
+    resetResult(filePath, "WORKING");
     expect(fs.readFileSync(filePath, "utf-8")).toBe(already);
   });
 
@@ -1912,7 +2288,7 @@ describe("resetting a result", () => {
     const filePath = write(
       assignment.replace("result:\n  type: submit", "x: 1"),
     );
-    expect(() => resetResult(filePath, "agent_worker")).toThrow(/result/);
+    expect(() => resetResult(filePath, "WORKING")).toThrow(/result/);
   });
 });
 

@@ -5,10 +5,12 @@ import {
   type TaskId,
   type TaskMeta,
   type TaskState,
+  type ValidState,
   isProcessAlive,
   openCount,
 } from "./task.ts";
 import {
+  CLAIM_TARGETS,
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
@@ -24,8 +26,10 @@ import {
   loadAgents,
 } from "./agents.ts";
 import {
+  type AgentResult,
   type AssignmentMeta,
-  type AssignmentResult,
+  type PlanResults,
+  type PlanReviewResults,
   readAssignment,
   repair,
   resetResult,
@@ -57,8 +61,9 @@ import {
   sandbox,
 } from "./sandbox.ts";
 import {
-  ROLE_STATE,
   Runtime,
+  STATE_ROLE,
+  type ClaimState,
   type Role,
   branchName,
   snapshot,
@@ -68,7 +73,11 @@ import type { TemplateVars } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
 import { SchemaError } from "./schema.ts";
 
-const ABORTABLE_STATES: TaskState[] = ["MANAGER_REVIEWING", "READY_WORK"];
+const ABORTABLE_STATES: TaskState[] = [
+  "MANAGER_REVIEWING",
+  "READY_WORK",
+  "READY_PLAN",
+];
 
 export const BACKOFF_START_MS = 1000;
 export const BACKOFF_CAP_MS = 64000;
@@ -187,6 +196,9 @@ export class Server {
     const server = new Server(options, loadAgents(options.agentsPath));
 
     server.runtime.log(`starting against ${repo} (base ${server.base})`);
+    for (const filePath of server.prompts.cachedFiles()) {
+      server.runtime.log(`cached ${filePath}`);
+    }
     server.recoverWorkspaces();
     server.reattach();
     server.listen();
@@ -283,6 +295,14 @@ export class Server {
     this.problems = problems;
 
     return tasks;
+  }
+
+  reloadPrompts(): string[] {
+    const paths = this.prompts.reload();
+    for (const filePath of paths) {
+      this.runtime.log(`cached ${filePath}`);
+    }
+    return paths;
   }
 
   get schedulerEnabled(): boolean {
@@ -568,9 +588,7 @@ export class Server {
   }
 
   private roleOf(state: TaskState): Role {
-    return state === "READY_AGENT_REVIEW" || state === "AGENT_REVIEWING"
-      ? "agent_reviewer"
-      : "agent_worker";
+    return STATE_ROLE[CLAIM_TARGETS[state as ValidState] as ClaimState]!;
   }
 
   private launch(taskId: TaskId, slot: AgentSlot, cwd: string): string[] {
@@ -586,15 +604,21 @@ export class Server {
     );
   }
 
-  private spawn(taskId: TaskId, role: Role, slot: AgentSlot, cwd: string) {
+  private spawn(
+    taskId: TaskId,
+    role: Role,
+    state: ClaimState,
+    slot: AgentSlot,
+    cwd: string,
+  ) {
     return new PiProcess(
       {
         provider: slot.provider,
         model: slot.model,
         sessionDir: this.runtime.sessionDir(taskId, role),
-        name: `${taskId} ${role}`,
+        name: `${taskId} ${state}`,
         cwd,
-        systemPrompt: this.prompts.systemPrompt(role),
+        systemPrompt: this.prompts.systemPrompt(state),
         log: this.runtime.rpcLog(taskId),
       },
       this.piCommand,
@@ -620,6 +644,7 @@ export class Server {
     }
 
     const role = worker.role;
+    const claimed = CLAIM_TARGETS[task.state as ValidState] as ClaimState;
     this.runtime.prepare(task.id);
     const worktree = this.runtime.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
@@ -628,9 +653,9 @@ export class Server {
       git.addWorkspace(this.repo, branch, worktree, this.base);
     }
 
-    worker.dispatched = this.writeAssignment(task, role, worktree);
+    worker.dispatched = this.writeAssignment(task, claimed, worktree);
 
-    const process = this.spawn(task.id, role, slot, worktree);
+    const process = this.spawn(task.id, role, claimed, slot, worktree);
     worker.process = process;
 
     const session = await process.newSession();
@@ -654,14 +679,20 @@ export class Server {
     const role = worker.role!;
     const live = this.runtime.assignment(task.id);
 
-    const process = this.spawn(task.id, role, slot, workspace.worktree);
+    const process = this.spawn(
+      task.id,
+      role,
+      "WORKING",
+      slot,
+      workspace.worktree,
+    );
     worker.process = process;
 
     await process.switchSession(workspace.session!);
     worker.session = workspace.session;
     this.requireStill(task, slot);
-    if (role === "agent_worker") {
-      resetResult(live, role);
+    if (role === "worker") {
+      resetResult(live, "WORKING");
     }
     this.transition(
       task.id,
@@ -676,7 +707,7 @@ export class Server {
       slot.name,
     );
 
-    worker.dispatched = readAssignment(live, role).meta;
+    worker.dispatched = readAssignment(live, "WORKING").meta;
     worker.state = "BUSY";
 
     await process.prompt(
@@ -699,7 +730,7 @@ export class Server {
 
   private writeAssignment(
     task: TaskMeta,
-    role: Role,
+    state: ClaimState,
     worktree: string,
   ): AssignmentMeta {
     const live = this.runtime.assignment(task.id);
@@ -712,21 +743,26 @@ export class Server {
       checks: task.checks.map((command) => ({ command })),
     };
 
-    if (role === "agent_reviewer") {
+    if (state === "AGENT_REVIEWING") {
       vars.worktree = worktree;
       vars.range = git.range(worktree, this.base);
+      vars.todos = task.todos.map((todo) => ({
+        message: todo.message,
+        done: todo.done,
+      }));
     } else {
       vars.todos = task.todos
         .filter((todo) => !todo.done)
         .map((todo) => ({ message: todo.message }));
     }
 
-    fs.writeFileSync(
-      live,
-      this.prompts.template(ROLE_STATE[role], vars),
-      "utf-8",
-    );
-    return readAssignment(live, role).meta;
+    if (state === "PLANNING") {
+      vars.plan_feedback = task.plan_feedback.map((finding) => ({ finding }));
+      vars.plan_feedback_head = task.plan_feedback.length === 0 ? [] : [{}];
+    }
+
+    fs.writeFileSync(live, this.prompts.template(state, vars), "utf-8");
+    return readAssignment(live, state).meta;
   }
 
   private async awaitSettle(worker: Worker): Promise<void> {
@@ -814,16 +850,16 @@ export class Server {
     stopReason: StopReason | null,
   ): Promise<void> {
     const taskId = worker.task_id!;
-    const role = worker.role!;
+    const state = this.tasks().get(taskId)!.state as ClaimState;
     const live = this.runtime.assignment(taskId);
 
     let read: AssignmentMeta;
     try {
-      read = readAssignment(live, role).meta;
+      read = readAssignment(live, state).meta;
     } catch (err) {
       const issues =
         err instanceof SchemaError ? err.issues : [(err as Error).message];
-      await this.raise(worker, "unreadable-result", issues.join("; "), {
+      await this.raise(worker, "unparsable-result", issues.join("; "), {
         issues: issues.map((message) => ({ message })),
       });
       return;
@@ -837,7 +873,7 @@ export class Server {
     }
 
     if (stopReason === "length" || meta.result === null) {
-      await this.raise(worker, "no-result", "");
+      await this.raise(worker, "missing-result", "");
       return;
     }
 
@@ -846,14 +882,28 @@ export class Server {
       return;
     }
 
-    if (role === "agent_reviewer") {
+    if (state === "PLANNING") {
+      if ("addTodos" in meta.result) {
+        await this.settlePlan(worker, meta.result);
+      }
+      return;
+    }
+
+    if (state === "PLAN_REVIEWING") {
+      if ("findings" in meta.result && !("delegations" in meta.result)) {
+        this.settlePlanReview(worker, meta.result);
+      }
+      return;
+    }
+
+    if (state === "AGENT_REVIEWING") {
       this.submitReview(worker, meta.result);
       return;
     }
 
     const open = openCount(meta.todos);
     if (open > 0) {
-      await this.raise(worker, "open-todos", String(open), { open });
+      await this.raise(worker, "incomplete-todos", String(open), { open });
       return;
     }
 
@@ -900,7 +950,109 @@ export class Server {
     };
   }
 
-  private submitReview(worker: Worker, result: AssignmentResult): void {
+  private touchedWorktree(
+    task: TaskMeta,
+  ): { detail: string; vars: TemplateVars } | null {
+    const worktree = task.workspace?.worktree ?? this.runtime.worktree(task.id);
+    const dirty = git.uncommitted(worktree);
+    const commits = git.commitCount(worktree, this.base);
+
+    if (dirty.length === 0 && commits === 0) {
+      return null;
+    }
+
+    return {
+      detail: [
+        commits === 0 ? null : `${commits} commit(s) on the branch`,
+        dirty.length === 0 ? null : `${dirty.length} uncommitted file(s)`,
+      ]
+        .filter((part) => part !== null)
+        .join("; "),
+      vars: {
+        commits: commits === 0 ? [] : [{}],
+        dirty: dirty.length === 0 ? [] : [{ status: git.statusOf(dirty) }],
+        base: this.base,
+      },
+    };
+  }
+
+  private async settlePlan(
+    worker: Worker,
+    result: Extract<PlanResults, { type: "submit" }>,
+  ): Promise<void> {
+    const taskId = worker.task_id!;
+    const task = this.tasks().get(taskId)!;
+    const open = task.todos.filter((todo) => !todo.done);
+    const distinct = new Set(result.removeTodos);
+
+    if (
+      distinct.size !== result.removeTodos.length ||
+      result.removeTodos.some((index) => index >= open.length)
+    ) {
+      await this.raise(
+        worker,
+        "invalid-remove-todo",
+        open.length === 0
+          ? "the task has no todos to remove"
+          : `an index outside 0..${open.length - 1} or a repeated index`,
+      );
+      return;
+    }
+
+    if (
+      open.length - result.removeTodos.length + result.addTodos.length ===
+      0
+    ) {
+      await this.raise(worker, "missing-plan", "");
+      return;
+    }
+
+    const issue = this.touchedWorktree(task);
+    if (issue !== null) {
+      await this.raise(worker, "modified-worktree", issue.detail, issue.vars);
+      return;
+    }
+
+    for (const index of [...result.removeTodos].sort((a, b) => b - a)) {
+      this.transition(taskId, "removeTodo", { index }, "server");
+    }
+    for (const message of result.addTodos) {
+      this.transition(taskId, "addTodo", { message }, "server");
+    }
+
+    worker.process!.close();
+    this.transition(taskId, "submit", {}, worker.slot.name);
+    this.finish(worker);
+  }
+
+  private settlePlanReview(
+    worker: Worker,
+    result: Extract<PlanReviewResults, { type: "submit" }>,
+  ): void {
+    const taskId = worker.task_id!;
+    const task = this.tasks().get(taskId)!;
+    const issue = this.touchedWorktree(task);
+    if (issue !== null) {
+      this.raise(worker, "modified-worktree", issue.detail, issue.vars);
+      return;
+    }
+
+    worker.process!.close();
+
+    if (result.findings.length === 0) {
+      this.transition(taskId, "submit", {}, worker.slot.name);
+    } else {
+      this.transition(
+        taskId,
+        "addFeedback",
+        { findings: result.findings },
+        "server",
+      );
+    }
+    this.finish(worker);
+  }
+
+  private submitReview(worker: Worker, result: AgentResult): void {
     const taskId = worker.task_id!;
     const task = this.tasks().get(taskId)!;
     const branch = task.workspace!.branch;
@@ -917,9 +1069,8 @@ export class Server {
 
     if (findings.length === 0) {
       this.transition(taskId, "submit", {}, worker.slot.name);
-    }
-    for (const finding of findings) {
-      this.transition(taskId, "addTodo", { message: finding }, "server");
+    } else {
+      this.transition(taskId, "addFeedback", { findings }, "server");
     }
 
     this.finish(worker);
@@ -958,7 +1109,8 @@ export class Server {
 
     worker.issues.set(name, used + 1);
     worker.state = "BUSY";
-    await worker.process.prompt(this.prompts.issue(name, worker.role!, vars));
+    const state = this.tasks().get(taskId)!.state as ClaimState;
+    await worker.process.prompt(this.prompts.issue(name, state, vars));
     this.track(worker, this.awaitSettle(worker));
   }
 

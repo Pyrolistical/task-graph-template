@@ -4,12 +4,15 @@ import { createTask } from "./task.ts";
 import { applyTransition } from "./transition.ts";
 import { git, gitOrThrow } from "./git.ts";
 import { tempDir } from "./temp.ts";
+import type { ClaimState } from "./runtime.ts";
 
 const REPO_ROOT = path.join(import.meta.dir, "..");
 
 export interface Step {
   todos_done?: boolean;
   submit?: boolean;
+  add_todos?: string[];
+  remove_todos?: number[];
   findings?: string[];
   delegations?: string[];
   blocked?: string;
@@ -18,6 +21,7 @@ export interface Step {
   notes?: string;
   commit?: { path: string; contents: string };
   write?: { path: string; contents: string };
+  clean?: string[];
   edit_header?: Record<string, string>;
   stop_reason?: string;
   loop?: number;
@@ -28,10 +32,7 @@ export interface Step {
   break_git?: boolean;
 }
 
-export type Plan = Record<
-  string,
-  { agent_worker?: Step[]; agent_reviewer?: Step[] }
->;
+export type Plan = Record<string, Partial<Record<ClaimState, Step[]>>>;
 
 export const FAKE_PI = `#!/usr/bin/env bun
 import fs from "node:fs";
@@ -44,9 +45,15 @@ const flag = (name) => {
 };
 
 const sessionDir = flag("--session-dir");
-const [taskId, role] = (flag("--name") ?? "").split(" ");
+const [taskId, state] = (flag("--name") ?? "").split(" ");
+const role = {
+  PLANNING: "planner",
+  PLAN_REVIEWING: "reviewer",
+  WORKING: "worker",
+  AGENT_REVIEWING: "reviewer",
+}[state] ?? "worker";
 const plan = JSON.parse(fs.readFileSync(process.env.FAKE_PI_PLAN, "utf-8"));
-const steps = (plan[taskId] ?? {})[role] ?? [];
+const steps = (plan[taskId] ?? {})[state] ?? [];
 const counter = path.join(sessionDir, "prompt-count");
 
 let sessionFile = null;
@@ -93,14 +100,37 @@ function list(name, values) {
         values.map((v) => "    - " + JSON.stringify(v)).join("\\n");
 }
 
+function ints(name, values) {
+  return values.length === 0
+    ? "  " + name + ": []"
+    : "  " + name + ":\\n" + values.map((v) => "    - " + v).join("\\n");
+}
+
 function submitBlock(step) {
-  if (role !== "agent_reviewer") return "result:\\n  type: submit";
-  return [
-    "result:",
-    "  type: submit",
-    list("findings", step.findings ?? []),
-    list("delegations", step.delegations ?? []),
-  ].join("\\n");
+  if (state === "PLANNING") {
+    return [
+      "result:",
+      "  type: submit",
+      list("addTodos", step.add_todos ?? []),
+      ints("removeTodos", step.remove_todos ?? []),
+    ].join("\\n");
+  }
+  if (state === "PLAN_REVIEWING") {
+    return [
+      "result:",
+      "  type: submit",
+      list("findings", step.findings ?? []),
+    ].join("\\n");
+  }
+  if (state === "AGENT_REVIEWING") {
+    return [
+      "result:",
+      "  type: submit",
+      list("findings", step.findings ?? []),
+      list("delegations", step.delegations ?? []),
+    ].join("\\n");
+  }
+  return "result:\\n  type: submit";
 }
 
 function act(step) {
@@ -121,7 +151,8 @@ function act(step) {
       "result:\\n  type: blocked\\n  message: " + JSON.stringify(step.blocked),
     );
   }
-  if (step.submit) text = setResult(text, submitBlock(step));
+  if (step.submit || step.add_todos)
+    text = setResult(text, submitBlock(step));
   for (const [key, value] of Object.entries(step.edit_header ?? {})) {
     text = text.replace(new RegExp("^" + key + ": .*$", "m"), key + ": " + value);
   }
@@ -142,6 +173,12 @@ function act(step) {
 
   if (step.write) {
     fs.writeFileSync(path.join(process.cwd(), step.write.path), step.write.contents);
+  }
+
+  if (step.clean) {
+    for (const file of step.clean) {
+      fs.rmSync(path.join(process.cwd(), file), { force: true });
+    }
   }
 
   if (step.break_git) {
@@ -412,7 +449,7 @@ export function setPlan(fixture: Fixture, plan: Plan): void {
   process.env.FAKE_PI_PLAN = fixture.planPath;
 }
 
-export function readyTask(
+export function unplannedTask(
   fixture: Fixture,
   title: string,
   checks: string[] = [],
@@ -424,6 +461,25 @@ export function readyTask(
   applyTransition(fixture.tasksDir, id, "noDependencies", {});
   gitOrThrow(fixture.repo, ["add", "-A"]);
   gitOrThrow(fixture.repo, ["commit", "-q", "-m", `add task ${id}`]);
+  return id;
+}
+
+export function readyTask(
+  fixture: Fixture,
+  title: string,
+  checks: string[] = [],
+): string {
+  const id = unplannedTask(fixture, title, checks);
+  applyTransition(fixture.tasksDir, id, "claim", {
+    agentName: "planner",
+    pid: process.pid,
+  });
+  applyTransition(fixture.tasksDir, id, "submit", {});
+  applyTransition(fixture.tasksDir, id, "claim", {
+    agentName: "plan-reviewer",
+    pid: process.pid,
+  });
+  applyTransition(fixture.tasksDir, id, "submit", {});
   return id;
 }
 

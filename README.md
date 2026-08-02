@@ -109,7 +109,7 @@ Overrides are per file, not per directory, so a project can replace `prompts/WOR
 }
 ```
 
-An entry is a model on a provider and how many of it may run at once. Slot names are derived rather than configured — `type-provider-model-slot`, numbered from 1 — so that pool is `pi-anthropic-claude-sonnet-4-5-1` through `-3`. A bad pool is rejected on load, not at the tenth dispatch: unknown keys, missing fields, a repeated `type`+`provider`+`model` triple and `slots < 1` all fail startup. See [Agents configuration](ORCHESTRATOR.md#agents-configuration).
+An entry is a model on a provider and how many of it may run at once. Slot names are derived rather than configured — `type-provider-model-slot`, numbered from 1 — so that pool is `pi-anthropic-claude-sonnet-4-5-1` through `-3`. `roles` narrows which agent roles the entry's slots may take — `worker`, `reviewer`, `planner` — and defaults to all three. A bad pool is rejected on load, not at the tenth dispatch: unknown keys, missing fields, a repeated `type`+`provider`+`model` triple, `slots < 1` and an unknown role all fail startup. See [Agents configuration](ORCHESTRATOR.md#agents-configuration).
 
 ### What an agent may write
 
@@ -197,13 +197,14 @@ workspace:
   branch: "task/000042"
   worktree: "/tmp/task-graph-server/-home-user-project/000042/worktree"
   agent: "agent-1"
-  session: "/tmp/task-graph-server/-home-user-project/000042/session/agent_worker/019f.jsonl"
+  session: "/tmp/task-graph-server/-home-user-project/000042/session/worker/019f.jsonl"
 todos:
   - at: "2026-07-27T12:30:00Z"
     message: "fix null handling in parser"
     done: true
 checks:
   - "bun test"
+plan_feedback: []
 failures:
   - type: check
     command: "bun test"
@@ -220,25 +221,26 @@ task_graph_updates:
 ---
 ```
 
-| Field                | Type                              | Written by                                        |
-| -------------------- | --------------------------------- | ------------------------------------------------- |
-| `id`                 | quoted six-digit string           | `createTask()`                                    |
-| `title`              | non-empty string                  | `createTask()`                                    |
-| `state`              | one of the states below           | every transition                                  |
-| `state_entered`      | ISO timestamp or null             | every transition, including self-loops            |
-| `depends_on`         | list of quoted IDs                | `addDependencies`, `removeDependencies`, closing  |
-| `claimed_by`         | string or null                    | `claim`, `release`, cleared on unclaimed states   |
-| `claimed_pid`        | integer or null                   | `claim`, `release`, cleared on unclaimed states   |
-| `held_reason`        | string or null                    | `hold`, cleared by every transition out of `HELD` |
-| `workspace`          | mapping or null                   | `claim`, cleared on `CLOSED`                      |
-| `todos`              | `{ at, message, done }`           | `addTodo`, `doneTodo`                             |
-| `checks`             | list of command strings           | `addCheck`                                        |
-| `failures`           | `{ type, ... }`                   | `fail`, cleared by `submit` and `hold`            |
-| `task_graph_updates` | `{ op, task_id?, message, done }` | `addTaskGraph`, `doneTaskGraph`                   |
+| Field                | Type                              | Written by                                                            |
+| -------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `id`                 | quoted six-digit string           | `createTask()`                                                        |
+| `title`              | non-empty string                  | `createTask()`                                                        |
+| `state`              | one of the states below           | every transition                                                      |
+| `state_entered`      | ISO timestamp or null             | every transition, including self-loops                                |
+| `depends_on`         | list of quoted IDs                | `addDependencies`, `removeDependencies`, closing                      |
+| `claimed_by`         | string or null                    | `claim`, `release`, cleared on unclaimed states                       |
+| `claimed_pid`        | integer or null                   | `claim`, `release`, cleared on unclaimed states                       |
+| `held_reason`        | string or null                    | `hold`, cleared by every transition out of a held state               |
+| `workspace`          | mapping or null                   | `claim`, cleared on `CLOSED`                                          |
+| `todos`              | `{ at, message, done }`           | `addTodo`, `removeTodo`, `doneTodo`                                   |
+| `checks`             | list of command strings           | `addCheck`                                                            |
+| `plan_feedback`      | list of strings                   | `addFeedback` from `PLAN_REVIEWING`, cleared on entering `READY_WORK` |
+| `failures`           | `{ type, ... }`                   | `fail`, cleared by `submit` and `hold`                                |
+| `task_graph_updates` | `{ op, task_id?, message, done }` | `addTaskGraph`, `doneTaskGraph`                                       |
 
 `claimed_by` and `claimed_pid` must both be set or both be null.
 
-`held_reason` is non-null if and only if the task is `HELD`.
+`held_reason` is non-null if and only if the task is `HELD_PLAN` or `HELD_WORK`.
 
 `workspace` is the execution context of a task: the `branch` and `worktree` the work happens in, the `agent` that was handed it, and the `session` file to resume, which is null when the claim carries no session. It is `null` before the first claim, so `workspace != null` is also the answer to "has this task been started". A `claim` that carries no workspace arguments leaves the recorded one alone, which is how a check or a review keeps the implementer's session reachable.
 
@@ -289,26 +291,28 @@ applyTransition("tasks", "000001", "addTodo", { message: "fix null handling" });
 
 #### Available transitions
 
-| Transition           | Args                                               | Description                                        |
-| -------------------- | -------------------------------------------------- | -------------------------------------------------- |
-| `addDependencies`    | `{ taskIds }`                                      | Add dependency tasks                               |
-| `removeDependencies` | `{ taskIds }`                                      | Remove dependencies manually                       |
-| `noDependencies`     | _(none)_                                           | Declare the task has no dependencies               |
-| `claim`              | `{ agentName, pid, branch?, worktree?, session? }` | Claim a task for work, check, or review            |
-| `release`            | _(none)_                                           | Release a claim whose process has died             |
-| `submit`             | _(none)_                                           | Submit work for checks, or a review for its check  |
-| `pass`               | _(none)_                                           | Checks or review passed                            |
-| `fail`               | `{ failures }`                                     | A check failed; send the work back                 |
-| `hold`               | `{ reason }`                                       | Park a task that cannot proceed                    |
-| `resume`             | _(none)_                                           | Return a held task to `READY_WORK`                 |
-| `addTodo`            | `{ message }`                                      | File something that must be fixed                  |
-| `doneTodo`           | `{ index }`                                        | Mark a todo done                                   |
-| `addCheck`           | `{ command }`                                      | Declare an automated check                         |
-| `addTaskGraph`       | `{ op: "add", message }`                           | Queue a new task                                   |
-| `addTaskGraph`       | `{ op: "update" \| "delete", taskId, message }`    | Queue a change to an existing task                 |
-| `doneTaskGraph`      | `{ index }`                                        | Mark a task graph update done                      |
-| `merged`             | _(none)_                                           | The branch landed on the base                      |
-| `abort`              | _(none)_                                           | The task is being thrown away; the graph was wrong |
+| Transition           | Args                                               | Description                                                                                                                                                                                             |
+| -------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `addDependencies`    | `{ taskIds }`                                      | Add dependency tasks                                                                                                                                                                                    |
+| `removeDependencies` | `{ taskIds }`                                      | Remove dependencies manually                                                                                                                                                                            |
+| `noDependencies`     | _(none)_                                           | Declare the task has no dependencies                                                                                                                                                                    |
+| `claim`              | `{ agentName, pid, branch?, worktree?, session? }` | Claim a task for planning, work, checks, or review                                                                                                                                                      |
+| `release`            | _(none)_                                           | Release a claim whose process has died                                                                                                                                                                  |
+| `submit`             | _(none)_                                           | Submit a plan for its review, work for checks, or a review for its check                                                                                                                                |
+| `pass`               | _(none)_                                           | The checks passed                                                                                                                                                                                       |
+| `fail`               | `{ failures }`                                     | A check failed; send the work back                                                                                                                                                                      |
+| `hold`               | `{ reason }`                                       | Park a task that cannot proceed — `HELD_PLAN` from planning, `HELD_WORK` from work                                                                                                                      |
+| `resume`             | _(none)_                                           | Return a held task to the phase it was held from — `READY_PLAN` from `HELD_PLAN`, `READY_WORK` from `HELD_WORK`                                                                                         |
+| `addTodo`            | `{ message }`                                      | File something that must be fixed                                                                                                                                                                       |
+| `removeTodo`         | `{ index }`                                        | Remove a todo by index (a planner replacing a decided todo)                                                                                                                                             |
+| `addFeedback`        | `{ findings }`                                     | Send a review's findings back — from `AGENT_REVIEWING` each becomes a todo and the task returns to `READY_WORK`; from `PLAN_REVIEWING` they become `plan_feedback` and the task returns to `READY_PLAN` |
+| `doneTodo`           | `{ index }`                                        | Mark a todo done                                                                                                                                                                                        |
+| `addCheck`           | `{ command }`                                      | Declare an automated check                                                                                                                                                                              |
+| `addTaskGraph`       | `{ op: "add", message }`                           | Queue a new task                                                                                                                                                                                        |
+| `addTaskGraph`       | `{ op: "update" \| "delete", taskId, message }`    | Queue a change to an existing task                                                                                                                                                                      |
+| `doneTaskGraph`      | `{ index }`                                        | Mark a task graph update done                                                                                                                                                                           |
+| `merged`             | _(none)_                                           | The branch landed on the base                                                                                                                                                                           |
+| `abort`              | _(none)_                                           | The task is being thrown away; the graph was wrong                                                                                                                                                      |
 
 Indices are 0-based and refer to positions in the corresponding frontmatter list.
 
@@ -318,7 +322,7 @@ Every argument is validated before anything is written, so a rejected transition
 
 `failures` is the whole list the checker produced, each entry carrying the output tail of one failing command.
 
-`merged` and `abort` are the two ways out of `MANAGER_REVIEWING`, and the graph cannot tell them apart on its own — whether the branch landed is a fact about git. `applyTransition()` enforces the part it can see (`abort` requires queued task graph updates; `merged` requires no open todos) and the orchestrator proves the rest before it applies either: `merged` only after the branch is an ancestor of the base, `abort` only while it is not. `abort` is also allowed from `READY_WORK`, where the task is queued and unclaimed and the judgement is the same one made a state early.
+`merged` and `abort` are the two ways out of `MANAGER_REVIEWING`, and the graph cannot tell them apart on its own — whether the branch landed is a fact about git. `applyTransition()` enforces the part it can see (`abort` requires queued task graph updates; `merged` requires no open todos) and the orchestrator proves the rest before it applies either: `merged` only after the branch is an ancestor of the base, `abort` only while it is not. `abort` is also allowed from `READY_WORK` and `READY_PLAN`, where the task is queued and unclaimed and the judgement is the same one made a state early.
 
 #### Examples
 
@@ -326,7 +330,7 @@ Every argument is validated before anything is written, so a rejected transition
 const apply = (id: string, name: TransitionName, args: TransitionArgs = {}) =>
   applyTransition("tasks", id, name, args);
 
-// A task with no dependencies (NEW → READY_WORK)
+// A task with no dependencies (NEW → READY_PLAN)
 apply("000001", "noDependencies");
 
 // Add dependencies (NEW → BLOCKED, or self-loop while already BLOCKED)
@@ -388,7 +392,7 @@ apply("000001", "release");
 
 - `pid` is the claiming process, which is what claim ownership and stale-process detection are read from.
 - Self-loop transitions update `state_entered` without changing state.
-- When a task reaches `CLOSED`, its file is moved to `tasks/closed/` and its ID is removed from every active dependent. A dependent whose last dependency was removed moves to `READY_WORK`.
+- When a task reaches `CLOSED`, its file is moved to `tasks/closed/` and its ID is removed from every active dependent. A dependent whose last dependency was removed moves to `READY_PLAN`.
 - `release` only works once the claiming process is gone. A live claim cannot be taken from its owner.
 
 ## Task State Machine
@@ -403,10 +407,28 @@ stateDiagram-v2
     NEW --> NEW : addTodo
     NEW --> NEW : addCheck
     NEW --> BLOCKED : addDependencies
-    NEW --> READY_WORK : noDependencies
+    NEW --> READY_PLAN : noDependencies
     BLOCKED --> BLOCKED : addDependencies
     BLOCKED --> BLOCKED : removeDependencies (deps remain)
-    BLOCKED --> READY_WORK : removeDependencies (last)
+    BLOCKED --> READY_PLAN : removeDependencies (last)
+
+    READY_PLAN --> BLOCKED : addDependencies
+    READY_PLAN --> READY_PLAN : addTodo
+    READY_PLAN --> READY_PLAN : addCheck
+    READY_PLAN --> READY_PLAN : addTaskGraph
+    READY_PLAN --> READY_TASK_GRAPH_UPDATE : abort
+    READY_PLAN --> PLANNING : claim
+
+    PLANNING --> PLANNING : addTodo
+    PLANNING --> READY_PLAN_REVIEW : submit
+    PLANNING --> HELD_PLAN : hold
+    PLANNING --> READY_PLAN : release
+
+    READY_PLAN_REVIEW --> PLAN_REVIEWING : claim
+    PLAN_REVIEWING --> READY_WORK : submit
+    PLAN_REVIEWING --> READY_PLAN : addFeedback
+    PLAN_REVIEWING --> HELD_PLAN : hold
+    PLAN_REVIEWING --> READY_PLAN_REVIEW : release
 
     READY_WORK --> BLOCKED : addDependencies
     READY_WORK --> READY_WORK : addTodo
@@ -419,14 +441,20 @@ stateDiagram-v2
     WORKING --> WORKING : doneTodo
     WORKING --> WORKING : addCheck
     WORKING --> READY_CHECK : submit
-    WORKING --> HELD : hold
+    WORKING --> HELD_WORK : hold
     WORKING --> READY_WORK : release
 
-    HELD --> HELD : addCheck
-    HELD --> READY_WORK : resume
-    HELD --> READY_WORK : addTodo
-    HELD --> BLOCKED : addDependencies
-    HELD --> READY_TASK_GRAPH_UPDATE : addTaskGraph
+    HELD_PLAN --> HELD_PLAN : addCheck
+    HELD_PLAN --> READY_PLAN : resume
+    HELD_PLAN --> READY_PLAN : addTodo
+    HELD_PLAN --> BLOCKED : addDependencies
+    HELD_PLAN --> READY_TASK_GRAPH_UPDATE : addTaskGraph
+
+    HELD_WORK --> HELD_WORK : addCheck
+    HELD_WORK --> READY_WORK : resume
+    HELD_WORK --> READY_WORK : addTodo
+    HELD_WORK --> BLOCKED : addDependencies
+    HELD_WORK --> READY_TASK_GRAPH_UPDATE : addTaskGraph
 
     READY_CHECK --> CHECKING : claim
     CHECKING --> CHECKING : addCheck
@@ -435,9 +463,9 @@ stateDiagram-v2
     CHECKING --> READY_CHECK : release
 
     READY_AGENT_REVIEW --> AGENT_REVIEWING : claim
-    AGENT_REVIEWING --> READY_WORK : addTodo
+    AGENT_REVIEWING --> READY_WORK : addFeedback
     AGENT_REVIEWING --> READY_MANAGER_REVIEW : submit
-    AGENT_REVIEWING --> HELD : hold
+    AGENT_REVIEWING --> HELD_WORK : hold
     AGENT_REVIEWING --> READY_AGENT_REVIEW : release
 
     READY_MANAGER_REVIEW --> MANAGER_REVIEWING : claim
@@ -469,27 +497,33 @@ Every state belongs to exactly one role. A transition between two states of the 
 ```mermaid
 stateDiagram-v2
     [*] --> manager : create
-    manager --> implementer : noDependencies
+    manager --> planner : noDependencies
+    planner --> planreviewer : submit
+    planreviewer --> planner : addFeedback
+    planreviewer --> implementer : submit
     implementer --> checker : submit
     checker --> implementer : fail
     checker --> reviewer : pass
-    reviewer --> implementer : addTodo
+    reviewer --> implementer : addFeedback
     reviewer --> manager : submit, hold
     implementer --> manager : hold, addDependencies, abort
-    manager --> implementer : addTodo, resume
+    manager --> planner : addTodo, resume (held from planning)
+    manager --> implementer : addTodo, resume (held from work)
     manager --> [*] : merged, doneTaskGraph
 ```
 
-The manager is at both ends: it defines the task before anyone can work on it, and it is the only role that can close one. An `addTodo` from the reviewer or the manager is a finding, and it always sends the task back to the implementer; a `submit` from the reviewer means it found nothing.
+The manager is at both ends: it defines the task before anyone can work on it, and it is the only role that can close one. A task is planned before it is worked: the planner decomposes it into todos, the plan reviewer checks the todos against the acceptance criteria, and only a reviewed plan reaches the implementer. An `addFeedback` from the work reviewer files its findings as todos and sends the task back to the implementer; from the plan reviewer it becomes `plan_feedback` and sends the task back to the planner. An `addTodo` from the manager is a finding of its own.
 
-| Role          | States                                                                                           | Job                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| `manager`     | `NEW`, `BLOCKED`, `READY_MANAGER_REVIEW`, `MANAGER_REVIEWING`, `HELD`, the two task graph states | Defines the task, judges finished work, closes it, rewrites the graph. |
-| `implementer` | `READY_WORK`, `WORKING`                                                                          | Writes the commits and marks off todos.                                |
-| `checker`     | `READY_CHECK`, `CHECKING`                                                                        | Runs every declared check and reports the exit codes.                  |
-| `reviewer`    | `READY_AGENT_REVIEW`, `AGENT_REVIEWING`                                                          | Reads the commits and files what it found, or nothing.                 |
+| Role           | States                                                                                                             | Job                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `manager`      | `NEW`, `BLOCKED`, `READY_MANAGER_REVIEW`, `MANAGER_REVIEWING`, `HELD_PLAN`, `HELD_WORK`, the two task graph states | Defines the task, judges finished work, closes it, rewrites the graph. |
+| `planner`      | `READY_PLAN`, `PLANNING`                                                                                           | Decomposes the task into executable todos.                             |
+| `planreviewer` | `READY_PLAN_REVIEW`, `PLAN_REVIEWING`                                                                              | Checks the plan against the acceptance criteria.                       |
+| `implementer`  | `READY_WORK`, `WORKING`                                                                                            | Writes the commits and marks off todos.                                |
+| `checker`      | `READY_CHECK`, `CHECKING`                                                                                          | Runs every declared check and reports the exit codes.                  |
+| `reviewer`     | `READY_AGENT_REVIEW`, `AGENT_REVIEWING`                                                                            | Reads the commits and files what it found, or nothing.                 |
 
-Roles are a way to read the state machine; the state machine does not know about them. Under the orchestrator the manager is a Claude Code session, the implementer and the reviewer are dispatched agents, and the checker is the server itself — see [ORCHESTRATOR.md](ORCHESTRATOR.md).
+Roles are a way to read the state machine; the state machine does not know about them. Under the orchestrator the manager is a Claude Code session, the planner, the implementer and the reviewers are dispatched agents, and the checker is the server itself — see [ORCHESTRATOR.md](ORCHESTRATOR.md). The planner and the plan reviewer are both agents of the pool, and the plan reviewer is the same `reviewer` role as the work reviewer — the states differ, not the pool.
 
 Each role that holds a claim has the same shape: a `READY_*` state nothing owns yet, a claimed state entered by `claim`, and a `release` back to the ready state when the claiming process dies.
 
@@ -503,13 +537,46 @@ stateDiagram-v2
     NEW --> NEW : addTodo
     NEW --> NEW : addCheck
     NEW --> BLOCKED : addDependencies
-    NEW --> READY_WORK : noDependencies
+    NEW --> READY_PLAN : noDependencies
     BLOCKED --> BLOCKED : addDependencies
     BLOCKED --> BLOCKED : removeDependencies (deps remain)
-    BLOCKED --> READY_WORK : removeDependencies (last)
+    BLOCKED --> READY_PLAN : removeDependencies (last)
 ```
 
-`BLOCKED` is the one state with no actor: it clears itself when the last dependency is removed, which happens automatically when that dependency closes. A task also arrives in `BLOCKED` from `READY_WORK` or `HELD`, via `addDependencies`, when it turns out to be waiting on another one.
+`BLOCKED` is the one state with no actor: it clears itself when the last dependency is removed, which happens automatically when that dependency closes. A task also arrives in `BLOCKED` from `READY_PLAN`, `READY_WORK` or either held state, via `addDependencies`, when it turns out to be waiting on another one.
+
+#### planner: the plan
+
+```mermaid
+stateDiagram-v2
+    READY_PLAN --> READY_PLAN : addTodo
+    READY_PLAN --> READY_PLAN : addCheck
+    READY_PLAN --> READY_PLAN : addTaskGraph
+    READY_PLAN --> PLANNING : claim
+    READY_PLAN --> BLOCKED : addDependencies
+    READY_PLAN --> READY_TASK_GRAPH_UPDATE : abort
+    PLANNING --> PLANNING : addTodo
+    PLANNING --> READY_PLAN_REVIEW : submit
+    PLANNING --> HELD_PLAN : hold
+    PLANNING --> READY_PLAN : release
+```
+
+A task is planned before it is worked. The planner reads the goal and the acceptance criteria and writes the executable plan as its `result`: a `todos` list, each entry specific and verifiable enough for an implementer to execute without the planner present. Its todos are copied into the graph verbatim when the plan is accepted; an empty list is refused. The planner writes nothing and commits nothing — the server verifies the worktree is untouched at every settle.
+
+`READY_PLAN` is the state a task can be called off in before a slot is spent on it, by the same `abort` that ends a manager review. Like every abort it requires at least one queued task graph update to say what should replace it.
+
+#### planreviewer: the plan review
+
+```mermaid
+stateDiagram-v2
+    READY_PLAN_REVIEW --> PLAN_REVIEWING : claim
+    PLAN_REVIEWING --> READY_WORK : submit
+    PLAN_REVIEWING --> READY_PLAN : addFeedback
+    PLAN_REVIEWING --> HELD_PLAN : hold
+    PLAN_REVIEWING --> READY_PLAN_REVIEW : release
+```
+
+A peer reading the plan, not the code. Its `findings` are the gaps between the todos and the acceptance criteria; each goes back to the planner verbatim, and an empty list approves the plan and opens `READY_WORK`. The plan reviewer is the same dispatched `reviewer` as the work reviewer, in a different state.
 
 #### implementer: the work
 
@@ -525,13 +592,13 @@ stateDiagram-v2
     WORKING --> WORKING : doneTodo
     WORKING --> WORKING : addCheck
     WORKING --> READY_CHECK : submit
-    WORKING --> HELD : hold
+    WORKING --> HELD_WORK : hold
     WORKING --> READY_WORK : release
 ```
 
 Everything that sends work back lands in `READY_WORK`: a failed check, a finding from either review, a resumed hold. `submit` is the claim that no todo is open, and it is refused while one is.
 
-`READY_WORK` is also the last state a task can be called off in, by the same `abort` that ends a manager review: nothing holds it yet, so the manager can throw away a task it has decided was the wrong shape instead of spending a slot proving it. Like every abort it requires at least one queued task graph update to say what should replace it.
+`READY_WORK` and `READY_PLAN` are also the states a task can be called off in, by the same `abort` that ends a manager review: nothing holds them yet, so the manager can throw away a task it has decided was the wrong shape instead of spending a slot proving it. Like every abort it requires at least one queued task graph update to say what should replace it.
 
 #### checker: the checks
 
@@ -551,9 +618,9 @@ The only mechanical role. Every check runs on every entry, `pass` if they all ex
 ```mermaid
 stateDiagram-v2
     READY_AGENT_REVIEW --> AGENT_REVIEWING : claim
-    AGENT_REVIEWING --> READY_WORK : addTodo
+    AGENT_REVIEWING --> READY_WORK : addFeedback
     AGENT_REVIEWING --> READY_MANAGER_REVIEW : submit
-    AGENT_REVIEWING --> HELD : hold
+    AGENT_REVIEWING --> HELD_WORK : hold
     AGENT_REVIEWING --> READY_AGENT_REVIEW : release
 ```
 
@@ -577,15 +644,21 @@ Only work that survived both the checks and the peer arrives here, and this is t
 
 #### manager: held
 
-`HELD` is where a task waits on a person. It is a state rather than a flag so that a dispatcher pulling from `READY_WORK` cannot pick it up by forgetting to check something.
+`HELD_PLAN` and `HELD_WORK` are where a task waits on a person. They are states rather than a flag, so that a dispatcher pulling from `READY_WORK` or `READY_PLAN` cannot pick a held task up by forgetting to check something. The split is the flag: a task held while it had no plan lands in `HELD_PLAN` and returns to `READY_PLAN`; one held during the work lands in `HELD_WORK` and returns to `READY_WORK`.
 
 ```mermaid
 stateDiagram-v2
-    HELD --> HELD : addCheck
-    HELD --> READY_WORK : resume
-    HELD --> READY_WORK : addTodo
-    HELD --> BLOCKED : addDependencies
-    HELD --> READY_TASK_GRAPH_UPDATE : addTaskGraph
+    HELD_PLAN --> HELD_PLAN : addCheck
+    HELD_PLAN --> READY_PLAN : resume
+    HELD_PLAN --> READY_PLAN : addTodo
+    HELD_PLAN --> BLOCKED : addDependencies
+    HELD_PLAN --> READY_TASK_GRAPH_UPDATE : addTaskGraph
+
+    HELD_WORK --> HELD_WORK : addCheck
+    HELD_WORK --> READY_WORK : resume
+    HELD_WORK --> READY_WORK : addTodo
+    HELD_WORK --> BLOCKED : addDependencies
+    HELD_WORK --> READY_TASK_GRAPH_UPDATE : addTaskGraph
 ```
 
 Every exit is a judgement: `resume` if the wall is gone, `addTodo` if work was missing, `addDependencies` if it was waiting on another task, `addTaskGraph` if the graph itself was wrong.
@@ -609,11 +682,11 @@ A task that queued changes to the graph does them before it closes, whether it g
 
 Todos, failures and task graph updates all work the same way: something adds to the queue, something clears it, and a gate blocks progress while entries remain.
 
-|       | Todos                                                                                                                                                    | Failures                             | Task graph updates                                                                                   |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| Add   | `addTodo` — from `AGENT_REVIEWING`, `MANAGER_REVIEWING` and `HELD` it moves the task to `READY_WORK`; in `NEW`, `READY_WORK` and `WORKING` it self-loops | `fail` — from `CHECKING`             | `addTaskGraph` — from `HELD` it moves the task to `READY_TASK_GRAPH_UPDATE`; elsewhere it self-loops |
-| Clear | `doneTodo` in `WORKING`                                                                                                                                  | `submit` and `hold`, wholesale       | `doneTaskGraph` in `TASK_GRAPH_UPDATING`                                                             |
-| Gate  | `submit`, `pass` and `merged` refuse while open                                                                                                          | none; they are a message, not a gate | `CLOSED` only when all are done                                                                      |
+| | Todos | Failures | Task graph updates |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Add | `addTodo` — from `MANAGER_REVIEWING` and `HELD_WORK` it moves the task to `READY_WORK`, and from `HELD_PLAN` to `READY_PLAN`; elsewhere it self-loops. `addFeedback` — from `AGENT_REVIEWING` its findings become todos and the task moves to `READY_WORK`; from `PLAN_REVIEWING` they become `plan_feedback` and the task moves to `READY_PLAN` | `fail` — from `CHECKING` | `addTaskGraph` — from either held state it moves the task to `READY_TASK_GRAPH_UPDATE`; elsewhere it self-loops |
+| Clear | `doneTodo` in `WORKING`; `removeTodo` in `PLANNING`, by index, before the planner's additions | | `submit` and `hold`, wholesale | `doneTaskGraph` in `TASK_GRAPH_UPDATING` |
+| Gate | `submit`, `pass` and `merged` refuse while open | none; they are a message, not a gate | `CLOSED` only when all are done |
 
 Checks are not a queue. They are a list of commands, run in full every time the task reaches `CHECKING`.
 

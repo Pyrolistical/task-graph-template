@@ -4,7 +4,8 @@ import { blockingCounts } from "./graph.ts";
 export const INBOX_RANKS = [
   "READY_MANAGER_REVIEW",
   "READY_TASK_GRAPH_UPDATE",
-  "HELD",
+  "HELD_PLAN",
+  "HELD_WORK",
   "NEW",
 ] as const;
 

@@ -1,12 +1,16 @@
 import { type TaskId, type TaskMeta, openCount } from "./task.ts";
 import { type AgentSlot, agentModelKey } from "./agents.ts";
 import { blockingCounts } from "./graph.ts";
+import type { Role } from "./runtime.ts";
 
 export const RANKS = [
   "resume",
   "READY_AGENT_REVIEW",
   "READY_WORK_STARTED",
   "READY_WORK_FRESH",
+  "READY_PLAN_REVIEW",
+  "READY_PLAN_STARTED",
+  "READY_PLAN_FRESH",
 ] as const;
 
 export type Rank = (typeof RANKS)[number];
@@ -14,11 +18,22 @@ export type Rank = (typeof RANKS)[number];
 export interface Candidate {
   task_id: TaskId;
   rank: Rank;
+  role: Role;
   blocking: number;
   open_todos: number;
   prefer_agent: string | null;
   session: string | null;
 }
+
+const RANK_ROLE: Record<Rank, Role> = {
+  resume: "worker",
+  READY_AGENT_REVIEW: "reviewer",
+  READY_WORK_STARTED: "worker",
+  READY_WORK_FRESH: "worker",
+  READY_PLAN_REVIEW: "reviewer",
+  READY_PLAN_STARTED: "planner",
+  READY_PLAN_FRESH: "planner",
+};
 
 function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
   if (resumable.has(task.id)) {
@@ -29,6 +44,12 @@ function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
   }
   if (task.state === "READY_WORK") {
     return task.workspace === null ? "READY_WORK_FRESH" : "READY_WORK_STARTED";
+  }
+  if (task.state === "READY_PLAN_REVIEW") {
+    return "READY_PLAN_REVIEW";
+  }
+  if (task.state === "READY_PLAN") {
+    return task.workspace === null ? "READY_PLAN_FRESH" : "READY_PLAN_STARTED";
   }
   return null;
 }
@@ -48,6 +69,7 @@ export function candidates(
     found.push({
       task_id: id,
       rank,
+      role: RANK_ROLE[rank],
       blocking: blocking.get(id) ?? 0,
       open_todos: openCount(task.todos),
       prefer_agent: task.workspace?.agent ?? null,
@@ -69,20 +91,21 @@ export function pickSlot(
   candidate: Candidate,
   isTop: boolean,
 ): AgentSlot | null {
-  if (free.length === 0) {
+  const eligible = free.filter((slot) => slot.roles.includes(candidate.role));
+  if (eligible.length === 0) {
     return null;
   }
   if (candidate.prefer_agent === null) {
-    return free[0]!;
+    return eligible[0]!;
   }
 
   const wanted = agentModelKey(candidate.prefer_agent);
-  const same = free.find((slot) => agentModelKey(slot.name) === wanted);
+  const same = eligible.find((slot) => agentModelKey(slot.name) === wanted);
   if (same !== undefined) {
     return same;
   }
 
-  return candidate.rank === "resume" && !isTop ? null : free[0]!;
+  return candidate.rank === "resume" && !isTop ? null : eligible[0]!;
 }
 
 export interface Dispatch {

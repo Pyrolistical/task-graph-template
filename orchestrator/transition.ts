@@ -33,6 +33,8 @@ export const TRANSITION_NAMES = [
   "hold",
   "resume",
   "addTodo",
+  "removeTodo",
+  "addFeedback",
   "doneTodo",
   "addCheck",
   "addTaskGraph",
@@ -46,7 +48,31 @@ export type TransitionName = (typeof TRANSITION_NAMES)[number];
 export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
   NEW: ["addDependencies", "noDependencies", "addTodo", "addCheck"],
   BLOCKED: ["addDependencies", "removeDependencies"],
-  HELD: ["resume", "addTodo", "addCheck", "addDependencies", "addTaskGraph"],
+  HELD_PLAN: [
+    "resume",
+    "addTodo",
+    "addCheck",
+    "addDependencies",
+    "addTaskGraph",
+  ],
+  HELD_WORK: [
+    "resume",
+    "addTodo",
+    "addCheck",
+    "addDependencies",
+    "addTaskGraph",
+  ],
+  READY_PLAN: [
+    "addDependencies",
+    "addTodo",
+    "addCheck",
+    "addTaskGraph",
+    "abort",
+    "claim",
+  ],
+  PLANNING: ["addTodo", "removeTodo", "submit", "hold", "release"],
+  READY_PLAN_REVIEW: ["claim"],
+  PLAN_REVIEWING: ["submit", "addFeedback", "hold", "release"],
   READY_WORK: [
     "addDependencies",
     "addTodo",
@@ -59,7 +85,7 @@ export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
   READY_CHECK: ["claim"],
   CHECKING: ["addCheck", "pass", "fail", "release"],
   READY_AGENT_REVIEW: ["claim"],
-  AGENT_REVIEWING: ["addTodo", "submit", "hold", "release"],
+  AGENT_REVIEWING: ["addFeedback", "submit", "hold", "release"],
   READY_MANAGER_REVIEW: ["claim"],
   MANAGER_REVIEWING: [
     "addTodo",
@@ -73,7 +99,9 @@ export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
   TASK_GRAPH_UPDATING: ["addTaskGraph", "doneTaskGraph", "release"],
 };
 
-const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
+export const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
+  READY_PLAN: "PLANNING",
+  READY_PLAN_REVIEW: "PLAN_REVIEWING",
   READY_WORK: "WORKING",
   READY_CHECK: "CHECKING",
   READY_AGENT_REVIEW: "AGENT_REVIEWING",
@@ -82,6 +110,8 @@ const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
 };
 
 const RELEASE_TARGETS: Partial<Record<ValidState, ValidState>> = {
+  PLANNING: "READY_PLAN",
+  PLAN_REVIEWING: "READY_PLAN_REVIEW",
   WORKING: "READY_WORK",
   CHECKING: "READY_CHECK",
   AGENT_REVIEWING: "READY_AGENT_REVIEW",
@@ -90,6 +120,8 @@ const RELEASE_TARGETS: Partial<Record<ValidState, ValidState>> = {
 };
 
 const SUBMIT_TARGETS: Partial<Record<ValidState, ValidState>> = {
+  PLANNING: "READY_PLAN_REVIEW",
+  PLAN_REVIEWING: "READY_WORK",
   WORKING: "READY_CHECK",
   AGENT_REVIEWING: "READY_MANAGER_REVIEW",
 };
@@ -102,16 +134,15 @@ const FAIL_TARGETS: Partial<Record<ValidState, ValidState>> = {
   CHECKING: "READY_WORK",
 };
 
-const TODO_SENDS_BACK_FROM: ValidState[] = [
-  "AGENT_REVIEWING",
-  "MANAGER_REVIEWING",
-  "HELD",
-];
+const TODO_SENDS_BACK_FROM: ValidState[] = ["MANAGER_REVIEWING", "HELD_WORK"];
 
 const UNCLAIMED_STATES: TaskState[] = [
   "NEW",
   "BLOCKED",
-  "HELD",
+  "HELD_PLAN",
+  "HELD_WORK",
+  "READY_PLAN",
+  "READY_PLAN_REVIEW",
   "READY_WORK",
   "READY_CHECK",
   "READY_AGENT_REVIEW",
@@ -134,6 +165,7 @@ export interface TransitionArgs {
   op?: UpdateOp;
   taskId?: TaskId;
   failures?: Failure[];
+  findings?: string[];
 }
 
 export interface TransitionResult {
@@ -186,6 +218,16 @@ function requireFailures(value: unknown): Failure[] {
     }
   }
   return value as Failure[];
+}
+
+function requireFindings(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`"findings" must be a non-empty list`);
+  }
+  for (const finding of value as unknown[]) {
+    requireText(finding, "a finding");
+  }
+  return value as string[];
 }
 
 function requireOp(value: unknown): UpdateOp {
@@ -281,7 +323,7 @@ function mutate(
     case "removeDependencies": {
       const ids = requireIdList(args.taskIds, "taskIds");
       meta.depends_on = meta.depends_on.filter((d) => !ids.includes(d));
-      return meta.depends_on.length === 0 ? "READY_WORK" : null;
+      return meta.depends_on.length === 0 ? "READY_PLAN" : null;
     }
 
     case "noDependencies": {
@@ -290,7 +332,7 @@ function mutate(
           `Task "${meta.id}" still depends on ${meta.depends_on.join(", ")}`,
         );
       }
-      return "READY_WORK";
+      return "READY_PLAN";
     }
 
     case "claim": {
@@ -327,11 +369,13 @@ function mutate(
     }
 
     case "submit": {
-      const open = openCount(meta.todos);
-      if (open > 0) {
-        throw new Error(
-          `Task "${meta.id}" has ${open} open todo(s); resolve them first`,
-        );
+      if (state === "WORKING") {
+        const open = openCount(meta.todos);
+        if (open > 0) {
+          throw new Error(
+            `Task "${meta.id}" has ${open} open todo(s); resolve them first`,
+          );
+        }
       }
       meta.failures = [];
       return SUBMIT_TARGETS[state]!;
@@ -355,11 +399,13 @@ function mutate(
     case "hold": {
       meta.held_reason = requireText(args.reason, "reason");
       meta.failures = [];
-      return "HELD";
+      return state === "PLANNING" || state === "PLAN_REVIEWING"
+        ? "HELD_PLAN"
+        : "HELD_WORK";
     }
 
     case "resume": {
-      return "READY_WORK";
+      return state === "HELD_PLAN" ? "READY_PLAN" : "READY_WORK";
     }
 
     case "addTodo": {
@@ -368,7 +414,32 @@ function mutate(
         message: requireText(args.message, "message"),
         done: false,
       });
+      if (state === "HELD_PLAN") {
+        return "READY_PLAN";
+      }
       return TODO_SENDS_BACK_FROM.includes(state) ? "READY_WORK" : null;
+    }
+
+    case "removeTodo": {
+      const index = requireIndex(meta.todos, args.index, "todo");
+      meta.todos.splice(index, 1);
+      return null;
+    }
+
+    case "addFeedback": {
+      const findings = requireFindings(args.findings);
+      if (state === "PLAN_REVIEWING") {
+        meta.plan_feedback = findings;
+        return "READY_PLAN";
+      }
+      for (const finding of findings) {
+        meta.todos.push({
+          at: now,
+          message: finding,
+          done: false,
+        });
+      }
+      return "READY_WORK";
     }
 
     case "doneTodo": {
@@ -404,7 +475,9 @@ function mutate(
             }
       ) as TaskGraphUpdate;
       meta.task_graph_updates.push(update);
-      return state === "HELD" ? "READY_TASK_GRAPH_UPDATE" : null;
+      return state === "HELD_PLAN" || state === "HELD_WORK"
+        ? "READY_TASK_GRAPH_UPDATE"
+        : null;
     }
 
     case "doneTaskGraph": {
@@ -463,7 +536,7 @@ function propagateClose(
     dependentsUpdated.push(meta.id);
 
     if (meta.state === "BLOCKED" && meta.depends_on.length === 0) {
-      meta.state = "READY_WORK";
+      meta.state = "READY_PLAN";
       unblocked.push(meta.id);
     }
     meta.state_entered = now;
@@ -518,8 +591,12 @@ export function applyTransition(
       meta.claimed_pid = null;
     }
 
-    if (target !== null && target !== "HELD") {
+    if (target !== null && target !== "HELD_PLAN" && target !== "HELD_WORK") {
       meta.held_reason = null;
+    }
+
+    if (target === "READY_WORK") {
+      meta.plan_feedback = [];
     }
 
     if (target === "CLOSED") {

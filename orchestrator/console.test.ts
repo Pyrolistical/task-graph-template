@@ -50,6 +50,7 @@ import {
   textWidth,
   thousands,
   toggle,
+  tokensPerSecond,
   wrap,
 } from "./console.ts";
 import type { Candidate } from "./scheduler.ts";
@@ -77,10 +78,15 @@ function busyRow(overrides: Partial<AgentRow> = {}): AgentRow {
     ...idleRow(SLOTS[0]!),
     state: "BUSY",
     task_id: "000123",
-    role: "agent_worker",
+    role: "worker",
     pid: 4242,
     started_at: new Date(1000).toISOString(),
-    activity: { kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW },
+    activity: {
+      kind: "tool-call",
+      tool: "bash",
+      target: "bun test",
+      started_at: NOW,
+    },
     tokens: 12300,
     context_percent: 41.6,
     session: "/tmp/session.jsonl",
@@ -122,6 +128,7 @@ function candidateOf(overrides: Partial<Candidate> = {}): Candidate {
   return {
     task_id: "000123",
     rank: "READY_WORK_FRESH",
+    role: "worker",
     blocking: 0,
     open_todos: 0,
     prefer_agent: null,
@@ -325,7 +332,23 @@ describe("SessionTail", () => {
 
     write(file, [assistant("second")]);
     expect(tail.read().map((entry) => entry.text)).toEqual(["first", "second"]);
-    expect(tail.totalUsage).toEqual({ input: 2, output: 4, cacheRead: 6 });
+    expect(tail.samples).toEqual([
+      { timestampMs: 0, tokens: 2 },
+      { timestampMs: 0, tokens: 2 },
+    ]);
+  });
+
+  test("keeps only the last ten usage samples", () => {
+    const dir = tempDir("console-");
+    const file = path.join(dir, "session.jsonl");
+    const messages = Array.from({ length: 12 }, (_, index) =>
+      assistant(`m${index}`),
+    );
+    write(file, messages);
+
+    const tail: SessionTail = new SessionTail(file);
+    expect(tail.read()).toHaveLength(12);
+    expect(tail.samples).toHaveLength(10);
   });
 
   test("a truncated file restarts the tail", () => {
@@ -339,7 +362,7 @@ describe("SessionTail", () => {
     fs.writeFileSync(file, "", "utf-8");
     write(file, [assistant("fresh")]);
     expect(tail.read().map((entry) => entry.text)).toEqual(["fresh"]);
-    expect(tail.totalUsage).toEqual({ input: 1, output: 2, cacheRead: 3 });
+    expect(tail.samples).toEqual([{ timestampMs: 0, tokens: 2 }]);
   });
 
   test("a half written line is held until its newline arrives", () => {
@@ -364,7 +387,7 @@ describe("SessionTail", () => {
 });
 
 describe("Sessions", () => {
-  test("usage is null until the tail has been read and dropped agents are forgotten", () => {
+  test("rate is null until the tail has been read and dropped agents are forgotten", () => {
     const dir = tempDir("console-");
     const file = path.join(dir, "session.jsonl");
     fs.writeFileSync(
@@ -382,15 +405,57 @@ describe("Sessions", () => {
     );
 
     const sessions: Sessions = new Sessions();
-    expect(sessions.usage(file)).toBeNull();
+    expect(sessions.rate(file, 5000)).toBeNull();
     expect(sessions.entries(file)).toHaveLength(1);
-    expect(sessions.usage(file)).toEqual({ input: 4, output: 1, cacheRead: 0 });
+    expect(sessions.rate(file, 5000)).toBe(0.2);
 
     expect(sessions.entries(null)).toEqual([]);
-    expect(sessions.usage(null)).toBeNull();
+    expect(sessions.rate(null, 5000)).toBeNull();
 
     sessions.keep(new Set());
-    expect(sessions.usage(file)).toBeNull();
+    expect(sessions.rate(file, 5000)).toBeNull();
+  });
+});
+
+describe("tokensPerSecond", () => {
+  test("no samples give no rate", () => {
+    expect(tokensPerSecond([], NOW)).toBeNull();
+  });
+
+  test("a single sample measures from when it arrived", () => {
+    expect(tokensPerSecond([{ timestampMs: NOW, tokens: 5 }], NOW + 5000)).toBe(
+      1,
+    );
+  });
+
+  test("two samples use the time between them", () => {
+    expect(
+      tokensPerSecond(
+        [
+          { timestampMs: NOW, tokens: 3 },
+          { timestampMs: NOW + 1000, tokens: 7 },
+        ],
+        NOW + 10_000,
+      ),
+    ).toBe(10);
+  });
+
+  test("same-time samples fall back to now", () => {
+    expect(
+      tokensPerSecond(
+        [
+          { timestampMs: NOW, tokens: 4 },
+          { timestampMs: NOW, tokens: 6 },
+        ],
+        NOW + 2000,
+      ),
+    ).toBe(5);
+  });
+
+  test("a sample in the future gives no rate", () => {
+    expect(tokensPerSecond([{ timestampMs: NOW + 1000, tokens: 5 }], NOW)).toBe(
+      null,
+    );
   });
 });
 
@@ -412,9 +477,7 @@ describe("panes", () => {
     expect(pane.task?.state).toBe("WORKING");
     expect(pane.check?.command).toBe("bun test");
     expect(pane.sinceMs).toBe(1000);
-    expect(detailLine(pane)).toBe(
-      "task 000123 · agent_worker · WORKING · pid 4242",
-    );
+    expect(detailLine(pane)).toBe("task 000123 · worker · WORKING · pid 4242");
     expect(activityLine(pane)).toBe("check 1: bun test");
   });
 
@@ -433,7 +496,7 @@ describe("panes", () => {
     const pane = paneOf({ tasks: [] });
 
     expect(pane.task).toBeNull();
-    expect(detailLine(pane)).toBe("task 000123 · agent_worker · pid 4242");
+    expect(detailLine(pane)).toBe("task 000123 · worker · pid 4242");
   });
 
   test("a retrying agent shows its attempt", () => {
@@ -451,12 +514,10 @@ describe("panes", () => {
     expect(activityLine(pane)).toBe("tool: bash — bun test (0s)");
   });
 
-  test("stats merge the agent row with the session usage", () => {
+  test("stats show the token rate over the last ten messages and context", () => {
     const pane = paneOf();
 
-    expect(statsLine(pane, { input: 900, output: 12000, cacheRead: 0 })).toBe(
-      "12.3k tokens · ctx 42% · 900 in · 12.0k out · 0 cached",
-    );
+    expect(statsLine(pane, 1234.56)).toBe("1.2k tok/s · ctx 42%");
   });
 });
 
@@ -647,7 +708,7 @@ describe("screen", () => {
           busyRow({ ...SLOTS[index % SLOTS.length]!, task_id: "000123" }),
         ],
       }),
-      usage: null,
+      rate: null,
       lines: (width: number) =>
         new PaneLines().update([entryOf("working")], width),
     }));
@@ -730,9 +791,7 @@ describe("screen", () => {
 
   test("a busy pane gets an abort hit at QUEUE_LINES + 2", () => {
     const { hits } = screen(cells(1), [], layoutOf());
-    const abortHit = hits.find(
-      (hit) => hit.command.command === "agent_abort",
-    );
+    const abortHit = hits.find((hit) => hit.command.command === "agent_abort");
 
     expect(abortHit).toBeDefined();
     expect(abortHit!.row).toBe(QUEUE_LINES + 2);
@@ -756,9 +815,7 @@ describe("screen", () => {
 
   test("hitAt returns the abort command for a click inside the span", () => {
     const { hits } = screen(cells(1), [], layoutOf());
-    const abortHit = hits.find(
-      (hit) => hit.command.command === "agent_abort",
-    )!;
+    const abortHit = hits.find((hit) => hit.command.command === "agent_abort")!;
 
     expect(
       hitAt(hits, {
@@ -792,15 +849,15 @@ describe("screen", () => {
     const idleCells = [
       {
         pane: paneOf({ agents: [idleRow(SLOTS[0]!)] }),
-        usage: null,
+        rate: null,
         lines: (width: number) =>
           new PaneLines().update([entryOf("nothing")], width),
       },
     ];
     const idleHits = screen(idleCells, [], layoutOf()).hits;
-    expect(
-      idleHits.some((hit) => hit.command.command === "agent_abort"),
-    ).toBe(false);
+    expect(idleHits.some((hit) => hit.command.command === "agent_abort")).toBe(
+      false,
+    );
   });
 
   test("a terminal too narrow for the panes fails", () => {
@@ -846,9 +903,7 @@ describe("switches", () => {
   test("a narrow pane clips the identity, never the switch or the state", () => {
     const line = renderLine(header(paneOf(), null, 30, 1000, false)[0]!);
 
-    expect(line).toBe(
-      "\x1b[32m[─●]\x1b[0m pi · anthropic/c… busy 0s",
-    );
+    expect(line).toBe("\x1b[32m[─●]\x1b[0m pi · anthropic/c… busy 0s");
     expect(textWidth(line.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
   });
 
@@ -911,7 +966,18 @@ describe("the abort button", () => {
   });
 
   test("the activity text is clipped rather than overlapping the button", () => {
-    const pane = paneOf({ agents: [busyRow({ activity: { kind: "tool-call", tool: "bash", target: "a very long command that would overflow the pane width", started_at: NOW } })] });
+    const pane = paneOf({
+      agents: [
+        busyRow({
+          activity: {
+            kind: "tool-call",
+            tool: "bash",
+            target: "a very long command that would overflow the pane width",
+            started_at: NOW,
+          },
+        }),
+      ],
+    });
 
     const lines = header(pane, null, 30, 1000, false);
     const line = renderLine(lines[2]!);
@@ -1090,10 +1156,7 @@ describe("console commands", () => {
 
   test("a malformed agent_abort command (missing slot) parses to null", () => {
     const runtime = runtimeIn(tempDir("console-"));
-    fs.writeFileSync(
-      runtime.consoleCommand,
-      `{ "command": "agent_abort" }`,
-    );
+    fs.writeFileSync(runtime.consoleCommand, `{ "command": "agent_abort" }`);
 
     expect(takeCommand(runtime)).toBeNull();
     expect(fs.existsSync(runtime.consoleCommand)).toBe(false);

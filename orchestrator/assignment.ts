@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { parse } from "./schema.ts";
 import { splitDocument } from "./task.ts";
-import type { Role } from "./runtime.ts";
+import type { ClaimState } from "./runtime.ts";
 
 const Text = z.string().trim().min(1);
 
@@ -14,32 +14,62 @@ const Blocked = z.strictObject({
   message: Text,
 });
 
-function frontmatter(submit: z.ZodObject) {
+const PlanResults = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("submit"),
+    addTodos: z.array(Text),
+    removeTodos: z.array(z.int().nonnegative()),
+  }),
+  Blocked,
+]);
+
+const PlanReviewResults = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("submit"), findings: z.array(Text) }),
+  Blocked,
+]);
+
+const WorkResult = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("submit") }),
+  Blocked,
+]);
+
+const WorkReviewResults = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("submit"),
+    findings: z.array(Text),
+    delegations: z.array(Text),
+  }),
+  Blocked,
+]);
+
+export type PlanResults = z.infer<typeof PlanResults>;
+export type PlanReviewResults = z.infer<typeof PlanReviewResults>;
+export type WorkResult = z.infer<typeof WorkResult>;
+export type WorkReviewResults = z.infer<typeof WorkReviewResults>;
+
+export type AgentResult =
+  | PlanResults
+  | PlanReviewResults
+  | WorkResult
+  | WorkReviewResults;
+
+function frontmatter(result: z.ZodType) {
   return z.strictObject({
     assignment: z
       .string({ error: "must be a quoted six-digit string" })
       .regex(/^\d{6}$/, "must be a quoted six-digit string"),
     todos: z.array(Todo),
     checks: z.array(Text),
-    result: z.discriminatedUnion("type", [submit, Blocked]).nullable(),
+    result: result.nullable(),
   });
 }
 
-const SCHEMA: Record<Role, z.ZodType> = {
-  agent_worker: frontmatter(z.strictObject({ type: z.literal("submit") })),
-  agent_reviewer: frontmatter(
-    z.strictObject({
-      type: z.literal("submit"),
-      findings: z.array(Text),
-      delegations: z.array(Text),
-    }),
-  ),
+const SCHEMA: Record<ClaimState, z.ZodType> = {
+  PLANNING: frontmatter(PlanResults),
+  PLAN_REVIEWING: frontmatter(PlanReviewResults),
+  WORKING: frontmatter(WorkResult),
+  AGENT_REVIEWING: frontmatter(WorkReviewResults),
 };
-
-export type AssignmentResult =
-  | { type: "submit" }
-  | { type: "submit"; findings: string[]; delegations: string[] }
-  | { type: "blocked"; message: string };
 
 export interface AssignmentTodo {
   message: string;
@@ -50,19 +80,19 @@ export interface AssignmentMeta {
   assignment: string;
   todos: AssignmentTodo[];
   checks: string[];
-  result: AssignmentResult | null;
+  result: AgentResult | null;
 }
 
 export function parseAssignment(
   content: string,
-  role: Role,
+  state: ClaimState,
   source = "ASSIGNMENT.md",
 ): { meta: AssignmentMeta; body: string } {
   const { frontmatter: head, body } = splitDocument(content);
   const meta = parse(
-    SCHEMA[role],
+    SCHEMA[state],
     Bun.YAML.parse(head),
-    `${role} ASSIGNMENT.md`,
+    `${state} ASSIGNMENT.md`,
     source,
   ) as AssignmentMeta;
   return { meta, body };
@@ -70,9 +100,9 @@ export function parseAssignment(
 
 export function readAssignment(
   filePath: string,
-  role: Role,
+  state: ClaimState,
 ): { meta: AssignmentMeta; body: string } {
-  return parseAssignment(fs.readFileSync(filePath, "utf-8"), role, filePath);
+  return parseAssignment(fs.readFileSync(filePath, "utf-8"), state, filePath);
 }
 
 function list(name: string, values: string[]): string[] {
@@ -82,7 +112,14 @@ function list(name: string, values: string[]): string[] {
   return [`${name}:`, ...values.map((value) => `  - ${JSON.stringify(value)}`)];
 }
 
-function resultLines(result: AssignmentResult | null): string[] {
+function intList(name: string, values: number[]): string[] {
+  if (values.length === 0) {
+    return [`${name}: []`];
+  }
+  return [`${name}:`, ...values.map((value) => `  - ${value}`)];
+}
+
+function resultLines(result: AgentResult | null): string[] {
   if (result === null) {
     return ["result: null"];
   }
@@ -93,15 +130,30 @@ function resultLines(result: AssignmentResult | null): string[] {
       `  message: ${JSON.stringify(result.message)}`,
     ];
   }
-  if (!("findings" in result)) {
-    return ["result:", "  type: submit"];
+  if ("addTodos" in result) {
+    return [
+      "result:",
+      "  type: submit",
+      ...list("addTodos", result.addTodos).map((line) => `  ${line}`),
+      ...intList("removeTodos", result.removeTodos).map((line) => `  ${line}`),
+    ];
   }
-  return [
-    "result:",
-    "  type: submit",
-    ...list("findings", result.findings).map((line) => `  ${line}`),
-    ...list("delegations", result.delegations).map((line) => `  ${line}`),
-  ];
+  if ("delegations" in result) {
+    return [
+      "result:",
+      "  type: submit",
+      ...list("findings", result.findings).map((line) => `  ${line}`),
+      ...list("delegations", result.delegations).map((line) => `  ${line}`),
+    ];
+  }
+  if ("findings" in result) {
+    return [
+      "result:",
+      "  type: submit",
+      ...list("findings", result.findings).map((line) => `  ${line}`),
+    ];
+  }
+  return ["result:", "  type: submit"];
 }
 
 export function serializeAssignment(meta: AssignmentMeta): string {
@@ -136,9 +188,9 @@ export function rewriteAssignment(
   );
 }
 
-export function resetResult(filePath: string, role: Role): void {
+export function resetResult(filePath: string, state: ClaimState): void {
   rewriteAssignment(filePath, {
-    ...readAssignment(filePath, role).meta,
+    ...readAssignment(filePath, state).meta,
     result: null,
   });
 }

@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import { z } from "zod";
-import { type Activity, describeActivity, toolCall, toolTarget } from "./activity.ts";
+import {
+  type Activity,
+  describeActivity,
+  toolCall,
+  toolTarget,
+} from "./activity.ts";
 
 export const STOP_REASONS = [
   "stop",

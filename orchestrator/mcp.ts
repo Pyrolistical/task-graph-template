@@ -83,7 +83,7 @@ export function build(server: Server): McpServer {
     "task_done_create",
     {
       description:
-        "Finish authoring a task and let it be dispatched: NEW → READY_WORK. Refused while it still has dependencies, which put it in BLOCKED instead.",
+        "Finish authoring a task and let it be dispatched: NEW → READY_PLAN. Refused while it still has dependencies, which put it in BLOCKED instead.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => judge(id, "noDependencies"),
@@ -104,7 +104,7 @@ export function build(server: Server): McpServer {
     "task_remove_dependencies",
     {
       description:
-        "Drop dependencies you decided were not real. Removing the last one moves the task to READY_WORK.",
+        "Drop dependencies you decided were not real. Removing the last one moves the task to READY_PLAN.",
       inputSchema: z.object({ id: taskId, task_ids: z.array(taskId).min(1) }),
     },
     async ({ id, task_ids }) =>
@@ -125,7 +125,7 @@ export function build(server: Server): McpServer {
     "task_add_todo",
     {
       description:
-        "Add a piece of work. From MANAGER_REVIEWING or HELD this sends the task back to READY_WORK.",
+        "Add a piece of work. From MANAGER_REVIEWING this sends the task back to READY_WORK; from HELD_WORK back to READY_WORK, and from HELD_PLAN back to READY_PLAN.",
       inputSchema: z.object({ id: taskId, message: z.string().min(1) }),
     },
     async ({ id, message }) => judge(id, "addTodo", { message }),
@@ -135,7 +135,7 @@ export function build(server: Server): McpServer {
     "task_resume",
     {
       description:
-        "Take a task out of HELD unchanged, having decided the wall is gone.",
+        "Take a task out of HELD unchanged, having decided the wall is gone. Returns to READY_PLAN from HELD_PLAN, and to READY_WORK from HELD_WORK.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => judge(id, "resume"),
@@ -208,7 +208,7 @@ export function build(server: Server): McpServer {
     "task_abort",
     {
       description:
-        "Throw the task away because it was the wrong shape, from MANAGER_REVIEWING once the work is in, or from READY_WORK before an agent picks it up. Refused if the branch already landed, or if no graph update says what should replace it.",
+        "Throw the task away because it was the wrong shape, from MANAGER_REVIEWING once the work is in, or from READY_WORK or READY_PLAN before an agent picks it up. Refused if the branch already landed, or if no graph update says what should replace it.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => applied(server.attemptAbort(id)),
@@ -233,6 +233,16 @@ export function build(server: Server): McpServer {
       server.setSchedulerEnabled(false);
       return text("the scheduler is paused; running work still settles");
     },
+  );
+
+  mcp.registerTool(
+    "reload_prompts",
+    {
+      description:
+        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
+      inputSchema: z.object({}),
+    },
+    async () => json(server.reloadPrompts()),
   );
 
   mcp.registerTool(

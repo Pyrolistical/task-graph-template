@@ -65,6 +65,7 @@ function baseMeta(overrides: Partial<TaskMeta> = {}): TaskMeta {
     workspace: null,
     todos: [],
     checks: [],
+    plan_feedback: [],
     failures: [],
     task_graph_updates: [],
     ...overrides,
@@ -129,11 +130,14 @@ function shape(name: TransitionName, extra: string[]): TransitionArgs {
       return { command: rest(0) };
     case "doneTodo":
     case "doneTaskGraph":
+    case "removeTodo":
       return { index: Number(extra[0]) };
     case "addTaskGraph":
       return extra[0] === "add"
         ? { op: "add", message: rest(1) }
         : { op: extra[0] as UpdateOp, taskId: extra[1], message: rest(2) };
+    case "addFeedback":
+      return { findings: extra };
     default:
       return {};
   }
@@ -166,9 +170,23 @@ function newTasks(count: number): { dir: string; ids: string[] } {
   return { dir, ids };
 }
 
-function toWorking(): { dir: string; id: string } {
+function toPlan(): { dir: string; id: string } {
   const { dir, id } = newTask();
   run(dir, id, "noDependencies");
+  return { dir, id };
+}
+
+function planThrough(): { dir: string; id: string } {
+  const { dir, id } = toPlan();
+  run(dir, id, "claim", "planner", String(process.pid));
+  run(dir, id, "submit");
+  run(dir, id, "claim", "plan-reviewer", String(process.pid));
+  run(dir, id, "submit");
+  return { dir, id };
+}
+
+function toWorking(): { dir: string; id: string } {
+  const { dir, id } = planThrough();
   run(dir, id, "claim", "agent-1", String(process.pid));
   return { dir, id };
 }
@@ -202,6 +220,10 @@ function toHeld(): { dir: string; id: string } {
 
 function closeTask(dir: string, id: string) {
   run(dir, id, "noDependencies");
+  run(dir, id, "claim", "p", String(process.pid));
+  run(dir, id, "submit");
+  run(dir, id, "claim", "pr", String(process.pid));
+  run(dir, id, "submit");
   run(dir, id, "claim", "a", String(process.pid));
   run(dir, id, "submit");
   run(dir, id, "claim", "c", String(process.pid));
@@ -443,6 +465,14 @@ describe("schema", () => {
     expect(parseTaskMeta(parseDocument(doc).raw).todos).toEqual([]);
   });
 
+  test("a document without plan_feedback parses, defaulting to empty", () => {
+    const meta = raw(baseMeta());
+    delete meta.plan_feedback;
+    expect(parseTaskMeta(meta).plan_feedback).toEqual([]);
+    const doc = `---\nid: "000042"\ntitle: t\nstate: NEW\nstate_entered: null\ndepends_on: []\nclaimed_by: null\nclaimed_pid: null\nheld_reason: null\nworkspace: null\ntodos: []\nchecks: []\nfailures: []\ntask_graph_updates: []\n---\n`;
+    expect(parseTaskMeta(parseDocument(doc).raw).plan_feedback).toEqual([]);
+  });
+
   test("fields are serialized in schema order with state_entered under state", () => {
     const keys = rebuildDocument(baseMeta(), "\n")
       .split("\n")
@@ -460,6 +490,7 @@ describe("schema", () => {
       "workspace",
       "todos",
       "checks",
+      "plan_feedback",
       "failures",
       "task_graph_updates",
     ]);
@@ -688,7 +719,7 @@ describe("transitions: dependencies", () => {
 
     run(dir, main, "addDependencies", first, second);
     expect(run(dir, main, "removeDependencies", first).to).toBeNull();
-    expect(run(dir, main, "removeDependencies", second).to).toBe("READY_WORK");
+    expect(run(dir, main, "removeDependencies", second).to).toBe("READY_PLAN");
   });
 
   test("removeDependencies can clear a reference to a task that is gone", () => {
@@ -700,7 +731,7 @@ describe("transitions: dependencies", () => {
     });
 
     expect(run(dir, main, "removeDependencies", "000999").to).toBe(
-      "READY_WORK",
+      "READY_PLAN",
     );
     expect(metaOf(dir, main).depends_on).toEqual([]);
   });
@@ -718,8 +749,7 @@ describe("transitions: dependencies", () => {
 
 describe("transitions: claim and release", () => {
   test("claim records the agent and pid", () => {
-    const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    const { dir, id } = planThrough();
     expect(run(dir, id, "claim", "agent-1", "4242").to).toBe("WORKING");
 
     const meta = metaOf(dir, id);
@@ -746,7 +776,7 @@ describe("transitions: claim and release", () => {
     run(dir, id, "noDependencies");
     run(dir, id, "claim", "dead-agent", String(await deadPid()));
 
-    expect(run(dir, id, "release").to).toBe("READY_WORK");
+    expect(run(dir, id, "release").to).toBe("READY_PLAN");
 
     const meta = metaOf(dir, id);
     expect(meta.claimed_by).toBeNull();
@@ -767,13 +797,24 @@ describe("transitions: claim and release", () => {
 });
 
 describe("transitions: todos", () => {
-  test("addTodo from AGENT_REVIEWING sends the task back to READY_WORK", () => {
+  test("addFeedback from AGENT_REVIEWING sends the task back with findings as todos", () => {
     const { dir, id } = toAgentReview();
-    expect(run(dir, id, "addTodo", "fix null handling").to).toBe("READY_WORK");
+    expect(run(dir, id, "addFeedback", "fix null handling").to).toBe(
+      "READY_WORK",
+    );
 
     const todo = metaOf(dir, id).todos[0]!;
     expect(todo.message).toBe("fix null handling");
     expect(todo.done).toBe(false);
+  });
+
+  test("every finding in an addFeedback from AGENT_REVIEWING becomes a todo", () => {
+    const { dir, id } = toAgentReview();
+    run(dir, id, "addFeedback", "first", "second");
+    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
+      "first",
+      "second",
+    ]);
   });
 
   test("addTodo from MANAGER_REVIEWING sends the task back to READY_WORK", () => {
@@ -786,7 +827,7 @@ describe("transitions: todos", () => {
 
   test("addTodo self-loops in READY_WORK and WORKING so more can be filed", () => {
     const { dir, id } = toAgentReview();
-    run(dir, id, "addTodo", "first");
+    run(dir, id, "addFeedback", "first");
     expect(run(dir, id, "addTodo", "second").to).toBeNull();
     run(dir, id, "claim", "agent-1", String(process.pid));
     expect(run(dir, id, "addTodo", "third").to).toBeNull();
@@ -840,7 +881,7 @@ describe("transitions: todos", () => {
 
   test("todos are never cleared, so the record survives to close", () => {
     const { dir, id } = toAgentReview();
-    run(dir, id, "addTodo", "keep me");
+    run(dir, id, "addFeedback", "keep me");
     run(dir, id, "claim", "agent-1", String(process.pid));
     run(dir, id, "doneTodo", "0");
     run(dir, id, "submit");
@@ -865,12 +906,12 @@ describe("transitions: checks", () => {
     expect(metaOf(dir, id).checks).toEqual(["bun test"]);
   });
 
-  test("addCheck self-loops in NEW and the checks survive into READY_WORK", () => {
+  test("addCheck self-loops in NEW and the checks survive into READY_PLAN", () => {
     const { dir, id } = newTask();
     expect(run(dir, id, "addCheck", "bun test").to).toBeNull();
     expect(metaOf(dir, id).state).toBe("NEW");
 
-    expect(run(dir, id, "noDependencies").to).toBe("READY_WORK");
+    expect(run(dir, id, "noDependencies").to).toBe("READY_PLAN");
     expect(metaOf(dir, id).checks).toEqual(["bun test"]);
   });
 
@@ -1071,7 +1112,7 @@ describe("transitions: closing", () => {
     expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
   });
 
-  test("abort throws away a task still queued in READY_WORK", () => {
+  test("abort throws away a task still queued in READY_PLAN", () => {
     const { dir, id } = newTask("the wrong shape");
     run(dir, id, "noDependencies");
     expect(() => run(dir, id, "abort")).toThrow(/no task graph updates/);
@@ -1079,7 +1120,7 @@ describe("transitions: closing", () => {
     expect(
       run(dir, id, "addTaskGraph", "add", "two tasks instead of this one").to,
     ).toBeNull();
-    expect(metaOf(dir, id).state).toBe("READY_WORK");
+    expect(metaOf(dir, id).state).toBe("READY_PLAN");
 
     expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
   });
@@ -1118,7 +1159,7 @@ describe("transitions: closing", () => {
     expect(result.dependentsUpdated).toEqual([main]);
     expect(result.unblocked).toEqual([main]);
     expect(metaOf(dir, main).depends_on).toEqual([]);
-    expect(metaOf(dir, main).state).toBe("READY_WORK");
+    expect(metaOf(dir, main).state).toBe("READY_PLAN");
   });
 
   test("a dependent with other dependencies stays BLOCKED", () => {
@@ -1170,7 +1211,7 @@ describe("transitions: argument validation", () => {
     );
 
     const meta = metaOf(dir, id);
-    expect(meta.state).toBe("READY_WORK");
+    expect(meta.state).toBe("READY_PLAN");
     expect(meta.claimed_by).toBeNull();
     expect(meta.claimed_pid).toBeNull();
   });
@@ -1263,6 +1304,10 @@ describe("transitions: document integrity", () => {
 
     const steps: [TransitionName, string[]][] = [
       ["noDependencies", []],
+      ["claim", ["planner", String(process.pid)]],
+      ["submit", []],
+      ["claim", ["plan-reviewer", String(process.pid)]],
+      ["submit", []],
       ["addCheck", ["bun test"]],
       ["addTodo", ["something to do"]],
       ["claim", ["agent-1", String(process.pid)]],
@@ -1360,18 +1405,68 @@ describe("transitions: the whole state machine", () => {
   const MACHINE: Record<ValidState, Partial<Record<TransitionName, Case>>> = {
     NEW: {
       addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      noDependencies: { to: "READY_WORK" },
+      noDependencies: { to: "READY_PLAN" },
       addTodo: { to: "NEW", args: () => ["a todo"] },
       addCheck: { to: "NEW", args: () => ["bun test"] },
     },
     BLOCKED: {
       addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      removeDependencies: { to: "READY_WORK", args: (dep) => [dep] },
+      removeDependencies: { to: "READY_PLAN", args: (dep) => [dep] },
     },
-    HELD: {
+    READY_PLAN: {
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      addTodo: { to: "READY_PLAN", args: () => ["a todo"] },
+      addCheck: { to: "READY_PLAN", args: () => ["bun test"] },
+      addTaskGraph: {
+        to: "READY_PLAN",
+        args: () => ["add", "a follow-up"],
+      },
+      abort: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
+      },
+      claim: { to: "PLANNING", args: () => ["planner", String(process.pid)] },
+    },
+    PLANNING: {
+      addTodo: { to: "PLANNING", args: () => ["a todo"] },
+      removeTodo: {
+        to: "PLANNING",
+        prepare: [["addTodo", "something"]],
+        args: () => ["0"],
+      },
+      submit: { to: "READY_PLAN_REVIEW" },
+      hold: { to: "HELD_PLAN", args: () => ["waiting on a person"] },
+      release: { to: "READY_PLAN" },
+    },
+    READY_PLAN_REVIEW: {
+      claim: {
+        to: "PLAN_REVIEWING",
+        args: () => ["plan-reviewer", String(process.pid)],
+      },
+    },
+    PLAN_REVIEWING: {
+      submit: { to: "READY_WORK" },
+      addFeedback: {
+        to: "READY_PLAN",
+        args: () => ["the plan misses the empty case"],
+      },
+      hold: { to: "HELD_PLAN", args: () => ["waiting on a person"] },
+      release: { to: "READY_PLAN_REVIEW" },
+    },
+    HELD_PLAN: {
+      resume: { to: "READY_PLAN" },
+      addTodo: { to: "READY_PLAN", args: () => ["the missing piece"] },
+      addCheck: { to: "HELD_PLAN", args: () => ["bun test"] },
+      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
+      addTaskGraph: {
+        to: "READY_TASK_GRAPH_UPDATE",
+        args: () => ["add", "the graph was wrong"],
+      },
+    },
+    HELD_WORK: {
       resume: { to: "READY_WORK" },
       addTodo: { to: "READY_WORK", args: () => ["the missing piece"] },
-      addCheck: { to: "HELD", args: () => ["bun test"] },
+      addCheck: { to: "HELD_WORK", args: () => ["bun test"] },
       addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
       addTaskGraph: {
         to: "READY_TASK_GRAPH_UPDATE",
@@ -1401,7 +1496,7 @@ describe("transitions: the whole state machine", () => {
       },
       addCheck: { to: "WORKING", args: () => ["bun test"] },
       submit: { to: "READY_CHECK" },
-      hold: { to: "HELD", args: () => ["waiting on a person"] },
+      hold: { to: "HELD_WORK", args: () => ["waiting on a person"] },
       release: { to: "READY_WORK" },
     },
     READY_CHECK: {
@@ -1420,9 +1515,9 @@ describe("transitions: the whole state machine", () => {
       },
     },
     AGENT_REVIEWING: {
-      addTodo: { to: "READY_WORK", args: () => ["a finding"] },
+      addFeedback: { to: "READY_WORK", args: () => ["a finding"] },
       submit: { to: "READY_MANAGER_REVIEW" },
-      hold: { to: "HELD", args: () => ["the range does not exist"] },
+      hold: { to: "HELD_WORK", args: () => ["the range does not exist"] },
       release: { to: "READY_AGENT_REVIEW" },
     },
     READY_MANAGER_REVIEW: {
@@ -1486,11 +1581,27 @@ describe("transitions: the whole state machine", () => {
     }
 
     walk([["noDependencies"]]);
+    if (state === "READY_PLAN") return { dir, id, dep };
+
+    walk([["claim", "planner", pid]]);
+    if (state === "PLANNING") return { dir, id, dep };
+    if (state === "HELD_PLAN") {
+      walk([["hold", "waiting on a person"]]);
+      return { dir, id, dep };
+    }
+
+    walk([["submit"]]);
+    if (state === "READY_PLAN_REVIEW") return { dir, id, dep };
+
+    walk([["claim", "plan-reviewer", pid]]);
+    if (state === "PLAN_REVIEWING") return { dir, id, dep };
+
+    walk([["submit"]]);
     if (state === "READY_WORK") return { dir, id, dep };
 
     walk([["claim", "agent-1", pid]]);
     if (state === "WORKING") return { dir, id, dep };
-    if (state === "HELD") {
+    if (state === "HELD_WORK") {
       walk([["hold", "waiting on a person"]]);
       return { dir, id, dep };
     }
@@ -1598,15 +1709,54 @@ describe("transitions: the whole state machine", () => {
         return ["bun test"];
       case "doneTodo":
       case "doneTaskGraph":
+      case "removeTodo":
         return ["0"];
       case "addTaskGraph":
         return ["add", "a message"];
+      case "addFeedback":
+        return ["a finding"];
       case "fail":
         return ["check", "1", "bun test"];
       default:
         return [];
     }
   }
+});
+
+describe("transitions: the planning phase", () => {
+  test("plan_feedback is set by a rejection and gone by the time the task reaches READY_WORK", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    run(dir, id, "addFeedback", "the plan misses the empty case");
+    expect(metaOf(dir, id).plan_feedback).toEqual([
+      "the plan misses the empty case",
+    ]);
+
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    run(dir, id, "submit");
+
+    expect(metaOf(dir, id).state).toBe("READY_WORK");
+    expect(metaOf(dir, id).plan_feedback).toEqual([]);
+  });
+
+  test("a second rejection replaces the first plan_feedback", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    run(dir, id, "addFeedback", "finding one");
+
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    run(dir, id, "addFeedback", "finding two");
+
+    expect(metaOf(dir, id).plan_feedback).toEqual(["finding two"]);
+  });
 });
 
 describe("transitions: the split review", () => {
@@ -1633,7 +1783,7 @@ describe("transitions: the split review", () => {
   test("a finding applied in AGENT_REVIEWING lands the task in READY_WORK", () => {
     const { dir, id } = toAgentReview();
 
-    expect(run(dir, id, "addTodo", "the null case is untested").to).toBe(
+    expect(run(dir, id, "addFeedback", "the null case is untested").to).toBe(
       "READY_WORK",
     );
     expect(run(dir, id, "addTodo", "the error message is wrong").to).toBeNull();
@@ -1647,7 +1797,7 @@ describe("transitions: the split review", () => {
   test("an agent reviewer cannot close the task or fail it", () => {
     const { dir, id } = toAgentReview();
     expect(ALLOWED_TRANSITIONS.AGENT_REVIEWING).toEqual([
-      "addTodo",
+      "addFeedback",
       "submit",
       "hold",
       "release",
@@ -1674,7 +1824,7 @@ describe("transitions: hold and resume", () => {
     const { dir, id } = toWorking();
 
     expect(run(dir, id, "hold", "the staging database is down").to).toBe(
-      "HELD",
+      "HELD_WORK",
     );
 
     const meta = metaOf(dir, id);
@@ -1685,7 +1835,9 @@ describe("transitions: hold and resume", () => {
 
   test("hold from AGENT_REVIEWING works the same way", () => {
     const { dir, id } = toAgentReview();
-    expect(run(dir, id, "hold", "the diff does not apply").to).toBe("HELD");
+    expect(run(dir, id, "hold", "the diff does not apply").to).toBe(
+      "HELD_WORK",
+    );
     expect(metaOf(dir, id).held_reason).toBe("the diff does not apply");
   });
 
@@ -1741,13 +1893,38 @@ describe("transitions: hold and resume", () => {
     run(dir, id, "hold", "blocked on a decision");
 
     expect(metaOf(dir, id).todos).toHaveLength(1);
-    expect(metaOf(dir, id).state).toBe("HELD");
+    expect(metaOf(dir, id).state).toBe("HELD_WORK");
+  });
+
+  test("hold from PLANNING parks the task in HELD_PLAN and resume re-plans it", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    expect(run(dir, id, "hold", "the criteria are empty").to).toBe("HELD_PLAN");
+    expect(run(dir, id, "resume").to).toBe("READY_PLAN");
+  });
+
+  test("hold from PLAN_REVIEWING parks the task in HELD_PLAN", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    expect(run(dir, id, "hold", "the criteria contradict the goal").to).toBe(
+      "HELD_PLAN",
+    );
+  });
+
+  test("addTodo from HELD_PLAN sends the task back to READY_PLAN", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "hold", "waiting on a person");
+    expect(run(dir, id, "addTodo", "the missing piece").to).toBe("READY_PLAN");
   });
 
   test("the dispatcher queue never contains a held task", () => {
     const { dir, id } = toHeld();
-    expect(metaOf(dir, id).state).toBe("HELD");
-    expect(ALLOWED_TRANSITIONS.HELD).not.toContain("claim");
+    expect(metaOf(dir, id).state).toBe("HELD_WORK");
+    expect(ALLOWED_TRANSITIONS.HELD_PLAN).not.toContain("claim");
+    expect(ALLOWED_TRANSITIONS.HELD_WORK).not.toContain("claim");
   });
 });
 
@@ -1824,7 +2001,7 @@ describe("transitions: the workspace block", () => {
     expect(() =>
       run(dir, id, "claim", "pi-1", String(process.pid), "work/000001"),
     ).toThrow(/"worktree" must be a non-empty string/);
-    expect(metaOf(dir, id).state).toBe("READY_WORK");
+    expect(metaOf(dir, id).state).toBe("READY_PLAN");
     expect(metaOf(dir, id).workspace).toBeNull();
   });
 
@@ -1853,6 +2030,10 @@ describe("transitions: the workspace block", () => {
     const dir = makeTasksDir();
     const id = createTask(dir, "a task").id;
     run(dir, id, "noDependencies");
+    run(dir, id, "claim", "p", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "pr", String(process.pid));
+    run(dir, id, "submit");
     run(
       dir,
       id,

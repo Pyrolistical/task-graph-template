@@ -12,6 +12,7 @@
       "provider": "llama.cpp-rocm",
       "model": "rocm",
       "slots": 1,
+      "roles": ["worker"],
       "enabled": false
     }
   ]

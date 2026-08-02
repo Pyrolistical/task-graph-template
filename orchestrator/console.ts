@@ -3,7 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TaskId } from "./task.ts";
 import type { AgentRow } from "./agents.ts";
-import { type Activity, describeActivity, describeLabel, elapsedSuffix } from "./activity.ts";
+import {
+  type Activity,
+  describeActivity,
+  describeLabel,
+  elapsedSuffix,
+} from "./activity.ts";
 import type { RunningCheck } from "./checks.ts";
 import type { TaskRow } from "./graph.ts";
 import type { Candidate, Rank } from "./scheduler.ts";
@@ -204,6 +209,34 @@ export interface Usage {
   input: number;
   output: number;
   cacheRead: number;
+}
+
+export interface Sample {
+  timestampMs: number;
+  tokens: number;
+}
+
+export function tokensPerSecond(
+  samples: Sample[],
+  nowMs: number,
+): number | null {
+  const first = samples[0];
+  if (first === undefined) {
+    return null;
+  }
+  const last = samples[samples.length - 1]!;
+  let durationMs = last.timestampMs - first.timestampMs;
+  if (durationMs <= 0) {
+    durationMs = nowMs - first.timestampMs;
+  }
+  if (durationMs <= 0) {
+    return null;
+  }
+  let tokens = 0;
+  for (const sample of samples) {
+    tokens += sample.tokens;
+  }
+  return (tokens / durationMs) * 1000;
 }
 
 function entry(
@@ -415,18 +448,12 @@ function append(
   }
 }
 
-function addUsage(total: Usage, usage: Usage): void {
-  total.input += usage.input;
-  total.output += usage.output;
-  total.cacheRead += usage.cacheRead;
-}
-
 const READ_CHUNK = 1 << 20;
 
 export class SessionTail {
   readonly path: string;
   readonly entries: Entry[] = [];
-  totalUsage: Usage = { input: 0, output: 0, cacheRead: 0 };
+  readonly samples: Sample[] = [];
 
   private offset = 0;
   private ino = 0;
@@ -449,7 +476,7 @@ export class SessionTail {
       this.pending = "";
       this.decoder = new TextDecoder();
       this.entries.length = 0;
-      this.totalUsage = { input: 0, output: 0, cacheRead: 0 };
+      this.samples.length = 0;
     }
     if (this.offset === stats.size) {
       return this.entries;
@@ -475,10 +502,17 @@ export class SessionTail {
           if (line.trim() === "") {
             continue;
           }
-          const result = recordEntries(JSON.parse(line));
+          const record = JSON.parse(line) as Record<string, unknown>;
+          const result = recordEntries(record);
           append(this.entries, result);
           if (result.usage !== null) {
-            addUsage(this.totalUsage, result.usage);
+            this.samples.push({
+              timestampMs: stamp(record),
+              tokens: result.usage.output,
+            });
+            if (this.samples.length > 10) {
+              this.samples.shift();
+            }
           }
         }
       }
@@ -514,11 +548,15 @@ export class Sessions {
     return cache.update(this.tail(sessionPath).entries, width);
   }
 
-  usage(sessionPath: string | null): Usage | null {
+  rate(sessionPath: string | null, nowMs: number): number | null {
     if (sessionPath === null) {
       return null;
     }
-    return this.tails.get(sessionPath)?.totalUsage ?? null;
+    const tail = this.tails.get(sessionPath);
+    if (tail === undefined) {
+      return null;
+    }
+    return tokensPerSecond(tail.samples, nowMs);
   }
 
   keep(sessionPaths: Set<string>): void {
@@ -662,10 +700,7 @@ export function toggle(on: boolean, label: string, readOnly: boolean): Line {
   ];
 }
 
-export function abortButton(
-  pane: Pane,
-  readOnly: boolean,
-): Line {
+export function abortButton(pane: Pane, readOnly: boolean): Line {
   if (readOnly || pane.agent.activity.kind === "none") {
     return [];
   }
@@ -677,6 +712,9 @@ export const RANK_LABELS: Record<Rank, string> = {
   READY_AGENT_REVIEW: "READY_AGENT_REVIEW",
   READY_WORK_STARTED: "READY_WORK",
   READY_WORK_FRESH: "READY_WORK",
+  READY_PLAN_REVIEW: "READY_PLAN_REVIEW",
+  READY_PLAN_STARTED: "READY_PLAN",
+  READY_PLAN_FRESH: "READY_PLAN",
 };
 
 export function queueHeader(
@@ -779,28 +817,20 @@ export function activityLine(pane: Pane): string {
   return describeActivity(pane.agent.activity);
 }
 
-export function statsLine(pane: Pane, usage: Usage | null): string {
-  const { agent } = pane;
+export function statsLine(pane: Pane, rate: number | null): string {
   const parts: string[] = [];
-  if (agent.tokens !== null) {
-    parts.push(`${thousands(agent.tokens)} tokens`);
+  if (rate !== null) {
+    parts.push(`${thousands(Math.round(rate * 10) / 10)} tok/s`);
   }
-  if (agent.context_percent !== null) {
-    parts.push(`ctx ${Math.round(agent.context_percent)}%`);
-  }
-  if (usage !== null) {
-    parts.push(
-      `${thousands(usage.input)} in`,
-      `${thousands(usage.output)} out`,
-      `${thousands(usage.cacheRead)} cached`,
-    );
+  if (pane.agent.context_percent !== null) {
+    parts.push(`ctx ${Math.round(pane.agent.context_percent)}%`);
   }
   return parts.join(" · ");
 }
 
 export function header(
   pane: Pane,
-  usage: Usage | null,
+  rate: number | null,
   width: number,
   nowMs: number,
   readOnly: boolean,
@@ -853,7 +883,7 @@ export function header(
     ),
     clip([{ text: detailLine(pane), sgr: DIM }], width),
     activityRow,
-    clip([{ text: statsLine(pane, usage), sgr: DIM }], width),
+    clip([{ text: statsLine(pane, rate), sgr: DIM }], width),
   ];
 }
 
@@ -934,7 +964,7 @@ export function paneWidth(columns: number, count: number): number {
 
 export interface Cell {
   pane: Pane;
-  usage: Usage | null;
+  rate: number | null;
   lines: (width: number) => Line[];
 }
 
@@ -969,7 +999,7 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
   const height = bodyHeight(rows);
   const totals: number[] = [];
   const hits: Hit[] = [];
-  const rendered = cells.map(({ pane, usage, lines }, index) => {
+  const rendered = cells.map(({ pane, rate, lines }, index) => {
     const paneLines = lines(width);
     totals.push(paneLines.length);
     if (!readOnly) {
@@ -991,12 +1021,15 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
           row: QUEUE_LINES + 2,
           from: from + width - buttonWidth,
           to: from + width,
-          command: { command: "agent_abort", "agent-name-slot": pane.agent.name },
+          command: {
+            command: "agent_abort",
+            "agent-name-slot": pane.agent.name,
+          },
         });
       }
     }
     return [
-      ...header(pane, usage, width, nowMs, readOnly),
+      ...header(pane, rate, width, nowMs, readOnly),
       [{ text: "─".repeat(width), sgr: DIM }],
       ...body(paneLines, height, scroll),
     ];
@@ -1043,7 +1076,7 @@ export function frame(
     sessions.entries(session);
     return {
       pane,
-      usage: sessions.usage(session),
+      rate: sessions.rate(session, layout.nowMs),
       lines: (width: number) => sessions.lines(session, width),
     };
   });

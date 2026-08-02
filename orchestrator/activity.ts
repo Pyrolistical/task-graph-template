@@ -4,7 +4,10 @@ export type Activity =
   | { kind: "compacting"; reason: string; started_at: number }
   | { kind: "none" };
 
-export function toolTarget(toolName: string, args: Record<string, unknown>): string {
+export function toolTarget(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
   const command = args?.command;
   if (typeof command === "string") {
     const newline = command.indexOf("\n");
@@ -17,7 +20,10 @@ export function toolTarget(toolName: string, args: Record<string, unknown>): str
   return toolName;
 }
 
-export function toolCall(toolName: string, args: Record<string, unknown>): Activity {
+export function toolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+): Activity {
   return {
     kind: "tool-call",
     tool: toolName,

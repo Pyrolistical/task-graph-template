@@ -1,16 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { TaskId, ValidState } from "./task.ts";
+import type { TaskId } from "./task.ts";
 
 export const SERVER_ROOT = "/tmp/task-graph-server";
 
 export const SERVER_LOG_CAP_BYTES = 100 * 1024 * 1024;
 
-export type Role = "agent_worker" | "agent_reviewer";
+export const ALL_ROLES = ["worker", "reviewer", "planner"] as const;
 
-export const ROLE_STATE: Record<Role, ValidState> = {
-  agent_worker: "WORKING",
-  agent_reviewer: "AGENT_REVIEWING",
+export type Role = (typeof ALL_ROLES)[number];
+
+export const AGENT_STATES = [
+  "PLANNING",
+  "PLAN_REVIEWING",
+  "WORKING",
+  "AGENT_REVIEWING",
+] as const;
+
+export type ClaimState = (typeof AGENT_STATES)[number];
+
+export const STATE_ROLE: Record<ClaimState, Role> = {
+  PLANNING: "planner",
+  PLAN_REVIEWING: "reviewer",
+  WORKING: "worker",
+  AGENT_REVIEWING: "reviewer",
 };
 
 export function repoKey(repoPath: string): string {
@@ -120,8 +133,9 @@ export class Runtime {
 
   prepare(id: TaskId): void {
     fs.mkdirSync(this.history(id), { recursive: true });
-    fs.mkdirSync(this.sessionDir(id, "agent_worker"), { recursive: true });
-    fs.mkdirSync(this.sessionDir(id, "agent_reviewer"), { recursive: true });
+    fs.mkdirSync(this.sessionDir(id, "worker"), { recursive: true });
+    fs.mkdirSync(this.sessionDir(id, "reviewer"), { recursive: true });
+    fs.mkdirSync(this.sessionDir(id, "planner"), { recursive: true });
   }
 
   discard(id: TaskId): void {

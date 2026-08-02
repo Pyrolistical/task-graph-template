@@ -3,7 +3,7 @@ import { z } from "zod";
 import { parse } from "./schema.ts";
 import { DEFAULT_WRITE, PI_HOME, overlays } from "./sandbox.ts";
 import type { TaskId } from "./task.ts";
-import type { Role } from "./runtime.ts";
+import { ALL_ROLES, type Role } from "./runtime.ts";
 import type { Activity } from "./activity.ts";
 
 const Entry = z.strictObject({
@@ -13,6 +13,7 @@ const Entry = z.strictObject({
   slots: z.int().min(1).default(1),
   enabled: z.boolean().default(true),
   write: z.array(z.string().min(1)).default(() => [...DEFAULT_WRITE]),
+  roles: z.array(z.enum(ALL_ROLES)).default(() => [...ALL_ROLES]),
 });
 
 const Pool = z
@@ -43,6 +44,7 @@ export interface AgentSlot {
   slot: number;
   enabled: boolean;
   write: string[];
+  roles: Role[];
 }
 
 export function agentWrite(slot: AgentSlot): string[] {
@@ -82,6 +84,7 @@ export function parseAgents(raw: unknown, source = "agents.json"): AgentSlot[] {
         slot,
         enabled: entry.enabled,
         write: entry.write,
+        roles: entry.roles,
       });
     }
   }

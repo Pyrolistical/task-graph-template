@@ -8,7 +8,12 @@ export type TaskId = string;
 export const VALID_STATES = [
   "NEW",
   "BLOCKED",
-  "HELD",
+  "HELD_PLAN",
+  "HELD_WORK",
+  "READY_PLAN",
+  "PLANNING",
+  "READY_PLAN_REVIEW",
+  "PLAN_REVIEWING",
   "READY_WORK",
   "WORKING",
   "READY_CHECK",
@@ -30,6 +35,8 @@ export const ALL_STATES = [...VALID_STATES, CLOSED_STATE] as const;
 export type TaskState = (typeof ALL_STATES)[number];
 
 export const CLAIMED_STATES = [
+  "PLANNING",
+  "PLAN_REVIEWING",
   "WORKING",
   "CHECKING",
   "AGENT_REVIEWING",
@@ -146,6 +153,7 @@ const TaskFields = z.strictObject({
   workspace: Workspace.nullable(),
   todos: z.array(Todo),
   checks: z.array(nonEmpty),
+  plan_feedback: z.array(nonEmpty).default([]),
   failures: z.array(Failure),
   task_graph_updates: z.array(TaskGraphUpdate),
 });
@@ -249,7 +257,7 @@ export function serializeMeta(meta: TaskMeta): string {
   for (const key of FIELD_ORDER) {
     const value = meta[key];
 
-    if (key === "depends_on" || key === "checks") {
+    if (key === "depends_on" || key === "checks" || key === "plan_feedback") {
       const items = value as string[];
       if (items.length === 0) {
         lines.push(`${key}: []`);
