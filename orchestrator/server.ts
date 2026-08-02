@@ -45,6 +45,7 @@ import {
 import { inbox } from "./inbox.ts";
 import { type IssueName, ISSUES, Prompts } from "./prompts.ts";
 import { LOOP_LIMIT, PiProcess, type StopReason } from "./rpc.ts";
+import type { Activity } from "./activity.ts";
 import { type Candidate, candidates, plan } from "./scheduler.ts";
 import { type Command, takeCommand, watchCommands } from "./command.ts";
 import {
@@ -324,6 +325,28 @@ export class Server {
     return rows;
   }
 
+  abortAgent(name: string): AgentRow {
+    const worker = this.workers.get(name);
+    if (worker === undefined) {
+      throw new Error(
+        `no agent slot named "${name}"; the pool has ${[...this.workers.keys()].join(", ")}`,
+      );
+    }
+
+    if (worker.process === null || !worker.process.alive) {
+      throw new Error(`${name} is not running`);
+    }
+
+    if (worker.process.stream.state.activity.kind === "none") {
+      throw new Error(`${name} is not doing anything to abort`);
+    }
+
+    worker.process.abort();
+    this.runtime.log(`${name} aborted`);
+
+    return this.agentRows().find((row) => row.name === name)!;
+  }
+
   transition(
     taskId: TaskId,
     name: TransitionName,
@@ -460,6 +483,8 @@ export class Server {
     try {
       if (command.command === "scheduler") {
         this.setSchedulerEnabled(command.enabled);
+      } else if (command.command === "agent_abort") {
+        this.abortAgent(command["agent-name-slot"]);
       } else {
         this.setAgentEnabled(command.agent, command.enabled);
       }
@@ -1133,7 +1158,7 @@ export class Server {
         role: worker.role,
         pid: worker.process?.pid ?? worker.detachedPid,
         started_at: worker.started_at,
-        activity: worker.process?.stream.state.activity ?? null,
+        activity: worker.process?.stream.state.activity ?? { kind: "none" },
         tokens: worker.tokens,
         context_percent: worker.contextPercent,
         session: worker.session,

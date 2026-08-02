@@ -51,6 +51,7 @@ const counter = path.join(sessionDir, "prompt-count");
 
 let sessionFile = null;
 let busy = false;
+let busyTimer: ReturnType<typeof setTimeout> | null = null;
 let prompts = fs.existsSync(counter)
   ? Number(fs.readFileSync(counter, "utf-8"))
   : 0;
@@ -199,7 +200,7 @@ function turn(step) {
   };
 
   if (step.busy_ms) {
-    setTimeout(finish, step.busy_ms);
+    busyTimer = setTimeout(finish, step.busy_ms);
   } else {
     finish();
   }
@@ -251,7 +252,18 @@ async function handle(command) {
     }
     case "abort": {
       respond("abort", command.id);
+      if (busyTimer !== null) {
+        clearTimeout(busyTimer);
+        busyTimer = null;
+      }
       busy = false;
+      emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "aborted",
+        },
+      });
       emit({ type: "agent_settled" });
       break;
     }

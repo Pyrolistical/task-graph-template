@@ -1,8 +1,11 @@
-import { describe, expect } from "bun:test";
+import { describe, expect, setSystemTime } from "bun:test";
 import { tempDir, test } from "./temp.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+setSystemTime(new Date("2026-01-01").getTime());
+const NOW = Date.now();
 import {
   agentModelKey,
   agentWrite,
@@ -29,6 +32,7 @@ import { ISSUES, Prompts } from "./prompts.ts";
 import { SchemaError } from "./schema.ts";
 import { render } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
+import { describeActivity, toolCall } from "./activity.ts";
 import {
   JsonlSplitter,
   LOOP_LIMIT,
@@ -1217,12 +1221,129 @@ describe("the rpc stream", () => {
         args: { command: "bun test\nsecond line" },
       })}\n`,
     );
-    expect(stream.state.activity).toBe("tool: bash — bun test");
+    expect(stream.state.activity).toEqual({
+      kind: "tool-call",
+      tool: "bash",
+      target: "bun test",
+      started_at: NOW,
+    });
 
     stream.feed(
       `${JSON.stringify({ type: "compaction_start", reason: "overflow" })}\n`,
     );
-    expect(stream.state.activity).toBe("compacting (overflow)");
+    expect(stream.state.activity).toEqual({
+      kind: "compacting",
+      reason: "overflow",
+      started_at: NOW,
+    });
+  });
+
+  test("tool_execution_end sets activity to thinking", () => {
+    const stream = new PiStream();
+    stream.feed(
+      `${JSON.stringify({ type: "tool_execution_start", toolName: "bash", args: {} })}\n`,
+    );
+    stream.feed(
+      `${JSON.stringify({ type: "tool_execution_end", toolCallId: "c1" })}\n`,
+    );
+    expect(stream.state.activity).toEqual({ kind: "thinking", started_at: NOW });
+  });
+
+  test("agent_settled sets activity to none", () => {
+    const stream = new PiStream();
+    stream.feed(
+      `${JSON.stringify({ type: "tool_execution_start", toolName: "bash", args: {} })}\n`,
+    );
+    stream.feed(
+      `${JSON.stringify({ type: "agent_settled" })}\n`,
+    );
+    expect(stream.state.activity).toEqual({ kind: "none" });
+  });
+
+  test("starting sets activity to thinking", () => {
+    const stream = new PiStream();
+    stream.starting();
+    expect(stream.state.activity).toEqual({ kind: "thinking", started_at: NOW });
+  });
+
+  test("a tool call with args.path but no command targets the path", () => {
+    const stream = new PiStream();
+    stream.feed(
+      `${JSON.stringify({
+        type: "tool_execution_start",
+        toolName: "read",
+        args: { path: "/tmp/file.ts" },
+      })}\n`,
+    );
+    expect(stream.state.activity).toEqual({
+      kind: "tool-call",
+      tool: "read",
+      target: "/tmp/file.ts",
+      started_at: NOW,
+    });
+  });
+
+  test("a tool call with neither command nor path falls back to the tool name", () => {
+    const stream = new PiStream();
+    stream.feed(
+      `${JSON.stringify({
+        type: "tool_execution_start",
+        toolName: "think",
+        args: {},
+      })}\n`,
+    );
+    expect(stream.state.activity).toEqual({
+      kind: "tool-call",
+      tool: "think",
+      target: "think",
+      started_at: NOW,
+    });
+  });
+
+  test("after abort, the aborting flag is set before the write", () => {
+    const dir = tempDir("orchestrator-");
+    const script = path.join(dir, "exits.ts");
+    fs.writeFileSync(script, "process.exit(0);\n");
+
+    const proc = new PiProcess(
+      {
+        provider: "fake",
+        model: "fake",
+        sessionDir: path.join(dir, "session"),
+        name: "test",
+        cwd: dir,
+        systemPrompt: path.join(dir, "system.md"),
+        log: path.join(dir, "rpc.jsonl"),
+      },
+      script,
+      ["bun"],
+    );
+
+    const aborting = () =>
+      (proc as unknown as { aborting: boolean }).aborting;
+
+    expect(aborting()).toBe(false);
+    try {
+      proc.abort();
+    } catch {
+      // write may fail because the process is already dead
+    }
+    expect(aborting()).toBe(true);
+    proc.kill();
+  }, 10000);
+
+  test("describeActivity formats all four kinds", () => {
+    expect(describeActivity({ kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW })).toBe(
+      "tool: bash — bun test (0s)",
+    );
+    expect(
+      describeActivity({ kind: "tool-call", tool: "bash", target: "bash", started_at: NOW }),
+    ).toBe("tool: bash (0s)");
+    expect(describeActivity({ kind: "thinking", started_at: NOW })).toBe("thinking (0s)");
+    expect(describeActivity({ kind: "compacting", reason: "overflow", started_at: NOW })).toBe(
+      "compacting (overflow) (0s)",
+    );
+    expect(describeActivity({ kind: "none" })).toBe("");
   });
 
   test("the settle of the turn just handled does not satisfy the next prompt", async () => {

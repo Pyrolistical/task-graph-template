@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TaskId } from "./task.ts";
 import type { AgentRow } from "./agents.ts";
+import { type Activity, describeActivity, describeLabel, elapsedSuffix } from "./activity.ts";
 import type { RunningCheck } from "./checks.ts";
 import type { TaskRow } from "./graph.ts";
 import type { Candidate, Rank } from "./scheduler.ts";
@@ -661,6 +662,16 @@ export function toggle(on: boolean, label: string, readOnly: boolean): Line {
   ];
 }
 
+export function abortButton(
+  pane: Pane,
+  readOnly: boolean,
+): Line {
+  if (readOnly || pane.agent.activity.kind === "none") {
+    return [];
+  }
+  return [{ text: "[abort]", sgr: RED }];
+}
+
 export const RANK_LABELS: Record<Rank, string> = {
   resume: "resume",
   READY_AGENT_REVIEW: "READY_AGENT_REVIEW",
@@ -765,7 +776,7 @@ export function activityLine(pane: Pane): string {
   if (pane.check !== null) {
     return `check ${pane.check.index}: ${oneLine(pane.check.command)}`;
   }
-  return pane.agent.activity ?? "";
+  return describeActivity(pane.agent.activity);
 }
 
 export function statsLine(pane: Pane, usage: Usage | null): string {
@@ -802,13 +813,46 @@ export function header(
     1,
     width - spanWidth(enabled) - spanWidth(left) - textWidth(right),
   );
+  const button = abortButton(pane, readOnly);
+  const buttonWidth = spanWidth(button);
+  const activityRow = (() => {
+    if (pane.check !== null) {
+      const text = [{ text: activityLine(pane), sgr: DIM }];
+      const room = width - buttonWidth;
+      const clipped = clip(text, room);
+      if (buttonWidth === 0) {
+        return clipped;
+      }
+      return [
+        ...clipped,
+        { text: " ".repeat(width - spanWidth(clipped) - buttonWidth) },
+        ...button,
+      ];
+    }
+    const suffix = elapsedSuffix(pane.agent.activity);
+    const suffixWidth = textWidth(suffix);
+    const label = [{ text: describeLabel(pane.agent.activity), sgr: DIM }];
+    const labelRoom = width - buttonWidth - suffixWidth;
+    const clippedLabel = clip(label, Math.max(0, labelRoom));
+    const suffixSpan: Line = suffix === "" ? [] : [{ text: suffix, sgr: DIM }];
+    const joined: Line = [...clippedLabel, ...suffixSpan];
+    if (buttonWidth === 0) {
+      return joined;
+    }
+    const gap = width - spanWidth(joined) - buttonWidth;
+    return [
+      ...joined,
+      ...(gap > 0 ? [{ text: " ".repeat(gap) }] : []),
+      ...button,
+    ];
+  })();
   return [
     clip(
       [...enabled, ...left, { text: " ".repeat(gap) }, { text: right }],
       width,
     ),
     clip([{ text: detailLine(pane), sgr: DIM }], width),
-    clip([{ text: activityLine(pane), sgr: DIM }], width),
+    activityRow,
     clip([{ text: statsLine(pane, usage), sgr: DIM }], width),
   ];
 }
@@ -940,6 +984,16 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
           enabled: !pane.agent.enabled,
         },
       });
+      const button = abortButton(pane, readOnly);
+      if (button.length > 0) {
+        const buttonWidth = spanWidth(button);
+        hits.push({
+          row: QUEUE_LINES + 2,
+          from: from + width - buttonWidth,
+          to: from + width,
+          command: { command: "agent_abort", "agent-name-slot": pane.agent.name },
+        });
+      }
     }
     return [
       ...header(pane, usage, width, nowMs, readOnly),

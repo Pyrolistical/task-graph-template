@@ -12,6 +12,10 @@ const Command = z.discriminatedUnion("command", [
     agent: z.string().min(1),
     enabled: z.boolean(),
   }),
+  z.strictObject({
+    command: z.literal("agent_abort"),
+    "agent-name-slot": z.string().min(1),
+  }),
 ]);
 
 export type Command = z.infer<typeof Command>;

@@ -4,6 +4,7 @@ import { parse } from "./schema.ts";
 import { DEFAULT_WRITE, PI_HOME, overlays } from "./sandbox.ts";
 import type { TaskId } from "./task.ts";
 import type { Role } from "./runtime.ts";
+import type { Activity } from "./activity.ts";
 
 const Entry = z.strictObject({
   type: z.string().min(1),
@@ -114,7 +115,7 @@ export interface AgentRow {
   role: Role | null;
   pid: number | null;
   started_at: string | null;
-  activity: string | null;
+  activity: Activity;
   tokens: number | null;
   context_percent: number | null;
   session: string | null;
@@ -137,7 +138,7 @@ export function idleRow(slot: AgentSlot, enabled = true): AgentRow {
     role: null,
     pid: null,
     started_at: null,
-    activity: null,
+    activity: { kind: "none" },
     tokens: null,
     context_percent: null,
     session: null,

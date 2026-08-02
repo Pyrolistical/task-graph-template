@@ -1,9 +1,13 @@
-import { describe, expect } from "bun:test";
+import { describe, expect, setSystemTime } from "bun:test";
+
+setSystemTime(new Date("2026-01-01").getTime());
+const NOW = Date.now();
 import { tempDir, test } from "./temp.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { idleRow, parseAgents } from "./agents.ts";
 import type { AgentRow } from "./agents.ts";
+import type { Activity } from "./activity.ts";
 import type { TaskRow } from "./graph.ts";
 import {
   type Entry,
@@ -19,6 +23,7 @@ import {
   SWITCH_ON,
   Sessions,
   SessionTail,
+  abortButton,
   activityLine,
   body,
   bodyHeight,
@@ -75,7 +80,7 @@ function busyRow(overrides: Partial<AgentRow> = {}): AgentRow {
     role: "agent_worker",
     pid: 4242,
     started_at: new Date(1000).toISOString(),
-    activity: "tool: bash — bun test",
+    activity: { kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW },
     tokens: 12300,
     context_percent: 41.6,
     session: "/tmp/session.jsonl",
@@ -443,7 +448,7 @@ describe("panes", () => {
     });
 
     expect(detailLine(pane)).toContain("retry 3 at ");
-    expect(activityLine(pane)).toBe("tool: bash — bun test");
+    expect(activityLine(pane)).toBe("tool: bash — bun test (0s)");
   });
 
   test("stats merge the agent row with the session usage", () => {
@@ -708,10 +713,11 @@ describe("screen", () => {
     const { hits } = screen(cells(2), [], layoutOf());
     const width = paneWidth(100, 2);
 
-    expect(hits).toHaveLength(2);
-    expect(hits[0]).toMatchObject({ row: QUEUE_LINES, from: 0 });
-    expect(hits[1]!.from).toBe(width + 1);
-    expect(hits[0]!.command).toEqual({
+    const toggleHits = hits.filter((hit) => hit.command.command === "agent");
+    expect(toggleHits).toHaveLength(2);
+    expect(toggleHits[0]).toMatchObject({ row: QUEUE_LINES, from: 0 });
+    expect(toggleHits[1]!.from).toBe(width + 1);
+    expect(toggleHits[0]!.command).toEqual({
       command: "agent",
       agent: SLOTS[0]!.agent,
       enabled: false,
@@ -720,6 +726,81 @@ describe("screen", () => {
 
   test("a read-only screen offers nothing to click", () => {
     expect(screen(cells(2), [], layoutOf({ readOnly: true })).hits).toEqual([]);
+  });
+
+  test("a busy pane gets an abort hit at QUEUE_LINES + 2", () => {
+    const { hits } = screen(cells(1), [], layoutOf());
+    const abortHit = hits.find(
+      (hit) => hit.command.command === "agent_abort",
+    );
+
+    expect(abortHit).toBeDefined();
+    expect(abortHit!.row).toBe(QUEUE_LINES + 2);
+    expect(abortHit!.command).toEqual({
+      command: "agent_abort",
+      "agent-name-slot": SLOTS[0]!.name,
+    });
+  });
+
+  test("the second pane's abort hit is offset by width + 1", () => {
+    const { hits } = screen(cells(2), [], layoutOf());
+    const width = paneWidth(100, 2);
+    const abortHits = hits.filter(
+      (hit) => hit.command.command === "agent_abort",
+    );
+
+    expect(abortHits).toHaveLength(2);
+    expect(abortHits[0]!.from).toBeLessThan(width);
+    expect(abortHits[1]!.from).toBeGreaterThanOrEqual(width + 1);
+  });
+
+  test("hitAt returns the abort command for a click inside the span", () => {
+    const { hits } = screen(cells(1), [], layoutOf());
+    const abortHit = hits.find(
+      (hit) => hit.command.command === "agent_abort",
+    )!;
+
+    expect(
+      hitAt(hits, {
+        button: 0,
+        column: abortHit.from,
+        row: abortHit.row,
+        pressed: true,
+      }),
+    ).toEqual(abortHit.command);
+
+    expect(
+      hitAt(hits, {
+        button: 0,
+        column: abortHit.to,
+        row: abortHit.row,
+        pressed: true,
+      }),
+    ).toBeNull();
+  });
+
+  test("no abort hits when readOnly and none for an idle pane", () => {
+    const readOnlyHits = screen(
+      cells(1),
+      [],
+      layoutOf({ readOnly: true }),
+    ).hits;
+    expect(
+      readOnlyHits.some((hit) => hit.command.command === "agent_abort"),
+    ).toBe(false);
+
+    const idleCells = [
+      {
+        pane: paneOf({ agents: [idleRow(SLOTS[0]!)] }),
+        usage: null,
+        lines: (width: number) =>
+          new PaneLines().update([entryOf("nothing")], width),
+      },
+    ];
+    const idleHits = screen(idleCells, [], layoutOf()).hits;
+    expect(
+      idleHits.some((hit) => hit.command.command === "agent_abort"),
+    ).toBe(false);
   });
 
   test("a terminal too narrow for the panes fails", () => {
@@ -757,30 +838,88 @@ describe("switches", () => {
   test("the pane header leads with the agent switch", () => {
     const lines = header(paneOf(), null, 60, 1000, false);
 
-    expect(plain(lines[0]!).startsWith(`${SWITCH_ON} pi · `)).toBe(true);
+    expect(renderLine(lines[0]!)).toBe(
+      "\x1b[32m[─●]\x1b[0m pi · anthropic/claude-sonnet-4-5 · slot 1       busy 0s",
+    );
   });
 
   test("a narrow pane clips the identity, never the switch or the state", () => {
-    const line = plain(header(paneOf(), null, 30, 1000, false)[0]!);
+    const line = renderLine(header(paneOf(), null, 30, 1000, false)[0]!);
 
-    expect(line.startsWith(SWITCH_ON)).toBe(true);
-    expect(line.endsWith("busy 0s")).toBe(true);
-    expect(line).toContain("…");
-    expect(textWidth(line)).toBe(30);
+    expect(line).toBe(
+      "\x1b[32m[─●]\x1b[0m pi · anthropic/c… busy 0s",
+    );
+    expect(textWidth(line.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
   });
 
   test("a disabled slot reads as idle behind an off switch, not as a state", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
-    const line = plain(header(pane, null, 60, 1000, false)[0]!);
 
-    expect(line.startsWith(SWITCH_OFF)).toBe(true);
-    expect(line.trimEnd().endsWith("idle")).toBe(true);
+    expect(renderLine(header(pane, null, 60, 1000, false)[0]!)).toBe(
+      "\x1b[2m[●─]\x1b[0m pi · anthropic/claude-sonnet-4-5 · slot 1          idle",
+    );
   });
 
   test("a read-only pane header says enabled or disabled instead", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
 
-    expect(plain(header(pane, null, 60, 1000, true)[0]!)).toContain("disabled");
+    expect(plain(header(pane, null, 60, 1000, true)[0]!)).toBe(
+      "disabled pi · anthropic/claude-sonnet-4-5 · slot 1      idle",
+    );
+  });
+});
+
+describe("the abort button", () => {
+  test("the button is empty when the activity is none", () => {
+    const pane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
+
+    expect(abortButton(pane, false)).toEqual([]);
+  });
+
+  test("the button is empty in read-only mode", () => {
+    const pane = paneOf();
+
+    expect(abortButton(pane, true)).toEqual([]);
+  });
+
+  test("the button is present for each non-none activity kind", () => {
+    const kinds: Activity[] = [
+      { kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW },
+      { kind: "thinking", started_at: NOW },
+      { kind: "compacting", reason: "overflow", started_at: NOW },
+    ];
+
+    for (const kind of kinds) {
+      const pane = paneOf({ agents: [busyRow({ activity: kind })] });
+      const button = abortButton(pane, false);
+      expect(button.length).toBeGreaterThan(0);
+      expect(plain(button)).toBe("[abort]");
+    }
+  });
+
+  test("header on a busy pane contains abort; on an idle pane it does not", () => {
+    const busyPane = paneOf();
+    const idlePane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
+
+    const busyLine = renderLine(header(busyPane, null, 60, 1000, false)[2]!);
+    const idleLine = renderLine(header(idlePane, null, 60, 1000, false)[2]!);
+
+    expect(busyLine).toBe(
+      "\x1b[2mtool: bash — bun test\x1b[0m\x1b[2m (0s)\x1b[0m                           \x1b[31m[abort]\x1b[0m",
+    );
+    expect(idleLine).toBe("\x1b[2m\x1b[0m");
+  });
+
+  test("the activity text is clipped rather than overlapping the button", () => {
+    const pane = paneOf({ agents: [busyRow({ activity: { kind: "tool-call", tool: "bash", target: "a very long command that would overflow the pane width", started_at: NOW } })] });
+
+    const lines = header(pane, null, 30, 1000, false);
+    const line = renderLine(lines[2]!);
+
+    expect(line).toBe(
+      "\x1b[2mtool: bash — a ve\x1b[0m\x1b[2m…\x1b[0m\x1b[2m (0s)\x1b[0m\x1b[31m[abort]\x1b[0m",
+    );
+    expect(textWidth(line.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
   });
 });
 
@@ -934,6 +1073,32 @@ describe("console commands", () => {
     expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
   });
 
+  test("writeCommand/takeCommand round-trips an agent_abort command", () => {
+    const runtime = runtimeIn(tempDir("console-"));
+
+    expect(
+      writeCommand(runtime, {
+        command: "agent_abort",
+        "agent-name-slot": "pi-fake-fake-1",
+      }),
+    ).toBe(true);
+    expect(takeCommand(runtime)).toEqual({
+      command: "agent_abort",
+      "agent-name-slot": "pi-fake-fake-1",
+    });
+  });
+
+  test("a malformed agent_abort command (missing slot) parses to null", () => {
+    const runtime = runtimeIn(tempDir("console-"));
+    fs.writeFileSync(
+      runtime.consoleCommand,
+      `{ "command": "agent_abort" }`,
+    );
+
+    expect(takeCommand(runtime)).toBeNull();
+    expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
+  });
+
   test("the watcher hands over the command the console just wrote", async () => {
     const runtime = runtimeIn(tempDir("console-"));
     const taken: Command[] = [];
@@ -1033,6 +1198,7 @@ describe("runtime views", () => {
     expect(hits.map((hit) => hit.command.command)).toEqual([
       "scheduler",
       "agent",
+      "agent_abort",
     ]);
   });
 });

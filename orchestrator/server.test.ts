@@ -1125,6 +1125,9 @@ describe("the server: the views", () => {
       (agent: { task_id: string | null }) => agent.task_id === id,
     );
     expect(busy).toBeDefined();
+    expect(["tool-call", "thinking", "compacting", "none"]).toContain(
+      busy.activity.kind,
+    );
     expect(busy.role).toBe("agent_worker");
     expect(busy.pid).toBeGreaterThan(0);
     expect(busy.log).toBe(server.runtime.rpcLog(id));
@@ -1490,6 +1493,7 @@ describe("the mcp surface", () => {
     const client = await connect(fixture);
 
     expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([
+      "agent_abort",
       "disable_agent",
       "disable_scheduler",
       "enable_agent",
@@ -1873,7 +1877,7 @@ describe("the server: the reaper", () => {
       close: () => {},
       kill: () => {},
       abort: () => {},
-      stream: { state: { activity: null } },
+      stream: { state: { activity: { kind: "none" } } },
     };
 
     await server.tick();
@@ -2284,6 +2288,157 @@ describe("the server: enabling and disabling an agent", () => {
   }, 30000);
 });
 
+describe("the server: aborting an agent", () => {
+  test("aborting a busy slot resolves, the slot goes IDLE and the task is harvested", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task to abort");
+    setPlan(fixture, {
+      [id]: { agent_worker: [{ notes: "still going", busy_ms: 5000 }] },
+    });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await server.tick();
+
+    expect(stateOf(server, id)).toBe("WORKING");
+    const row = server.agentRows()[0]!;
+    expect(row.state).toBe("BUSY");
+
+    server.abortAgent(row.name);
+    server.setSchedulerEnabled(false);
+    await server.drain();
+
+    await until(server, () => {
+      const after = server.agentRows()[0]!;
+      return after.state === "IDLE" && stateOf(server, id) === "READY_WORK";
+    }, 20);
+
+    const after = server.agentRows()[0]!;
+    expect(after.state).toBe("IDLE");
+    expect(after.task_id).toBeNull();
+
+    server.shutdown();
+  }, 30000);
+
+  test("aborting an IDLE slot throws", async () => {
+    const fixture = makeFixture();
+    const server = await serverFor(fixture);
+
+    expect(() => server.abortAgent("pi-fake-fake-1")).toThrow(
+      /not running/,
+    );
+
+    server.shutdown();
+  }, 30000);
+
+  test("aborting an unknown slot name throws, listing the pool's slot names", async () => {
+    const fixture = makeFixture();
+    const server = await serverFor(fixture);
+
+    expect(() => server.abortAgent("pi-nobody-1")).toThrow(
+      /no agent slot named "pi-nobody-1"/,
+    );
+    expect(() => server.abortAgent("pi-nobody-1")).toThrow(
+      /pi-fake-fake-1/,
+    );
+
+    server.shutdown();
+  }, 30000);
+
+  test("aborting by agent key (no slot suffix) throws", async () => {
+    const fixture = makeFixture();
+    const server = await serverFor(fixture);
+
+    expect(() => server.abortAgent("pi-fake-fake")).toThrow(
+      /no agent slot named "pi-fake-fake"/,
+    );
+
+    server.shutdown();
+  }, 30000);
+
+  test("a slot that is BUSY but whose activity is none is refused", async () => {
+    const fixture = makeFixture();
+    const server = await serverFor(fixture);
+    const worker = (
+      server as unknown as {
+        workers: Map<string, { process: { alive: boolean; stream: { state: { activity: { kind: string } } }; abort: () => void; kill: () => void; close: () => void } }>;
+      }
+    ).workers.get("pi-fake-fake-1")!;
+
+    worker.process = {
+      alive: true,
+      stream: { state: { activity: { kind: "none" } } },
+      abort: () => {},
+      kill: () => {},
+      close: () => {},
+    };
+
+    expect(() => server.abortAgent("pi-fake-fake-1")).toThrow(
+      /not doing anything to abort/,
+    );
+
+    server.shutdown();
+  }, 30000);
+
+  test("a written agent_abort command file drives applyCommand and aborts the slot", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task to abort via command");
+    setPlan(fixture, {
+      [id]: { agent_worker: [{ notes: "still going", busy_ms: 5000 }] },
+    });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    expect(stateOf(server, id)).toBe("WORKING");
+
+    writeCommand(server.runtime, {
+      command: "agent_abort",
+      "agent-name-slot": "pi-fake-fake-1",
+    });
+    for (let waited = 0; waited < 200; waited++) {
+      await Bun.sleep(10);
+      const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
+      if (log.includes("aborted")) {
+        break;
+      }
+    }
+    server.setSchedulerEnabled(false);
+    await server.drain();
+    await settle(server, 2);
+
+    expect(server.agentRows()[0]!.state).toBe("IDLE");
+    expect(
+      fs.readFileSync(server.runtime.serverLog, "utf-8"),
+    ).toContain("aborted");
+
+    server.shutdown();
+  }, 30000);
+
+  test("a written agent_abort naming an idle slot is logged and dropped", async () => {
+    const fixture = makeFixture();
+    const server = await serverFor(fixture);
+
+    writeCommand(server.runtime, {
+      command: "agent_abort",
+      "agent-name-slot": "pi-fake-fake-1",
+    });
+    for (let waited = 0; waited < 200; waited++) {
+      await Bun.sleep(10);
+      const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
+      if (log.includes("refused")) {
+        break;
+      }
+    }
+
+    expect(
+      fs.readFileSync(server.runtime.serverLog, "utf-8"),
+    ).toContain("not running");
+
+    server.shutdown();
+  }, 30000);
+});
+
 describe("the server: detaching", () => {
   test("a slot still running for a previous manager is not offered as capacity", async () => {
     const fixture = makeFixture();
@@ -2309,7 +2464,7 @@ describe("the server: detaching", () => {
             role: "agent_worker",
             pid: alive.pid,
             started_at: new Date().toISOString(),
-            activity: null,
+            activity: { kind: "none" },
             tokens: null,
             context_percent: null,
             session: "/tmp/s.jsonl",

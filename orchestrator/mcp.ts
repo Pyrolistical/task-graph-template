@@ -255,6 +255,16 @@ export function build(server: Server): McpServer {
     async ({ agent }) => applied(server.setAgentEnabled(agent, false)),
   );
 
+  mcp.registerTool(
+    "agent_abort",
+    {
+      description:
+        "Abort whatever a slot is doing right now. Names a slot (with the trailing number), only works while the slot is doing something. The aborted turn ends the assignment and releases the slot.",
+      inputSchema: z.object({ agent: z.string().min(1) }),
+    },
+    async ({ agent }) => applied(server.abortAgent(agent)),
+  );
+
   const views: [string, string, string, () => string][] = [
     [
       "inbox",

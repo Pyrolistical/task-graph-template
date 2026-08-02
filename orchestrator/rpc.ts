@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { z } from "zod";
+import { type Activity, describeActivity, toolCall, toolTarget } from "./activity.ts";
 
 export const STOP_REASONS = [
   "stop",
@@ -66,35 +67,13 @@ export class JsonlSplitter {
 export const LOOP_LIMIT = 10;
 
 export interface StreamState {
-  activity: string | null;
+  activity: Activity;
   stopReason: StopReason | null;
   errorMessage: string | null;
   settled: boolean;
   retrying: boolean;
   failure: string | null;
   looping: string | null;
-}
-
-function toolTarget(record: PiRecord): string {
-  const { toolName, args } = ToolStart.parse(record);
-  const command = args?.command;
-  if (typeof command === "string") {
-    const newline = command.indexOf("\n");
-    return newline === -1 ? command : command.slice(0, newline);
-  }
-  const file = args?.path;
-  if (typeof file === "string") {
-    return file;
-  }
-  return toolName;
-}
-
-function describeTool(record: PiRecord): string {
-  const { toolName } = ToolStart.parse(record);
-  const target = toolTarget(record);
-  return target === toolName
-    ? `tool: ${toolName}`
-    : `tool: ${toolName} — ${target}`;
 }
 
 function signature(record: PiRecord): string {
@@ -113,7 +92,7 @@ export class PiStream {
   private repeated = { signature: "", count: 0 };
 
   readonly state: StreamState = {
-    activity: null,
+    activity: { kind: "none" },
     stopReason: null,
     errorMessage: null,
     settled: false,
@@ -155,22 +134,32 @@ export class PiStream {
         break;
       }
       case "tool_execution_start": {
-        this.state.activity = describeTool(record);
+        const { toolName, args } = ToolStart.parse(record);
+        this.state.activity = toolCall(toolName, args ?? {});
         this.repeat(record);
         break;
       }
       case "tool_execution_end": {
-        this.state.activity = "thinking";
+        this.state.activity = { kind: "thinking", started_at: Date.now() };
         break;
       }
       case "compaction_start": {
-        this.state.activity = `compacting (${Compaction.parse(record).reason})`;
+        this.state.activity = {
+          kind: "compacting",
+          reason: Compaction.parse(record).reason,
+          started_at: Date.now(),
+        };
         break;
       }
       case "auto_retry_start": {
         const retry = AutoRetry.parse(record);
         this.state.retrying = true;
-        this.state.activity = `retry ${retry.attempt}/${retry.maxAttempts}`;
+        this.state.activity = {
+          kind: "tool-call",
+          tool: "retry",
+          target: `${retry.attempt}/${retry.maxAttempts}`,
+          started_at: Date.now(),
+        };
         break;
       }
       case "auto_retry_end": {
@@ -190,7 +179,7 @@ export class PiStream {
       }
       case "agent_settled": {
         this.state.settled = true;
-        this.state.activity = null;
+        this.state.activity = { kind: "none" };
         for (const waiter of this.settleWaiters) {
           waiter();
         }
@@ -208,7 +197,8 @@ export class PiStream {
         : { signature: current, count: 1 };
 
     if (this.repeated.count >= LOOP_LIMIT) {
-      this.state.looping = toolTarget(record);
+      const { toolName, args } = ToolStart.parse(record);
+      this.state.looping = toolTarget(toolName, args ?? {});
     }
   }
 
@@ -216,7 +206,7 @@ export class PiStream {
     this.state.settled = false;
     this.state.stopReason = null;
     this.state.errorMessage = null;
-    this.state.activity = "thinking";
+    this.state.activity = { kind: "thinking", started_at: Date.now() };
     this.state.looping = null;
     this.repeated = { signature: "", count: 0 };
   }
@@ -390,6 +380,7 @@ export class PiProcess {
   }
 
   abort(): void {
+    this.aborting = true;
     this.write({ type: "abort" });
   }
 
@@ -397,7 +388,6 @@ export class PiProcess {
     if (this.aborting || !this.alive) {
       return;
     }
-    this.aborting = true;
     this.abort();
   }
 
