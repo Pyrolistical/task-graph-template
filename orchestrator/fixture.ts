@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createTask } from "./task.ts";
+import {
+  createTask,
+  findTaskFile,
+  readTaskFile,
+  withLock,
+  writeTaskFile,
+} from "./task.ts";
 import { applyTransition } from "./transition.ts";
 import { git, gitOrThrow } from "./git.ts";
 import { tempDir } from "./temp.ts";
@@ -9,20 +15,18 @@ import type { ClaimState } from "./runtime.ts";
 const REPO_ROOT = path.join(import.meta.dir, "..");
 
 export interface Step {
-  todos_done?: boolean;
+  todos?: string[];
+  notes?: string;
   submit?: boolean;
-  add_todos?: string[];
-  remove_todos?: number[];
   findings?: string[];
   delegations?: string[];
   blocked?: string;
-  raw_result?: string;
-  add_todo?: string;
-  notes?: string;
+  result_tool?: { name: string; args: Record<string, unknown> };
+  raw_final_message?: string;
+  tamper?: { from: string; to: string };
   commit?: { path: string; contents: string };
   write?: { path: string; contents: string };
   clean?: string[];
-  edit_header?: Record<string, string>;
   stop_reason?: string;
   loop?: number;
   busy_ms?: number;
@@ -50,7 +54,7 @@ const role = {
   PLANNING: "planner",
   PLAN_REVIEWING: "reviewer",
   WORKING: "worker",
-  AGENT_REVIEWING: "reviewer",
+  WORK_REVIEWING: "reviewer",
 }[state] ?? "worker";
 const plan = JSON.parse(fs.readFileSync(process.env.FAKE_PI_PLAN, "utf-8"));
 const steps = (plan[taskId] ?? {})[state] ?? [];
@@ -59,6 +63,7 @@ const counter = path.join(sessionDir, "prompt-count");
 let sessionFile = null;
 let busy = false;
 let busyTimer: ReturnType<typeof setTimeout> | null = null;
+let lastText = "done";
 let prompts = fs.existsSync(counter)
   ? Number(fs.readFileSync(counter, "utf-8"))
   : 0;
@@ -69,96 +74,46 @@ function assignmentPath() {
   return path.join(path.dirname(process.cwd()), "ASSIGNMENT.md");
 }
 
-function markDone(text, section) {
-  const lines = text.split("\\n");
-  let inside = false;
-  return lines
-    .map((line) => {
-      if (/^\\w+:/.test(line)) {
-        inside = line.startsWith(section + ":");
-      }
-      return inside && line.trim() === "done: false"
-        ? line.replace("false", "true")
-        : line;
-    })
-    .join("\\n");
-}
-
-function setResult(text, block) {
-  const end = text.indexOf("\\n---", 4);
-  const head = text.slice(0, end);
-  const at = head.search(/^result:/m);
-  return head.slice(0, at) + block + text.slice(end);
-}
-
-function list(name, values) {
-  return values.length === 0
-    ? "  " + name + ": []"
-    : "  " +
-        name +
-        ":\\n" +
-        values.map((v) => "    - " + JSON.stringify(v)).join("\\n");
-}
-
-function ints(name, values) {
-  return values.length === 0
-    ? "  " + name + ": []"
-    : "  " + name + ":\\n" + values.map((v) => "    - " + v).join("\\n");
-}
-
-function submitBlock(step) {
-  if (state === "PLANNING") {
-    return [
-      "result:",
-      "  type: submit",
-      list("addTodos", step.add_todos ?? []),
-      ints("removeTodos", step.remove_todos ?? []),
-    ].join("\\n");
+function resultCall(step) {
+  if (step.result_tool) return step.result_tool;
+  if (step.blocked) {
+    return { name: "blocked", args: { message: step.blocked } };
   }
-  if (state === "PLAN_REVIEWING") {
-    return [
-      "result:",
-      "  type: submit",
-      list("findings", step.findings ?? []),
-    ].join("\\n");
+  if (step.submit) {
+    if (state === "PLAN_REVIEWING") {
+      return { name: "submit", args: { findings: step.findings ?? [] } };
+    }
+    if (state === "WORK_REVIEWING") {
+      return {
+        name: "submit",
+        args: {
+          findings: step.findings ?? [],
+          delegations: step.delegations ?? [],
+        },
+      };
+    }
+    return { name: "submit", args: {} };
   }
-  if (state === "AGENT_REVIEWING") {
-    return [
-      "result:",
-      "  type: submit",
-      list("findings", step.findings ?? []),
-      list("delegations", step.delegations ?? []),
-    ].join("\\n");
-  }
-  return "result:\\n  type: submit";
+  return null;
+}
+
+function appendSection(text, heading, content) {
+  return text + "\\n\\n" + heading + "\\n\\n" + content + "\\n";
 }
 
 function act(step) {
   const target = assignmentPath();
   let text = fs.readFileSync(target, "utf-8");
 
-  if (step.todos_done) text = markDone(text, "todos");
-  if (step.add_todo) {
-    text = text.replace(
-      /^checks:/m,
-      "  - message: " + JSON.stringify(step.add_todo) + "\\n    done: true\\nchecks:",
-    );
-  }
-  if (step.raw_result) text = setResult(text, step.raw_result);
-  if (step.blocked) {
-    text = setResult(
-      text,
-      "result:\\n  type: blocked\\n  message: " + JSON.stringify(step.blocked),
-    );
-  }
-  if (step.submit || step.add_todos)
-    text = setResult(text, submitBlock(step));
-  for (const [key, value] of Object.entries(step.edit_header ?? {})) {
-    text = text.replace(new RegExp("^" + key + ": .*$", "m"), key + ": " + value);
+  if (step.todos) {
+    const lines = step.todos.map((todo, i) => (i + 1) + ". " + todo);
+    text = appendSection(text, "## Todos", lines.join("\\n"));
   }
   if (step.notes) {
-    const at = text.lastIndexOf("## Notes");
-    text = text.slice(0, at) + "## Notes\\n\\n" + step.notes + "\\n";
+    text = appendSection(text, "## Implementation Notes", step.notes);
+  }
+  if (step.tamper) {
+    text = text.split(step.tamper.from).join(step.tamper.to);
   }
 
   fs.writeFileSync(target, text);
@@ -223,11 +178,27 @@ function turn(step) {
 
   const finish = () => {
     if (steps.length > 0) act(step);
+    const result = resultCall(step);
+    if (result !== null) {
+      emit({
+        type: "tool_execution_start",
+        toolCallId: "c2",
+        toolName: result.name,
+        args: result.args,
+      });
+      emit({
+        type: "tool_execution_end",
+        toolCallId: "c2",
+        toolName: result.name,
+        isError: false,
+      });
+    }
+    lastText = step.raw_final_message ?? (result === null ? "done" : "submitted");
     emit({
       type: "message_end",
       message: {
         role: "assistant",
-        stopReason: step.stop_reason ?? "stop",
+        stopReason: step.stop_reason ?? (result === null ? "stop" : "toolUse"),
         usage: { cost: { total: 0.45 } },
       },
     });
@@ -284,7 +255,7 @@ async function handle(command) {
       break;
     }
     case "get_last_assistant_text": {
-      respond("get_last_assistant_text", command.id, { text: "done" });
+      respond("get_last_assistant_text", command.id, { text: lastText });
       break;
     }
     case "abort": {
@@ -394,13 +365,11 @@ export function makeFixture(slots = 1): Fixture {
   );
   fs.writeFileSync(path.join(tasksDir, "next-task-id"), "1\n");
 
-  for (const name of ["prompts", "templates"]) {
-    fs.cpSync(
-      path.join(REPO_ROOT, "orchestrator", name),
-      path.join(orchestratorDir, name),
-      { recursive: true },
-    );
-  }
+  fs.cpSync(
+    path.join(REPO_ROOT, "orchestrator", "prompts"),
+    path.join(orchestratorDir, "prompts"),
+    { recursive: true },
+  );
   const agentsPath = path.join(repo, "agents.json");
   fs.writeFileSync(
     agentsPath,
@@ -455,10 +424,15 @@ export function unplannedTask(
   checks: string[] = [],
 ): string {
   const { id } = createTask(fixture.tasksDir, title);
-  for (const command of checks) {
-    applyTransition(fixture.tasksDir, id, "addCheck", { command });
+  if (checks.length > 0) {
+    withLock(fixture.tasksDir, () => {
+      const filePath = findTaskFile(id, fixture.tasksDir)!;
+      const { meta, body } = readTaskFile(filePath);
+      meta.checks = [...checks];
+      writeTaskFile(filePath, meta, body);
+    });
   }
-  applyTransition(fixture.tasksDir, id, "noDependencies", {});
+  applyTransition(fixture.tasksDir, id, "submit", {});
   gitOrThrow(fixture.repo, ["add", "-A"]);
   gitOrThrow(fixture.repo, ["commit", "-q", "-m", `add task ${id}`]);
   return id;
@@ -479,7 +453,8 @@ export function readyTask(
     agentName: "plan-reviewer",
     pid: process.pid,
   });
-  applyTransition(fixture.tasksDir, id, "submit", {});
+  const body = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
+  applyTransition(fixture.tasksDir, id, "submit", { body });
   return id;
 }
 

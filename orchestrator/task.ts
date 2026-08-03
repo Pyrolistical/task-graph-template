@@ -18,8 +18,8 @@ export const VALID_STATES = [
   "WORKING",
   "READY_CHECK",
   "CHECKING",
-  "READY_AGENT_REVIEW",
-  "AGENT_REVIEWING",
+  "READY_WORK_REVIEW",
+  "WORK_REVIEWING",
   "READY_MANAGER_REVIEW",
   "MANAGER_REVIEWING",
   "READY_TASK_GRAPH_UPDATE",
@@ -39,25 +39,14 @@ export const CLAIMED_STATES = [
   "PLAN_REVIEWING",
   "WORKING",
   "CHECKING",
-  "AGENT_REVIEWING",
+  "WORK_REVIEWING",
   "MANAGER_REVIEWING",
   "TASK_GRAPH_UPDATING",
-] as const satisfies readonly ValidState[];
-
-export const FAILURE_STATES = [
-  "READY_WORK",
-  "WORKING",
-  "READY_AGENT_REVIEW",
-  "AGENT_REVIEWING",
 ] as const satisfies readonly ValidState[];
 
 export const UPDATE_OPS = ["add", "update", "delete"] as const;
 
 export type UpdateOp = (typeof UPDATE_OPS)[number];
-
-export const FAILURE_TYPES = ["check", "result"] as const;
-
-export type FailureType = (typeof FAILURE_TYPES)[number];
 
 export function formatId(n: number): string {
   return String(n).padStart(6, "0");
@@ -79,29 +68,6 @@ const timestamp = z
   .refine((value) => !Number.isNaN(Date.parse(value)), {
     error: "must be a timestamp",
   });
-
-const Todo = z.strictObject({
-  at: timestamp,
-  message: nonEmpty,
-  done: z.boolean(),
-});
-
-export type Todo = z.infer<typeof Todo>;
-
-const Failure = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal("check"),
-    command: nonEmpty,
-    exit_code: z.int(),
-    output: z.string(),
-  }),
-  z.strictObject({
-    type: z.literal("result"),
-    message: nonEmpty,
-  }),
-]);
-
-export type Failure = z.infer<typeof Failure>;
 
 const TaskGraphUpdate = z.discriminatedUnion("op", [
   z.strictObject({
@@ -151,10 +117,7 @@ const TaskFields = z.strictObject({
   claimed_pid: z.int().nullable(),
   held_reason: nonEmpty.nullable(),
   workspace: Workspace.nullable(),
-  todos: z.array(Todo),
   checks: z.array(nonEmpty),
-  plan_feedback: z.array(nonEmpty).default([]),
-  failures: z.array(Failure),
   task_graph_updates: z.array(TaskGraphUpdate),
 });
 
@@ -257,7 +220,7 @@ export function serializeMeta(meta: TaskMeta): string {
   for (const key of FIELD_ORDER) {
     const value = meta[key];
 
-    if (key === "depends_on" || key === "checks" || key === "plan_feedback") {
+    if (key === "depends_on" || key === "checks") {
       const items = value as string[];
       if (items.length === 0) {
         lines.push(`${key}: []`);
@@ -283,21 +246,15 @@ export function serializeMeta(meta: TaskMeta): string {
       continue;
     }
 
-    if (key === "todos" || key === "failures" || key === "task_graph_updates") {
+    if (key === "task_graph_updates") {
       const items = value as Record<string, unknown>[];
       if (items.length === 0) {
         lines.push(`${key}: []`);
         continue;
       }
       lines.push(`${key}:`);
-      const order =
-        key === "todos"
-          ? ["at", "message", "done"]
-          : key === "failures"
-            ? ["type", "command", "exit_code", "output", "message"]
-            : ["op", "task_id", "message", "done"];
       for (const item of items) {
-        lines.push(...serializeMapItem(item, order));
+        lines.push(...serializeMapItem(item, ["op", "task_id", "message", "done"]));
       }
       continue;
     }

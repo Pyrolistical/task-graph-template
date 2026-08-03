@@ -1,20 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  type Failure,
-  FAILURE_TYPES,
-  type FailureType,
-  type TaskGraphUpdate,
   type TaskId,
   type TaskMeta,
   type TaskState,
   type ValidState,
-  UPDATE_OPS,
-  type UpdateOp,
   closeTaskFile,
   findTaskFile,
   isProcessAlive,
-  isValidId,
   openCount,
   readTaskFile,
   withLock,
@@ -22,9 +15,6 @@ import {
 } from "./task.ts";
 
 export const TRANSITION_NAMES = [
-  "addDependencies",
-  "removeDependencies",
-  "noDependencies",
   "claim",
   "release",
   "submit",
@@ -32,71 +22,31 @@ export const TRANSITION_NAMES = [
   "fail",
   "hold",
   "resume",
-  "addTodo",
-  "removeTodo",
   "addFeedback",
-  "doneTodo",
-  "addCheck",
-  "addTaskGraph",
-  "doneTaskGraph",
-  "merged",
   "abort",
 ] as const;
 
 export type TransitionName = (typeof TRANSITION_NAMES)[number];
 
 export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
-  NEW: ["addDependencies", "noDependencies", "addTodo", "addCheck"],
-  BLOCKED: ["addDependencies", "removeDependencies"],
-  HELD_PLAN: [
-    "resume",
-    "addTodo",
-    "addCheck",
-    "addDependencies",
-    "addTaskGraph",
-  ],
-  HELD_WORK: [
-    "resume",
-    "addTodo",
-    "addCheck",
-    "addDependencies",
-    "addTaskGraph",
-  ],
-  READY_PLAN: [
-    "addDependencies",
-    "addTodo",
-    "addCheck",
-    "addTaskGraph",
-    "abort",
-    "claim",
-  ],
-  PLANNING: ["addTodo", "removeTodo", "submit", "hold", "release"],
-  READY_PLAN_REVIEW: ["claim"],
+  NEW: ["submit"],
+  BLOCKED: ["submit"],
+  HELD_PLAN: ["resume", "abort"],
+  HELD_WORK: ["resume", "abort"],
+  READY_PLAN: ["hold", "claim"],
+  PLANNING: ["submit", "hold", "release"],
+  READY_PLAN_REVIEW: ["claim", "hold"],
   PLAN_REVIEWING: ["submit", "addFeedback", "hold", "release"],
-  READY_WORK: [
-    "addDependencies",
-    "addTodo",
-    "addCheck",
-    "addTaskGraph",
-    "abort",
-    "claim",
-  ],
-  WORKING: ["addTodo", "doneTodo", "addCheck", "submit", "hold", "release"],
-  READY_CHECK: ["claim"],
-  CHECKING: ["addCheck", "pass", "fail", "release"],
-  READY_AGENT_REVIEW: ["claim"],
-  AGENT_REVIEWING: ["addFeedback", "submit", "hold", "release"],
+  READY_WORK: ["hold", "claim"],
+  WORKING: ["submit", "hold", "release"],
+  READY_CHECK: ["claim", "hold"],
+  CHECKING: ["pass", "fail", "hold", "release"],
+  READY_WORK_REVIEW: ["claim", "hold"],
+  WORK_REVIEWING: ["addFeedback", "submit", "hold", "release"],
   READY_MANAGER_REVIEW: ["claim"],
-  MANAGER_REVIEWING: [
-    "addTodo",
-    "addCheck",
-    "addTaskGraph",
-    "merged",
-    "abort",
-    "release",
-  ],
-  READY_TASK_GRAPH_UPDATE: ["addTaskGraph", "claim"],
-  TASK_GRAPH_UPDATING: ["addTaskGraph", "doneTaskGraph", "release"],
+  MANAGER_REVIEWING: ["addFeedback", "submit", "abort", "release"],
+  READY_TASK_GRAPH_UPDATE: ["claim"],
+  TASK_GRAPH_UPDATING: ["submit", "release"],
 };
 
 export const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
@@ -104,7 +54,7 @@ export const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
   READY_PLAN_REVIEW: "PLAN_REVIEWING",
   READY_WORK: "WORKING",
   READY_CHECK: "CHECKING",
-  READY_AGENT_REVIEW: "AGENT_REVIEWING",
+  READY_WORK_REVIEW: "WORK_REVIEWING",
   READY_MANAGER_REVIEW: "MANAGER_REVIEWING",
   READY_TASK_GRAPH_UPDATE: "TASK_GRAPH_UPDATING",
 };
@@ -114,7 +64,7 @@ const RELEASE_TARGETS: Partial<Record<ValidState, ValidState>> = {
   PLAN_REVIEWING: "READY_PLAN_REVIEW",
   WORKING: "READY_WORK",
   CHECKING: "READY_CHECK",
-  AGENT_REVIEWING: "READY_AGENT_REVIEW",
+  WORK_REVIEWING: "READY_WORK_REVIEW",
   MANAGER_REVIEWING: "READY_MANAGER_REVIEW",
   TASK_GRAPH_UPDATING: "READY_TASK_GRAPH_UPDATE",
 };
@@ -123,18 +73,16 @@ const SUBMIT_TARGETS: Partial<Record<ValidState, ValidState>> = {
   PLANNING: "READY_PLAN_REVIEW",
   PLAN_REVIEWING: "READY_WORK",
   WORKING: "READY_CHECK",
-  AGENT_REVIEWING: "READY_MANAGER_REVIEW",
+  WORK_REVIEWING: "READY_MANAGER_REVIEW",
 };
 
 const PASS_TARGETS: Partial<Record<ValidState, TaskState>> = {
-  CHECKING: "READY_AGENT_REVIEW",
+  CHECKING: "READY_WORK_REVIEW",
 };
 
 const FAIL_TARGETS: Partial<Record<ValidState, ValidState>> = {
   CHECKING: "READY_WORK",
 };
-
-const TODO_SENDS_BACK_FROM: ValidState[] = ["MANAGER_REVIEWING", "HELD_WORK"];
 
 const UNCLAIMED_STATES: TaskState[] = [
   "NEW",
@@ -145,26 +93,20 @@ const UNCLAIMED_STATES: TaskState[] = [
   "READY_PLAN_REVIEW",
   "READY_WORK",
   "READY_CHECK",
-  "READY_AGENT_REVIEW",
+  "READY_WORK_REVIEW",
   "READY_MANAGER_REVIEW",
   "READY_TASK_GRAPH_UPDATE",
   "CLOSED",
 ];
 
 export interface TransitionArgs {
-  taskIds?: TaskId[];
   agentName?: string;
   pid?: number;
   branch?: string;
   worktree?: string;
   session?: string;
   reason?: string;
-  message?: string;
-  command?: string;
-  index?: number;
-  op?: UpdateOp;
-  taskId?: TaskId;
-  failures?: Failure[];
+  body?: string;
   findings?: string[];
 }
 
@@ -195,31 +137,6 @@ function requirePid(value: unknown): number {
   return value as number;
 }
 
-function requireFailures(value: unknown): Failure[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`"failures" must be a non-empty list`);
-  }
-  for (const failure of value as Record<string, unknown>[]) {
-    if (!FAILURE_TYPES.includes(failure.type as FailureType)) {
-      throw new Error(
-        `"failures" entries must have a type of ${FAILURE_TYPES.join(", ")}`,
-      );
-    }
-    if (failure.type === "check") {
-      requireText(failure.command, "command");
-      if (!Number.isInteger(failure.exit_code)) {
-        throw new Error(`"exit_code" must be an integer`);
-      }
-      if (typeof failure.output !== "string") {
-        throw new Error(`"output" must be a string`);
-      }
-    } else {
-      requireText(failure.message, "message");
-    }
-  }
-  return value as Failure[];
-}
-
 function requireFindings(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`"findings" must be a non-empty list`);
@@ -230,111 +147,14 @@ function requireFindings(value: unknown): string[] {
   return value as string[];
 }
 
-function requireOp(value: unknown): UpdateOp {
-  if (!UPDATE_OPS.includes(value as UpdateOp)) {
-    throw new Error(
-      `"op" must be one of ${UPDATE_OPS.join(", ")}, got ${JSON.stringify(value)}`,
-    );
-  }
-  return value as UpdateOp;
-}
-
-function requireIdList(value: unknown, label: string): TaskId[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`"${label}" must be a non-empty list of task IDs`);
-  }
-  for (const id of value) {
-    if (!isValidId(id)) {
-      throw new Error(
-        `"${label}" contains ${JSON.stringify(id)}, which is not a six-digit task ID`,
-      );
-    }
-  }
-  return value as TaskId[];
-}
-
-function requireOpenTask(
-  tasksDir: string,
-  value: unknown,
-  label: string,
-): TaskId {
-  if (!isValidId(value)) {
-    throw new Error(
-      `"${label}" must be a six-digit task ID, got ${JSON.stringify(value)}`,
-    );
-  }
-  if (fs.existsSync(path.join(tasksDir, `${value}.md`))) {
-    return value;
-  }
-  if (findTaskFile(value, tasksDir) !== null) {
-    throw new Error(`Task "${value}" is CLOSED and cannot be used as ${label}`);
-  }
-  throw new Error(
-    `Task "${value}" does not exist and cannot be used as ${label}`,
-  );
-}
-
-function requireIndex(
-  list: { done: boolean }[],
-  index: unknown,
-  label: string,
-): number {
-  if (!Number.isInteger(index) || (index as number) < 0) {
-    throw new Error(
-      `"index" must be a non-negative integer, got ${JSON.stringify(index)}`,
-    );
-  }
-  if (list.length === 0) {
-    throw new Error(`there are no ${label} entries to mark done`);
-  }
-  if ((index as number) >= list.length) {
-    throw new Error(
-      `${label} index ${index} is out of range (0..${list.length - 1})`,
-    );
-  }
-  if (list[index as number]!.done) {
-    throw new Error(`${label} index ${index} is already done`);
-  }
-  return index as number;
-}
-
 function mutate(
-  tasksDir: string,
   meta: TaskMeta,
   state: ValidState,
   name: TransitionName,
   args: TransitionArgs,
-  now: string,
-): TaskState | null {
+  body: string,
+): { target: TaskState | null; body?: string } {
   switch (name) {
-    case "addDependencies": {
-      for (const dep of requireIdList(args.taskIds, "taskIds")) {
-        if (dep === meta.id) {
-          throw new Error(`Task "${meta.id}" cannot depend on itself`);
-        }
-        requireOpenTask(tasksDir, dep, "a dependency");
-        if (!meta.depends_on.includes(dep)) {
-          meta.depends_on.push(dep);
-        }
-      }
-      return state === "BLOCKED" ? null : "BLOCKED";
-    }
-
-    case "removeDependencies": {
-      const ids = requireIdList(args.taskIds, "taskIds");
-      meta.depends_on = meta.depends_on.filter((d) => !ids.includes(d));
-      return meta.depends_on.length === 0 ? "READY_PLAN" : null;
-    }
-
-    case "noDependencies": {
-      if (meta.depends_on.length > 0) {
-        throw new Error(
-          `Task "${meta.id}" still depends on ${meta.depends_on.join(", ")}`,
-        );
-      }
-      return "READY_PLAN";
-    }
-
     case "claim": {
       if (meta.claimed_by !== null) {
         throw new Error(
@@ -351,7 +171,7 @@ function mutate(
           session: args.session === undefined ? null : args.session,
         };
       }
-      return CLAIM_TARGETS[state]!;
+      return { target: CLAIM_TARGETS[state]! };
     }
 
     case "release": {
@@ -365,150 +185,92 @@ function mutate(
           `Task "${meta.id}" is still claimed by a live process (PID ${meta.claimed_pid}); release is only for dead claims`,
         );
       }
-      return RELEASE_TARGETS[state]!;
+      return { target: RELEASE_TARGETS[state]! };
     }
 
     case "submit": {
-      if (state === "WORKING") {
-        const open = openCount(meta.todos);
-        if (open > 0) {
+      if (state === "NEW") {
+        return {
+          target: meta.depends_on.length > 0 ? "BLOCKED" : "READY_PLAN",
+        };
+      }
+      if (state === "BLOCKED") {
+        return {
+          target: meta.depends_on.length > 0 ? null : "READY_PLAN",
+        };
+      }
+      if (state === "MANAGER_REVIEWING") {
+        return {
+          target:
+            meta.task_graph_updates.length === 0
+              ? "CLOSED"
+              : "READY_TASK_GRAPH_UPDATE",
+        };
+      }
+      if (state === "TASK_GRAPH_UPDATING") {
+        const remaining = openCount(meta.task_graph_updates);
+        if (remaining > 0) {
           throw new Error(
-            `Task "${meta.id}" has ${open} open todo(s); resolve them first`,
+            `Task "${meta.id}" still has ${remaining} open task graph update${remaining === 1 ? "" : "s"}`,
           );
         }
+        return { target: "CLOSED" };
       }
-      meta.failures = [];
-      return SUBMIT_TARGETS[state]!;
+      const body =
+        state === "PLAN_REVIEWING" || state === "WORKING"
+          ? requireText(args.body, "body")
+          : undefined;
+      return { target: SUBMIT_TARGETS[state]!, body };
     }
 
     case "pass": {
-      const open = openCount(meta.todos);
-      if (open > 0) {
-        throw new Error(
-          `Task "${meta.id}" has ${open} open todo(s); cannot pass`,
-        );
-      }
-      return PASS_TARGETS[state]!;
+      return { target: PASS_TARGETS[state]! };
     }
 
     case "fail": {
-      meta.failures = requireFailures(args.failures);
-      return FAIL_TARGETS[state]!;
+      return { target: FAIL_TARGETS[state]! };
     }
 
     case "hold": {
       meta.held_reason = requireText(args.reason, "reason");
-      meta.failures = [];
-      return state === "PLANNING" || state === "PLAN_REVIEWING"
-        ? "HELD_PLAN"
-        : "HELD_WORK";
+      return {
+        target:
+          state === "PLANNING" ||
+          state === "PLAN_REVIEWING" ||
+          state === "READY_PLAN" ||
+          state === "READY_PLAN_REVIEW"
+            ? "HELD_PLAN"
+            : "HELD_WORK",
+      };
     }
 
     case "resume": {
-      return state === "HELD_PLAN" ? "READY_PLAN" : "READY_WORK";
-    }
-
-    case "addTodo": {
-      meta.todos.push({
-        at: now,
-        message: requireText(args.message, "message"),
-        done: false,
-      });
-      if (state === "HELD_PLAN") {
-        return "READY_PLAN";
+      if (meta.depends_on.length > 0) {
+        return { target: "BLOCKED" };
       }
-      return TODO_SENDS_BACK_FROM.includes(state) ? "READY_WORK" : null;
-    }
-
-    case "removeTodo": {
-      const index = requireIndex(meta.todos, args.index, "todo");
-      meta.todos.splice(index, 1);
-      return null;
+      return {
+        target: state === "HELD_PLAN" ? "READY_PLAN" : "READY_WORK",
+      };
     }
 
     case "addFeedback": {
       const findings = requireFindings(args.findings);
       if (state === "PLAN_REVIEWING") {
-        meta.plan_feedback = findings;
-        return "READY_PLAN";
+        return { target: "READY_PLAN" };
       }
-      for (const finding of findings) {
-        meta.todos.push({
-          at: now,
-          message: finding,
-          done: false,
-        });
-      }
-      return "READY_WORK";
-    }
-
-    case "doneTodo": {
-      const index = requireIndex(meta.todos, args.index, "todo");
-      meta.todos[index]!.done = true;
-      return null;
-    }
-
-    case "addCheck": {
-      const command = requireText(args.command, "command");
-      if (meta.checks.includes(command)) {
-        throw new Error(`Task "${meta.id}" already has check "${command}"`);
-      }
-      meta.checks.push(command);
-      return null;
-    }
-
-    case "addTaskGraph": {
-      const op = requireOp(args.op);
-      const message = requireText(args.message, "message");
-      const update = (
-        op === "add"
-          ? { op, message, done: false }
-          : {
-              op,
-              task_id: requireOpenTask(
-                tasksDir,
-                args.taskId,
-                `an ${op} target`,
-              ),
-              message,
-              done: false,
-            }
-      ) as TaskGraphUpdate;
-      meta.task_graph_updates.push(update);
-      return state === "HELD_PLAN" || state === "HELD_WORK"
-        ? "READY_TASK_GRAPH_UPDATE"
-        : null;
-    }
-
-    case "doneTaskGraph": {
-      const index = requireIndex(
-        meta.task_graph_updates,
-        args.index,
-        "task graph update",
-      );
-      meta.task_graph_updates[index]!.done = true;
-      return openCount(meta.task_graph_updates) === 0 ? "CLOSED" : null;
-    }
-
-    case "merged": {
-      const open = openCount(meta.todos);
-      if (open > 0) {
-        throw new Error(
-          `Task "${meta.id}" has ${open} open todo(s); cannot be merged`,
-        );
-      }
-      return meta.task_graph_updates.length === 0
-        ? "CLOSED"
-        : "READY_TASK_GRAPH_UPDATE";
+      const findingsSection = `\n\n# Review findings\n\n${findings
+        .map((finding) => `- ${finding}`)
+        .join("\n")}\n\n## Implementation Notes\n\n`;
+      return { target: "READY_WORK", body: body + findingsSection };
     }
 
     case "abort": {
-      if (meta.task_graph_updates.length === 0) {
-        throw new Error(
-          `Task "${meta.id}" has no task graph updates; an abort must say what the graph should become`,
-        );
-      }
-      return "READY_TASK_GRAPH_UPDATE";
+      return {
+        target:
+          meta.task_graph_updates.length > 0
+            ? "READY_TASK_GRAPH_UPDATE"
+            : "CLOSED",
+      };
     }
   }
 }
@@ -579,7 +341,8 @@ export function applyTransition(
     }
 
     const now = new Date().toISOString();
-    const target = mutate(tasksDir, meta, from, name, args, now);
+    const { target, body: newBody } = mutate(meta, from, name, args, body);
+    const nextBody = newBody ?? body;
 
     if (target !== null) {
       meta.state = target;
@@ -595,13 +358,9 @@ export function applyTransition(
       meta.held_reason = null;
     }
 
-    if (target === "READY_WORK") {
-      meta.plan_feedback = [];
-    }
-
     if (target === "CLOSED") {
       meta.workspace = null;
-      const closedPath = closeTaskFile(filePath, tasksDir, meta, body);
+      const closedPath = closeTaskFile(filePath, tasksDir, meta, nextBody);
       const { unblocked, dependentsUpdated } = propagateClose(
         tasksDir,
         taskId,
@@ -617,7 +376,7 @@ export function applyTransition(
       };
     }
 
-    writeTaskFile(filePath, meta, body);
+    writeTaskFile(filePath, meta, nextBody);
     return { taskId, from, to: target, unblocked: [], dependentsUpdated: [] };
   });
 }

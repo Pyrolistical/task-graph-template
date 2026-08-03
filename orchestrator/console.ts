@@ -709,7 +709,7 @@ export function abortButton(pane: Pane, readOnly: boolean): Line {
 
 export const RANK_LABELS: Record<Rank, string> = {
   resume: "resume",
-  READY_AGENT_REVIEW: "READY_AGENT_REVIEW",
+  READY_WORK_REVIEW: "READY_WORK_REVIEW",
   READY_WORK_STARTED: "READY_WORK",
   READY_WORK_FRESH: "READY_WORK",
   READY_PLAN_REVIEW: "READY_PLAN_REVIEW",

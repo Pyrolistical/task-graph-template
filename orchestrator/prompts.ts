@@ -6,12 +6,12 @@ import { type TemplateVars, render } from "./template.ts";
 export const ISSUE_NAMES = [
   "unparsable-result",
   "missing-result",
-  "incomplete-todos",
+  "missing-todos",
+  "missing-notes",
+  "modified-assignment",
   "uncommitted",
   "looping",
   "blocked",
-  "missing-plan",
-  "invalid-remove-todo",
   "modified-worktree",
 ] as const;
 
@@ -31,19 +31,35 @@ export const ISSUES: Record<IssueName, Issue> = {
     attempts: 4,
     states: ALL_AGENT_STATES,
     fragment: (state) => `unparsable-result-${state}`,
-    held: (detail) => `the agent never wrote a readable result: ${detail}`,
+    held: (detail) =>
+      `the agent's result tool call was not a valid one for its state: ${detail}`,
   },
   "missing-result": {
     attempts: 4,
     states: ALL_AGENT_STATES,
     fragment: (state) => `missing-result-${state}`,
-    held: () => "the agent stopped without setting a result",
+    held: () => "the agent stopped without calling a submit or blocked tool",
   },
-  "incomplete-todos": {
+  "missing-todos": {
+    attempts: 4,
+    states: ["PLANNING"],
+    fragment: () => "missing-todos",
+    held: () =>
+      "the planner submitted without appending a todo list to the assignment",
+  },
+  "missing-notes": {
     attempts: 4,
     states: ["WORKING"],
-    fragment: () => "incomplete-todos",
-    held: (detail) => `the agent submitted with ${detail} todo(s) still open`,
+    fragment: () => "missing-notes",
+    held: () =>
+      "the worker submitted without appending implementation notes to the assignment",
+  },
+  "modified-assignment": {
+    attempts: 4,
+    states: ALL_AGENT_STATES,
+    fragment: (state) => `modified-assignment-${state}`,
+    held: () =>
+      "the agent changed parts of the assignment it may not; only the section it was instructed to write may be appended",
   },
   uncommitted: {
     attempts: 4,
@@ -63,19 +79,6 @@ export const ISSUES: Record<IssueName, Issue> = {
     fragment: (state) => `blocked-${state}`,
     held: (detail) => detail,
   },
-  "missing-plan": {
-    attempts: 4,
-    states: ["PLANNING"],
-    fragment: () => "missing-plan",
-    held: () => "the planner submitted a plan with no todos",
-  },
-  "invalid-remove-todo": {
-    attempts: 4,
-    states: ["PLANNING"],
-    fragment: () => "invalid-remove-todo",
-    held: (detail) =>
-      `the planner named removeTodos indices that do not exist: ${detail}`,
-  },
   "modified-worktree": {
     attempts: 4,
     states: ["PLANNING", "PLAN_REVIEWING"],
@@ -84,8 +87,6 @@ export const ISSUES: Record<IssueName, Issue> = {
       `the agent wrote to the worktree during planning: ${detail}`,
   },
 };
-
-const KINDS = ["prompts", "templates"] as const;
 
 interface CachedFile {
   path: string;
@@ -107,26 +108,24 @@ export class Prompts {
   reload(): string[] {
     this.cached.clear();
     for (const dir of this.dirs) {
-      for (const kind of KINDS) {
-        const sub = path.join(dir, kind);
-        if (!fs.existsSync(sub)) {
+      const sub = path.join(dir, "prompts");
+      if (!fs.existsSync(sub)) {
+        continue;
+      }
+      for (const entry of fs.readdirSync(sub, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".md")) {
           continue;
         }
-        for (const entry of fs.readdirSync(sub, { withFileTypes: true })) {
-          if (!entry.isFile() || !entry.name.endsWith(".md")) {
-            continue;
-          }
-          const name = entry.name.slice(0, -3);
-          const key = `${kind}/${name}`;
-          if (this.cached.has(key)) {
-            continue;
-          }
-          const filePath = path.join(sub, entry.name);
-          this.cached.set(key, {
-            path: filePath,
-            contents: fs.readFileSync(filePath, "utf-8"),
-          });
+        const name = entry.name.slice(0, -3);
+        const key = `prompts/${name}`;
+        if (this.cached.has(key)) {
+          continue;
         }
+        const filePath = path.join(sub, entry.name);
+        this.cached.set(key, {
+          path: filePath,
+          contents: fs.readFileSync(filePath, "utf-8"),
+        });
       }
     }
     return this.cachedFiles();
@@ -142,10 +141,6 @@ export class Prompts {
 
   issue(name: IssueName, state: ClaimState, vars: TemplateVars = {}): string {
     return this.fragment(ISSUES[name].fragment(state), vars);
-  }
-
-  template(state: ClaimState, vars: TemplateVars = {}): string {
-    return render(this.file("templates", state).contents, vars);
   }
 
   cachedFiles(): string[] {

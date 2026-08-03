@@ -6,6 +6,7 @@ import {
   toolCall,
   toolTarget,
 } from "./activity.ts";
+import { RESULT_TOOLS, type ResultCall } from "./results.ts";
 
 export const STOP_REASONS = [
   "stop",
@@ -79,6 +80,7 @@ export interface StreamState {
   retrying: boolean;
   failure: string | null;
   looping: string | null;
+  resultCalls: ResultCall[];
 }
 
 function signature(record: PiRecord): string {
@@ -104,6 +106,7 @@ export class PiStream {
     retrying: false,
     failure: null,
     looping: null,
+    resultCalls: [],
   };
 
   feed(chunk: string): PiRecord[] {
@@ -142,6 +145,9 @@ export class PiStream {
         const { toolName, args } = ToolStart.parse(record);
         this.state.activity = toolCall(toolName, args ?? {});
         this.repeat(record);
+        if ((RESULT_TOOLS as readonly string[]).includes(toolName)) {
+          this.state.resultCalls.push({ tool: toolName, args: args ?? {} });
+        }
         break;
       }
       case "tool_execution_end": {
@@ -213,6 +219,7 @@ export class PiStream {
     this.state.errorMessage = null;
     this.state.activity = { kind: "thinking", started_at: Date.now() };
     this.state.looping = null;
+    this.state.resultCalls = [];
     this.repeated = { signature: "", count: 0 };
   }
 
@@ -259,6 +266,7 @@ export interface SpawnOptions {
   name: string;
   cwd: string;
   systemPrompt: string;
+  extension: string;
   log: string;
 }
 
@@ -275,6 +283,8 @@ export function spawnArgs(options: SpawnOptions): string[] {
     "--name",
     options.name,
     "--approve",
+    "--extension",
+    options.extension,
     "--append-system-prompt",
     `@${options.systemPrompt}`,
   ];

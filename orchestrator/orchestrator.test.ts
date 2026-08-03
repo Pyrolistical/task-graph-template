@@ -19,22 +19,12 @@ import {
   loadAgents,
   parseAgents,
 } from "./agents.ts";
-import {
-  type AssignmentMeta,
-  attemptOf,
-  divergences,
-  historyName,
-  parseAssignment,
-  readAssignment,
-  repair,
-  resetResult,
-  rotate,
-  serializeAssignment,
-} from "./assignment.ts";
+import { attemptOf, historyName, rotate } from "./assignment.ts";
 import { CheckRunner, tailOf } from "./checks.ts";
 import { blockingCounts } from "./graph.ts";
 import { inbox } from "./inbox.ts";
 import { ISSUES, Prompts } from "./prompts.ts";
+import { RESULT_TOOLS, resultFromCall } from "./results.ts";
 import { SchemaError } from "./schema.ts";
 import { render } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
@@ -48,8 +38,15 @@ import {
 } from "./rpc.ts";
 import { candidates, pickSlot, plan } from "./scheduler.ts";
 import { ALL_ROLES } from "./runtime.ts";
-import { type TaskMeta, isProcessAlive } from "./task.ts";
-import { Runtime, branchName, repoKey, writeAtomic } from "./runtime.ts";
+import { type TaskMeta, isProcessAlive, splitDocument } from "./task.ts";
+import {
+  Runtime,
+  branchName,
+  defaultTasksDir,
+  graphKey,
+  repoKey,
+  writeAtomic,
+} from "./runtime.ts";
 import * as git from "./git.ts";
 import {
   CACHE_HOME,
@@ -568,7 +565,6 @@ describe("prompt and template overrides", () => {
     const dir = overrides({
       "prompts/dispatch.md": "Read ../ASSIGNMENT.md and do it.\n",
       "prompts/WORKING.md": "you are an implementer\n",
-      "templates/WORKING.md": '---\nassignment: "{{id}}"\n---\n\n# {{title}}\n',
     });
     const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
 
@@ -578,9 +574,7 @@ describe("prompt and template overrides", () => {
     expect(prompts.systemPrompt("WORKING")).toBe(
       path.join(dir, "prompts", "WORKING.md"),
     );
-    expect(
-      prompts.template("WORKING", { id: "000042", title: "A task" }),
-    ).toContain("# A task");
+    expect(prompts.fragment("dispatch", {})).toContain("Read");
   });
 
   test("a directory that overrides one file leaves the rest alone", () => {
@@ -588,8 +582,8 @@ describe("prompt and template overrides", () => {
     const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
 
     expect(prompts.fragment("dispatch")).toBe("do it\n");
-    expect(prompts.systemPrompt("AGENT_REVIEWING")).toBe(
-      path.join(ORCHESTRATOR_DIR, "prompts", "AGENT_REVIEWING.md"),
+    expect(prompts.systemPrompt("WORK_REVIEWING")).toBe(
+      path.join(ORCHESTRATOR_DIR, "prompts", "WORK_REVIEWING.md"),
     );
     const vars = { command: "bun test", limit: LOOP_LIMIT };
     expect(prompts.issue("looping", "WORKING", vars)).toBe(
@@ -649,129 +643,171 @@ describe("prompt and template overrides", () => {
   });
 });
 
-describe("template rendering", () => {
-  test("a work assignment carries the todos and checks it was given", () => {
-    const out = render(templateOf("templates/WORKING.md"), {
-      id: "000042",
-      title: "Parse frontmatter with Bun.YAML",
-      body: "# Goal\n\nParse it.",
-      todos: [{ message: "fix null handling" }],
-      checks: [{ command: "bun test" }, { command: "bun run typecheck" }],
-    });
+describe("result tool calls", () => {
+  const STATES = [
+    "PLANNING",
+    "PLAN_REVIEWING",
+    "WORKING",
+    "WORK_REVIEWING",
+  ] as const;
 
-    const { meta, body } = parseAssignment(out, "WORKING");
-    expect(meta.assignment).toBe("000042");
-    expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
-    expect(meta.checks).toEqual(["bun test", "bun run typecheck"]);
-    expect(meta.result).toBeNull();
-    expect(body).toContain("# Parse frontmatter with Bun.YAML");
-    expect(body).toContain("Parse it.");
-    expect(body.trimEnd().endsWith("## Notes")).toBe(true);
+  test("submit is the result in PLANNING and WORKING", () => {
+    expect(resultFromCall("WORKING", { tool: "submit", args: {} })).toEqual({
+      type: "submit",
+    });
+    expect(resultFromCall("PLANNING", { tool: "submit", args: {} })).toEqual({
+      type: "submit",
+    });
   });
 
-  test("an empty list is emitted as [] rather than a bare key", () => {
-    const out = render(templateOf("templates/WORKING.md"), {
-      id: "000042",
-      title: "A task",
-      body: "# Goal",
-      todos: [],
-      checks: [],
+  test("a work review submit carries findings and delegations", () => {
+    expect(
+      resultFromCall("WORK_REVIEWING", {
+        tool: "submit",
+        args: {
+          findings: ["the null case is untested"],
+          delegations: ["the same bug lives in fetch.ts"],
+        },
+      }),
+    ).toEqual({
+      type: "submit",
+      findings: ["the null case is untested"],
+      delegations: ["the same bug lives in fetch.ts"],
     });
-
-    expect(out).toContain("todos: []");
-    expect(out).toContain("checks: []");
-    expect(out).not.toMatch(/^todos:$/m);
-    expect(parseAssignment(out, "WORKING").meta.todos).toEqual([]);
   });
 
-  test("a message with quotes and newlines survives into the parse", () => {
-    const message = 'the "null" case\nbreaks on \\n';
-    const out = render(templateOf("templates/WORKING.md"), {
-      id: "000042",
-      title: "A task",
-      body: "# Goal",
-      todos: [{ message }],
-      checks: [],
-    });
+  test("a plan review submit carries findings", () => {
+    expect(
+      resultFromCall("PLAN_REVIEWING", {
+        tool: "submit",
+        args: { findings: [] },
+      }),
+    ).toEqual({ type: "submit", findings: [] });
+  });
 
-    expect(parseAssignment(out, "WORKING").meta.todos[0]!.message).toBe(
-      message,
+  test("a plain submit cannot carry findings or delegations", () => {
+    expect(() =>
+      resultFromCall("WORKING", { tool: "submit", args: { findings: ["x"] } }),
+    ).toThrow(/cannot carry findings/);
+    expect(() =>
+      resultFromCall("PLANNING", {
+        tool: "submit",
+        args: { delegations: ["x"] },
+      }),
+    ).toThrow(/cannot carry delegations/);
+    expect(() =>
+      resultFromCall("WORKING", {
+        tool: "submit",
+        args: { findings: ["x"], delegations: ["y"] },
+      }),
+    ).toThrow(/cannot carry findings/);
+    expect(
+      resultFromCall("WORKING", { tool: "submit", args: { findings: [] } }),
+    ).toEqual({ type: "submit" });
+  });
+
+  test("a review submit without findings is rejected", () => {
+    expect(() =>
+      resultFromCall("PLAN_REVIEWING", { tool: "submit", args: {} }),
+    ).toThrow(/findings/);
+    expect(() =>
+      resultFromCall("WORK_REVIEWING", { tool: "submit", args: {} }),
+    ).toThrow(/findings/);
+  });
+
+  test("a work review submit without delegations is rejected", () => {
+    expect(() =>
+      resultFromCall("WORK_REVIEWING", {
+        tool: "submit",
+        args: { findings: [] },
+      }),
+    ).toThrow(/delegations/);
+  });
+
+  test("a plan review submit cannot carry delegations", () => {
+    expect(() =>
+      resultFromCall("PLAN_REVIEWING", {
+        tool: "submit",
+        args: { findings: [], delegations: ["x"] },
+      }),
+    ).toThrow(/cannot carry delegations/);
+    expect(
+      resultFromCall("PLAN_REVIEWING", {
+        tool: "submit",
+        args: { findings: [], delegations: [] },
+      }),
+    ).toEqual({ type: "submit", findings: [] });
+  });
+
+  test("a finding that is only whitespace is rejected", () => {
+    expect(() =>
+      resultFromCall("WORK_REVIEWING", {
+        tool: "submit",
+        args: { findings: ["  "], delegations: [] },
+      }),
+    ).toThrow(/non-empty string/);
+  });
+
+  test("blocked requires a message, in every state", () => {
+    for (const state of STATES) {
+      expect(
+        resultFromCall(state, {
+          tool: "blocked",
+          args: { message: "the box is down" },
+        }),
+      ).toEqual({ type: "blocked", message: "the box is down" });
+      expect(() =>
+        resultFromCall(state, { tool: "blocked", args: {} }),
+      ).toThrow(/message/);
+    }
+  });
+
+  test("a tool outside the result tools is rejected in every state", () => {
+    for (const state of STATES) {
+      expect(() => resultFromCall(state, { tool: "bash", args: {} })).toThrow(
+        /or blocked tool/,
+      );
+    }
+  });
+
+  test("each role's extension registers submit and blocked, only the reviewer's submit carries findings", async () => {
+    const toolsOf = async (file: string) => {
+      const { default: factory } = await import(file);
+      const tools = new Map<
+        string,
+        { parameters: { properties: Record<string, unknown> } }
+      >();
+      factory({
+        registerTool: (tool: {
+          name: string;
+          parameters: { properties: Record<string, unknown> };
+        }) => tools.set(tool.name, tool),
+      } as never);
+      return tools;
+    };
+
+    const planner = await toolsOf("./result-tools-planner.ts");
+    const worker = await toolsOf("./result-tools-worker.ts");
+    const reviewer = await toolsOf("./result-tools-reviewer.ts");
+
+    for (const tools of [planner, worker, reviewer]) {
+      expect([...tools.keys()].sort()).toEqual([...RESULT_TOOLS].sort());
+    }
+    expect(planner.get("submit")!.parameters.properties).toEqual({});
+    expect(worker.get("submit")!.parameters.properties).toEqual({});
+    expect(reviewer.get("submit")!.parameters.properties).toHaveProperty(
+      "findings",
+    );
+    expect(reviewer.get("submit")!.parameters.properties).toHaveProperty(
+      "delegations",
+    );
+    expect(planner.get("blocked")!.parameters.properties).toHaveProperty(
+      "message",
     );
   });
+});
 
-  test("a review assignment names the commit range and the worktree", () => {
-    const out = render(templateOf("templates/AGENT_REVIEWING.md"), {
-      id: "000042",
-      title: "A task",
-      body: "# Goal",
-      todos: [{ message: "the fix", done: true }],
-      checks: [{ command: "bun test" }],
-      range: "a1b2c3d..e4f5a6b",
-      worktree: "/tmp/task-graph-server/-repo/000042/worktree",
-    });
-
-    const { meta, body } = parseAssignment(out, "AGENT_REVIEWING");
-    expect(meta.todos).toEqual([{ message: "the fix", done: true }]);
-    expect(meta.checks).toEqual(["bun test"]);
-    expect(meta.result).toBeNull();
-    expect(body).toContain("a1b2c3d..e4f5a6b");
-    expect(body).toContain("/tmp/task-graph-server/-repo/000042/worktree");
-    expect(body).not.toContain("git diff");
-  });
-
-  test("a planning assignment carries the decided todos and renders plan feedback", () => {
-    const out = render(templateOf("templates/PLANNING.md"), {
-      id: "000042",
-      title: "Parse frontmatter with Bun.YAML",
-      body: "# Goal\n\nParse it.",
-      todos: [{ message: "fix null handling" }],
-      checks: [{ command: "bun test" }],
-      plan_feedback: [{ finding: "no todo covers the empty case" }],
-      plan_feedback_head: [{}],
-    });
-
-    const { meta, body } = parseAssignment(out, "PLANNING");
-    expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
-    expect(meta.checks).toEqual(["bun test"]);
-    expect(meta.result).toBeNull();
-    expect(body).toContain("no todo covers the empty case");
-    expect(body).toContain("Write down what you would do");
-  });
-
-  test("a planning assignment with no feedback renders none", () => {
-    const out = render(templateOf("templates/PLANNING.md"), {
-      id: "000042",
-      title: "A task",
-      body: "# Goal",
-      todos: [],
-      checks: [],
-      plan_feedback: [],
-      plan_feedback_head: [],
-    });
-
-    expect(out).toContain("todos: []");
-    expect(out).toContain("checks: []");
-    expect(out).not.toContain("previous plan was rejected");
-    expect(parseAssignment(out, "PLANNING").meta.result).toBeNull();
-  });
-
-  test("a plan review assignment carries the plan to review", () => {
-    const out = render(templateOf("templates/PLAN_REVIEWING.md"), {
-      id: "000042",
-      title: "Parse frontmatter with Bun.YAML",
-      body: "# Goal\n\nParse it.",
-      todos: [{ message: "parse the frontmatter" }],
-      checks: [{ command: "bun test" }],
-    });
-
-    const { meta, body } = parseAssignment(out, "PLAN_REVIEWING");
-    expect(meta.todos).toEqual([
-      { message: "parse the frontmatter", done: false },
-    ]);
-    expect(meta.result).toBeNull();
-    expect(body).toContain("the plan an implementer will work through");
-  });
-
+describe("template rendering", () => {
   test("a template referring to something it was not given fails loudly", () => {
     expect(() => render("agent: {{agent}}\n", {})).toThrow(/refers to "agent"/);
   });
@@ -783,474 +819,16 @@ describe("template rendering", () => {
   });
 });
 
-describe("assignment parsing", () => {
-  const valid = [
-    "---",
-    'assignment: "000042"',
-    "todos: []",
-    "checks: []",
-    "result: null",
-    "---",
-    "",
-    "# A task",
-    "",
-    "## Notes",
-    "",
-    "I did the thing.",
-  ].join("\n");
-
-  function withResult(...lines: string[]): string {
-    return valid.replace("result: null", ["result:", ...lines].join("\n"));
-  }
-
-  test("a well-formed assignment parses with no result yet", () => {
-    const { meta } = parseAssignment(valid, "WORKING");
-    expect(meta.assignment).toBe("000042");
-    expect(meta.result).toBeNull();
-  });
-
-  test("an unquoted six-digit assignment id is rejected", () => {
-    expect(() =>
-      parseAssignment(valid.replace('"000042"', "000042"), "WORKING"),
-    ).toThrow(/quoted six-digit/);
-  });
-
-  test("a submitted work result carries nothing at all", () => {
-    expect(
-      parseAssignment(withResult("  type: submit"), "WORKING").meta.result,
-    ).toEqual({ type: "submit" });
-
-    expect(() =>
-      parseAssignment(
-        withResult("  type: submit", "  findings: []"),
-        "WORKING",
-      ),
-    ).toThrow(/result: Unrecognized key: "findings"/);
-  });
-
-  test("a submitted review result carries findings and delegations", () => {
-    const meta = parseAssignment(
-      withResult(
-        "  type: submit",
-        "  findings:",
-        '    - "the null case is untested"',
-        "  delegations:",
-        '    - "the same bug lives in fetch.ts"',
-      ),
-      "AGENT_REVIEWING",
-    ).meta;
-
-    expect(meta.result).toEqual({
-      type: "submit",
-      findings: ["the null case is untested"],
-      delegations: ["the same bug lives in fetch.ts"],
-    });
-  });
-
-  test("a review that submits without both lists is rejected", () => {
-    expect(() =>
-      parseAssignment(
-        withResult("  type: submit", "  findings: []"),
-        "AGENT_REVIEWING",
-      ),
-    ).toThrow(/result\.delegations: Invalid input/);
-  });
-
-  test("a plan result carries its additions and removals, both possibly empty", () => {
-    const meta = parseAssignment(
-      withResult(
-        "  type: submit",
-        "  addTodos:",
-        '    - "parse the frontmatter"',
-        "  removeTodos:",
-        "    - 0",
-      ),
-      "PLANNING",
-    ).meta;
-    expect(meta.result).toEqual({
-      type: "submit",
-      addTodos: ["parse the frontmatter"],
-      removeTodos: [0],
-    });
-
-    expect(
-      parseAssignment(
-        withResult("  type: submit", "  addTodos: []", "  removeTodos: []"),
-        "PLANNING",
-      ).meta.result,
-    ).toEqual({ type: "submit", addTodos: [], removeTodos: [] });
-  });
-
-  test("a plan result with unknown fields or a bad remove index is rejected", () => {
-    expect(() =>
-      parseAssignment(
-        withResult(
-          "  type: submit",
-          "  addTodos: []",
-          "  removeTodos: []",
-          "  findings: []",
-        ),
-        "PLANNING",
-      ),
-    ).toThrow(/result: Unrecognized key: "findings"/);
-
-    expect(() =>
-      parseAssignment(
-        withResult("  type: submit", "  addTodos: []", "  removeTodos: [0.5]"),
-        "PLANNING",
-      ),
-    ).toThrow(/result\.removeTodos\[0\]/);
-  });
-
-  test("a plan review result approves with empty findings", () => {
-    const meta = parseAssignment(
-      withResult("  type: submit", "  findings: []"),
-      "PLAN_REVIEWING",
-    ).meta;
-    expect(meta.result).toEqual({ type: "submit", findings: [] });
-  });
-
-  test("a plan review result carries its findings", () => {
-    const meta = parseAssignment(
-      withResult(
-        "  type: submit",
-        "  findings:",
-        '    - "no todo covers the empty case"',
-      ),
-      "PLAN_REVIEWING",
-    ).meta;
-    expect(meta.result).toEqual({
-      type: "submit",
-      findings: ["no todo covers the empty case"],
-    });
-  });
-
-  test("a plan review result missing findings is rejected", () => {
-    expect(() =>
-      parseAssignment(withResult("  type: submit"), "PLAN_REVIEWING"),
-    ).toThrow(/result\.findings: Invalid input/);
-  });
-
-  test("a plan review result cannot carry delegations", () => {
-    expect(() =>
-      parseAssignment(
-        withResult("  type: submit", "  findings: []", "  delegations: []"),
-        "PLAN_REVIEWING",
-      ),
-    ).toThrow(/result: Unrecognized key: "delegations"/);
-  });
-
-  test("a finding that is only whitespace is rejected", () => {
-    expect(() =>
-      parseAssignment(
-        withResult("  type: submit", '  findings: ["  "]', "  delegations: []"),
-        "AGENT_REVIEWING",
-      ),
-    ).toThrow(/result\.findings\[0\]: Too small/);
-  });
-
-  test("blocked requires a message, in every state", () => {
-    for (const state of [
-      "PLANNING",
-      "PLAN_REVIEWING",
-      "WORKING",
-      "AGENT_REVIEWING",
-    ] as const) {
-      expect(() =>
-        parseAssignment(withResult("  type: blocked"), state),
-      ).toThrow(/result\.message: Invalid input/);
-
-      expect(
-        parseAssignment(
-          withResult("  type: blocked", '  message: "the box is down"'),
-          state,
-        ).meta.result,
-      ).toEqual({ type: "blocked", message: "the box is down" });
-    }
-  });
-
-  test("a result type outside the two legal values is rejected", () => {
-    expect(() =>
-      parseAssignment(withResult("  type: done"), "WORKING"),
-    ).toThrow(
-      /result\.type: Invalid discriminator value\. Expected 'submit' \| 'blocked'/,
-    );
-  });
-
-  test("an unknown field and a missing field are both reported", () => {
-    let issues: string[] = [];
-    try {
-      parseAssignment(
-        valid.replace("checks: []\n", "").replace("todos: []", "notes: mine"),
-        "WORKING",
-      );
-    } catch (err) {
-      issues = (err as SchemaError).issues;
-    }
-    expect(issues).toContain(`Unrecognized key: "notes"`);
-    expect(issues.join("\n")).toContain("checks: Invalid input");
-    expect(issues.join("\n")).toContain("todos: Invalid input");
-  });
-
-  test("a document with no frontmatter is rejected", () => {
-    expect(() => parseAssignment("# Just a heading", "WORKING")).toThrow(
-      /no YAML frontmatter/,
-    );
-  });
-});
-
-describe("settle validation", () => {
-  const dispatched = parseAssignment(
-    [
-      "---",
-      'assignment: "000042"',
-      "todos:",
-      '  - message: "fix null handling"',
-      "    done: false",
-      "checks:",
-      '  - "bun test"',
-      "result: null",
-      "---",
-      "",
-      "## Notes",
-    ].join("\n"),
-    "WORKING",
-  ).meta;
-
-  function settled(mutate: (meta: AssignmentMeta) => void) {
-    const copy = structuredClone(dispatched);
-    mutate(copy);
-    return copy;
-  }
-
-  test("flipping a todo and setting a result is not a divergence", () => {
-    const meta = settled((m) => {
-      m.todos[0]!.done = true;
-      m.result = { type: "submit" };
-    });
-
-    expect(divergences(dispatched, meta)).toEqual([]);
-  });
-
-  test("editing the assignment id is a divergence", () => {
-    expect(
-      divergences(
-        dispatched,
-        settled((m) => (m.assignment = "000043")),
-      ),
-    ).toEqual([`"assignment" was changed from "000042" to "000043"`]);
-  });
-
-  test("rewording a todo is a divergence", () => {
-    expect(
-      divergences(
-        dispatched,
-        settled((m) => (m.todos[0]!.message = "fix the parser")),
-      ),
-    ).toEqual(["todos[0].message was reworded"]);
-  });
-
-  test("adding a todo is a divergence", () => {
-    const added = settled((m) =>
-      m.todos.push({ message: "and this too", done: false }),
-    );
-    expect(divergences(dispatched, added)).toEqual([
-      `"todos" was 1 entries and is now 2`,
-    ]);
-  });
-
-  test("rewriting a check command is a divergence", () => {
-    expect(
-      divergences(
-        dispatched,
-        settled((m) => (m.checks[0] = "bun test --bail")),
-      ),
-    ).toEqual(["checks[0] was rewritten"]);
-  });
-});
-
-describe("repairing what the agent changed", () => {
-  const source = [
-    "---",
-    'assignment: "000042"',
-    "todos:",
-    '  - message: "fix null handling"',
-    "    done: false",
-    "checks:",
-    '  - "bun test"',
-    "result: null",
-    "---",
-    "",
-    "## Notes",
-    "",
-    "what I tried.",
-  ].join("\n");
-
-  const dispatched = parseAssignment(source, "WORKING").meta;
-
-  function write(text: string): string {
-    const filePath = path.join(tempDir("orchestrator-"), "ASSIGNMENT.md");
-    fs.writeFileSync(filePath, text);
-    return filePath;
-  }
-
-  test("a file the agent left alone is not rewritten", () => {
-    const filePath = write(
-      source.replace("result: null", "result:\n  type: submit"),
-    );
-    const before = fs.readFileSync(filePath, "utf-8");
-
-    const { restored } = repair(
-      filePath,
-      dispatched,
-      readAssignment(filePath, "WORKING").meta,
-    );
-
-    expect(restored).toEqual([]);
-    expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
-  });
-
-  test("a reworded todo is put back and the result is kept", () => {
-    const filePath = write(
-      source
-        .replace("fix null handling", "do whatever I felt like")
-        .replace("result: null", "result:\n  type: submit"),
-    );
-
-    const { meta, restored } = repair(
-      filePath,
-      dispatched,
-      readAssignment(filePath, "WORKING").meta,
-    );
-
-    expect(restored).toEqual(["todos[0].message was reworded"]);
-    expect(meta.todos).toEqual([{ message: "fix null handling", done: false }]);
-    expect(meta.result).toEqual({ type: "submit" });
-    expect(readAssignment(filePath, "WORKING").meta).toEqual(meta);
-  });
-
-  test("a todo the agent added is dropped and the notes survive", () => {
-    const filePath = write(
-      source.replace(
-        "    done: false",
-        '    done: true\n  - message: "and this too"\n    done: true',
-      ),
-    );
-
-    const { meta, restored } = repair(
-      filePath,
-      dispatched,
-      readAssignment(filePath, "WORKING").meta,
-    );
-
-    expect(restored).toEqual([`"todos" was 1 entries and is now 2`]);
-    expect(meta.todos).toEqual([{ message: "fix null handling", done: true }]);
-    expect(fs.readFileSync(filePath, "utf-8")).toContain("what I tried.");
-  });
-
-  test("a rewritten check is put back and its done flag is not invented", () => {
-    const filePath = write(source.replace("bun test", "true"));
-
-    const { meta, restored } = repair(
-      filePath,
-      dispatched,
-      readAssignment(filePath, "WORKING").meta,
-    );
-
-    expect(restored).toEqual(["checks[0] was rewritten"]);
-    expect(meta.checks).toEqual(["bun test"]);
-  });
-
-  test("a review result round-trips through the serializer", () => {
-    expect(
-      serializeAssignment({
-        assignment: "000042",
-        todos: [],
-        checks: ["bun test"],
-        result: {
-          type: "submit",
-          findings: ["the null case is untested"],
-          delegations: [],
-        },
-      }),
-    ).toBe(
-      [
-        'assignment: "000042"',
-        "todos: []",
-        "checks:",
-        '  - "bun test"',
-        "result:",
-        "  type: submit",
-        "  findings:",
-        '    - "the null case is untested"',
-        "  delegations: []",
-      ].join("\n"),
-    );
-  });
-
-  test("a plan result round-trips through the serializer", () => {
-    expect(
-      serializeAssignment({
-        assignment: "000042",
-        todos: [],
-        checks: [],
-        result: {
-          type: "submit",
-          addTodos: ["parse the frontmatter"],
-          removeTodos: [0, 2],
-        },
-      }),
-    ).toBe(
-      [
-        'assignment: "000042"',
-        "todos: []",
-        "checks: []",
-        "result:",
-        "  type: submit",
-        "  addTodos:",
-        '    - "parse the frontmatter"',
-        "  removeTodos:",
-        "    - 0",
-        "    - 2",
-      ].join("\n"),
-    );
-  });
-
-  test("a plan review result round-trips through the serializer", () => {
-    expect(
-      serializeAssignment({
-        assignment: "000042",
-        todos: [],
-        checks: [],
-        result: {
-          type: "submit",
-          findings: ["the plan misses the empty case"],
-        },
-      }),
-    ).toBe(
-      [
-        'assignment: "000042"',
-        "todos: []",
-        "checks: []",
-        "result:",
-        "  type: submit",
-        "  findings:",
-        '    - "the plan misses the empty case"',
-      ].join("\n"),
-    );
-  });
-});
-
 describe("the issues an agent can be sent back for", () => {
   test("only a blocked result gets a single attempt", () => {
     expect(ISSUES.blocked.attempts).toBe(1);
     for (const name of [
       "missing-result",
-      "incomplete-todos",
+      "missing-todos",
+      "missing-notes",
+      "modified-assignment",
       "uncommitted",
       "unparsable-result",
-      "missing-plan",
-      "invalid-remove-todo",
       "modified-worktree",
     ] as const) {
       expect(ISSUES[name].attempts).toBe(4);
@@ -1258,11 +836,11 @@ describe("the issues an agent can be sent back for", () => {
   });
 
   test("the planning issues hold with reasons that name them", () => {
-    expect(ISSUES["missing-plan"].held("")).toBe(
-      "the planner submitted a plan with no todos",
+    expect(ISSUES["missing-todos"].held("")).toBe(
+      "the planner submitted without appending a todo list to the assignment",
     );
-    expect(ISSUES["invalid-remove-todo"].held("an index outside 0..1")).toBe(
-      "the planner named removeTodos indices that do not exist: an index outside 0..1",
+    expect(ISSUES["modified-assignment"].held("")).toContain(
+      "only the section it was instructed to write may be appended",
     );
     expect(ISSUES["modified-worktree"].held("2 files")).toBe(
       "the agent wrote to the worktree during planning: 2 files",
@@ -1279,30 +857,35 @@ describe("the issues an agent can be sent back for", () => {
       "PLANNING",
       "PLAN_REVIEWING",
       "WORKING",
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     ]);
     expect(ISSUES["missing-result"].states).toEqual([
       "PLANNING",
       "PLAN_REVIEWING",
       "WORKING",
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     ]);
     expect(ISSUES.looping.states).toEqual([
       "PLANNING",
       "PLAN_REVIEWING",
       "WORKING",
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     ]);
     expect(ISSUES.blocked.states).toEqual([
       "PLANNING",
       "PLAN_REVIEWING",
       "WORKING",
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     ]);
-    expect(ISSUES["incomplete-todos"].states).toEqual(["WORKING"]);
+    expect(ISSUES["missing-todos"].states).toEqual(["PLANNING"]);
+    expect(ISSUES["missing-notes"].states).toEqual(["WORKING"]);
+    expect(ISSUES["modified-assignment"].states).toEqual([
+      "PLANNING",
+      "PLAN_REVIEWING",
+      "WORKING",
+      "WORK_REVIEWING",
+    ]);
     expect(ISSUES.uncommitted.states).toEqual(["WORKING"]);
-    expect(ISSUES["missing-plan"].states).toEqual(["PLANNING"]);
-    expect(ISSUES["invalid-remove-todo"].states).toEqual(["PLANNING"]);
     expect(ISSUES["modified-worktree"].states).toEqual([
       "PLANNING",
       "PLAN_REVIEWING",
@@ -1367,7 +950,9 @@ describe("rotation", () => {
       "ASSIGNMENT.2.md",
     ]);
     expect(
-      readAssignment(path.join(history, "ASSIGNMENT.1.md"), "WORKING").body,
+      splitDocument(
+        fs.readFileSync(path.join(history, "ASSIGNMENT.1.md"), "utf-8"),
+      ).body,
     ).toContain("the first attempt");
     expect(attemptOf(history)).toBe(3);
   });
@@ -1487,6 +1072,7 @@ describe("the rpc stream", () => {
         name: "000001 work",
         cwd: dir,
         systemPrompt: path.join(dir, "system.md"),
+        extension: path.join(dir, "result-tools-worker.ts"),
         log: path.join(dir, "rpc.jsonl"),
       },
       command,
@@ -1621,6 +1207,7 @@ describe("the rpc stream", () => {
         name: "test",
         cwd: dir,
         systemPrompt: path.join(dir, "system.md"),
+        extension: path.join(dir, "result-tools-worker.ts"),
         log: path.join(dir, "rpc.jsonl"),
       },
       script,
@@ -1766,11 +1353,14 @@ describe("the rpc stream", () => {
       name: "000042 worker",
       cwd: "/tmp/wt",
       systemPrompt: "/repo/orchestrator/prompts/WORKING.md",
+      extension: "/repo/orchestrator/result-tools-worker.ts",
       log: "/tmp/rpc.jsonl",
     });
 
     expect(args.slice(0, 2)).toEqual(["--mode", "rpc"]);
     expect(args).toContain("--approve");
+    expect(args).toContain("--extension");
+    expect(args).toContain("/repo/orchestrator/result-tools-worker.ts");
     expect(args).toContain("@/repo/orchestrator/prompts/WORKING.md");
     expect(args).not.toContain("-p");
     expect(args).not.toContain("--thinking");
@@ -1783,15 +1373,15 @@ describe("the rpc stream", () => {
       "PLANNING",
       "PLAN_REVIEWING",
       "WORKING",
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     ] as const) {
       const prompt = fs.readFileSync(
         path.join(ORCHESTRATOR_DIR, "prompts", `${state}.md`),
         "utf-8",
       );
-      expect(prompt).toContain("result");
+      expect(prompt).toContain("tool");
       expect(prompt.includes("findings")).toBe(
-        state === "PLAN_REVIEWING" || state === "AGENT_REVIEWING",
+        state === "PLAN_REVIEWING" || state === "WORK_REVIEWING",
       );
       expect(prompt.includes("Commit as you go")).toBe(state === "WORKING");
     }
@@ -1810,10 +1400,7 @@ describe("the scheduler", () => {
       claimed_pid: null,
       held_reason: null,
       workspace: null,
-      todos: [],
       checks: [],
-      plan_feedback: [],
-      failures: [],
       task_graph_updates: [],
       ...overrides,
     };
@@ -1864,7 +1451,7 @@ describe("the scheduler", () => {
       graph(
         task({ id: "000001" }),
         task({ id: "000002", workspace: workspace() }),
-        task({ id: "000003", state: "READY_AGENT_REVIEW" }),
+        task({ id: "000003", state: "READY_WORK_REVIEW" }),
         task({ id: "000004", workspace: workspace() }),
       ),
       new Set(["000004"]),
@@ -1878,7 +1465,7 @@ describe("the scheduler", () => {
     ]);
     expect(queue.map((c) => c.rank)).toEqual([
       "resume",
-      "READY_AGENT_REVIEW",
+      "READY_WORK_REVIEW",
       "READY_WORK_STARTED",
       "READY_WORK_FRESH",
     ]);
@@ -1899,19 +1486,13 @@ describe("the scheduler", () => {
     expect(queue[0]!.blocking).toBe(2);
   });
 
-  test("a tie on blocking breaks on the fewest open todos", () => {
+  test("a tie on blocking breaks on the id", () => {
     const queue = candidates(
-      graph(
-        task({
-          id: "000001",
-          todos: [{ at: "x", message: "a", done: false }],
-        }),
-        task({ id: "000002" }),
-      ),
+      graph(task({ id: "000001" }), task({ id: "000002" })),
       new Set(),
     );
 
-    expect(queue.map((c) => c.task_id)).toEqual(["000002", "000001"]);
+    expect(queue.map((c) => c.task_id)).toEqual(["000001", "000002"]);
   });
 
   test("a held task is never a candidate", () => {
@@ -2025,9 +1606,8 @@ describe("the scheduler", () => {
         task({ id: "000001" }),
         task({
           id: "000002",
-          state: "READY_AGENT_REVIEW",
+          state: "READY_WORK_REVIEW",
           workspace: workspace(),
-          failures: [{ type: "result", message: "did not parse" }],
         }),
       ),
       new Set(["000002"]),
@@ -2050,10 +1630,7 @@ describe("the manager inbox", () => {
       claimed_pid: null,
       held_reason: null,
       workspace: null,
-      todos: [],
       checks: [],
-      plan_feedback: [],
-      failures: [],
       task_graph_updates: [],
       ...overrides,
     };
@@ -2104,7 +1681,7 @@ describe("the manager inbox", () => {
           claimed_by: "pi-1",
           claimed_pid: 1,
         }),
-        task({ id: "000003", state: "READY_AGENT_REVIEW" }),
+        task({ id: "000003", state: "READY_WORK_REVIEW" }),
         task({ id: "000004", state: "BLOCKED", depends_on: ["000001"] }),
       ),
     );
@@ -2211,84 +1788,27 @@ describe("the check runner", () => {
   });
 });
 
-describe("resetting a result", () => {
-  const assignment = [
-    "---",
-    'assignment: "000042"',
-    "todos: []",
-    "checks:",
-    '  - "bun test"',
-    "result:",
-    "  type: submit",
-    "---",
-    "",
-    "## Notes",
-    "",
-    "I ran the check and it passed.",
-  ].join("\n");
-
-  function write(text: string): string {
-    const filePath = path.join(tempDir("orchestrator-"), "ASSIGNMENT.md");
-    fs.writeFileSync(filePath, text);
-    return filePath;
-  }
-
-  test("a resumed assignment comes back with no result to stand on", () => {
-    const filePath = write(assignment);
-    resetResult(filePath, "WORKING");
-
-    const { meta, body } = readAssignment(filePath, "WORKING");
-    expect(meta.result).toBeNull();
-    expect(meta.checks).toEqual(["bun test"]);
-    expect(body).toContain("I ran the check and it passed.");
+describe("the task graph directory", () => {
+  test("graphKey is relative under home and absolute outside it", () => {
+    const home = "/home/model";
+    expect(graphKey("/home/model/project", home)).toBe("project");
+    expect(graphKey("/home/model/a/b", home)).toBe("a-b");
+    expect(graphKey("/home/model", home)).toBe("-home-model");
+    expect(graphKey("/tmp/other", home)).toBe("-tmp-other");
   });
 
-  test("nothing else in the file moves", () => {
-    const filePath = write(assignment);
-    resetResult(filePath, "WORKING");
-
-    expect(fs.readFileSync(filePath, "utf-8")).toBe(
-      assignment.replace("result:\n  type: submit", "result: null"),
-    );
-  });
-
-  test("a multi-line result is removed whole, not line by line", () => {
-    const filePath = write(
-      assignment.replace(
-        "result:\n  type: submit",
-        [
-          "result:",
-          "  type: submit",
-          "  findings:",
-          '    - "one"',
-          '    - "two"',
-          "  delegations: []",
-        ].join("\n"),
-      ),
-    );
-
-    resetResult(filePath, "AGENT_REVIEWING");
-    expect(fs.readFileSync(filePath, "utf-8")).toBe(
-      assignment.replace("result:\n  type: submit", "result: null"),
-    );
-  });
-
-  test("a result that is already null is left alone", () => {
-    const already = assignment.replace(
-      "result:\n  type: submit",
-      "result: null",
-    );
-    const filePath = write(already);
-
-    resetResult(filePath, "WORKING");
-    expect(fs.readFileSync(filePath, "utf-8")).toBe(already);
-  });
-
-  test("a file with no result at all fails loudly", () => {
-    const filePath = write(
-      assignment.replace("result:\n  type: submit", "x: 1"),
-    );
-    expect(() => resetResult(filePath, "WORKING")).toThrow(/result/);
+  test("defaultTasksDir joins the root with the key", () => {
+    const previous = process.env.TASK_GRAPH_TASKS_ROOT;
+    process.env.TASK_GRAPH_TASKS_ROOT = "/tmp/tg";
+    try {
+      expect(defaultTasksDir("/home/model/project")).toBe("/tmp/tg/project");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TASK_GRAPH_TASKS_ROOT;
+      } else {
+        process.env.TASK_GRAPH_TASKS_ROOT = previous;
+      }
+    }
   });
 });
 

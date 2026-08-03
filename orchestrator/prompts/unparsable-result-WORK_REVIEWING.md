@@ -9,7 +9,8 @@ Your last action was not a valid result for this step:
 The result must be a call to one of these tools, as your last action, with
 nothing after it:
 
-- `submit` — no arguments; the `## Todos` section you appended is the plan.
+- `submit` — with `findings` naming the defects in this work (an empty list
+  means you are satisfied) and `delegations` naming the defects outside it.
 - `blocked` — with `message` naming the one thing that stands in the way.
 
 Submit again by calling the right tool. Nothing you did in this session is

@@ -21,7 +21,6 @@ carries none of this work.
 
 {{/dirty}}
 
-That last `git status --porcelain` has to print nothing. Leave
-`result: type: submit` in `../ASSIGNMENT.md` as it is once it does — the file is
-already right, the git history is what is missing. Only what is committed
-survives this worktree.
+That last `git status --porcelain` has to print nothing. Only what is committed
+survives this worktree. Once it does, submit again by calling the `submit`
+tool.

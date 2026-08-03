@@ -1,11 +1,17 @@
-import { describe, expect } from "bun:test";
+import { afterEach, describe, expect } from "bun:test";
 import { tempDir, test } from "./temp.ts";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "./transition.ts";
-import { readAssignment } from "./assignment.ts";
+import {
+  type TaskMeta,
+  readTaskFile,
+  rebuildDocument,
+  writeTaskBody,
+} from "./task.ts";
+import { defaultTasksDir } from "./runtime.ts";
 import * as git from "./git.ts";
 import { repoKey } from "./runtime.ts";
 import {
@@ -21,6 +27,14 @@ import {
   writeOverride,
 } from "./fixture.ts";
 import { Server } from "./server.ts";
+
+const openClients: Client[] = [];
+
+afterEach(async () => {
+  for (const client of openClients.splice(0)) {
+    await client.close().catch(() => {});
+  }
+});
 import { writeCommand } from "./command.ts";
 import { ISSUES } from "./prompts.ts";
 import { LOOP_LIMIT } from "./rpc.ts";
@@ -31,10 +45,22 @@ async function serverFor(fixture: Fixture): Promise<Server> {
     agentsPath: fixture.agentsPath,
     tasksDir: fixture.tasksDir,
     orchestratorDir: fixture.orchestratorDir,
+    overridesDir: fixture.overridesDir,
     serverRoot: fixture.serverRoot,
     piCommand: fixture.piCommand,
     base: "master",
   });
+}
+
+function editTaskFile(
+  fixture: Fixture,
+  id: string,
+  edit: (meta: TaskMeta) => void,
+): void {
+  const filePath = path.join(fixture.tasksDir, `${id}.md`);
+  const { meta, body } = readTaskFile(filePath);
+  edit(meta);
+  fs.writeFileSync(filePath, rebuildDocument(meta, body));
 }
 
 async function settle(server: Server, ticks = 6): Promise<void> {
@@ -73,6 +99,47 @@ function stateOf(server: Server, id: string): string {
   return server.tasks().get(id)?.state ?? "CLOSED";
 }
 
+describe("the server: the default tasks directory", () => {
+  test("with no tasks dir the server resolves ~/task-graph/<key> and seeds the graph", async () => {
+    const fixture = makeFixture();
+    const root = tempDir("task-graph-root-");
+    const previous = process.env.TASK_GRAPH_TASKS_ROOT;
+    process.env.TASK_GRAPH_TASKS_ROOT = root;
+    try {
+      const tasksDir = defaultTasksDir(fixture.repo);
+      fs.mkdirSync(tasksDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(tasksDir, "agents.json"),
+        JSON.stringify({
+          agents: [{ type: "pi", provider: "fake", model: "fake", slots: 1 }],
+        }),
+      );
+
+      const server = await Server.start({
+        repo: fixture.repo,
+        serverRoot: fixture.serverRoot,
+        piCommand: fixture.piCommand,
+        base: "master",
+      });
+
+      expect(server.tasksDir).toBe(tasksDir);
+      expect(server.overridesDir).toBe(tasksDir);
+      expect(fs.existsSync(path.join(tasksDir, "template.md"))).toBe(true);
+      expect(
+        fs.readFileSync(path.join(tasksDir, "next-task-id"), "utf-8"),
+      ).toBe("1\n");
+
+      server.shutdown();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TASK_GRAPH_TASKS_ROOT;
+      } else {
+        process.env.TASK_GRAPH_TASKS_ROOT = previous;
+      }
+    }
+  }, 30000);
+});
+
 describe("the server: a task that goes all the way through", () => {
   test("work, checks, agent review and manager review close the task", async () => {
     const fixture = makeFixture();
@@ -82,13 +149,12 @@ describe("the server: a task that goes all the way through", () => {
       [id]: {
         WORKING: [
           {
-            todos_done: true,
             submit: true,
             notes: "wrote hello.txt and ran the check",
             commit: { path: "hello.txt", contents: "hello\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true, notes: "the range is fine" }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -129,19 +195,20 @@ describe("the server: the planning phase", () => {
       [id]: {
         PLANNING: [
           {
-            add_todos: ["write hello.txt", "run the check"],
+            todos: ["write hello.txt", "run the check"],
             notes: "the plan",
+            submit: true,
           },
         ],
-        PLAN_REVIEWING: [{ submit: true, notes: "the plan is fine" }],
+        PLAN_REVIEWING: [{ submit: true }],
         WORKING: [
           {
-            todos_done: true,
             submit: true,
+            notes: "wrote hello.txt and ran the check",
             commit: { path: "hello.txt", contents: "hello\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -150,16 +217,15 @@ describe("the server: the planning phase", () => {
 
     await reaches(server, id, "READY_WORK");
 
-    const task = server.tasks().get(id)!;
-    expect(task.todos.map((t) => t.message)).toEqual([
-      "write hello.txt",
-      "run the check",
-    ]);
-    expect(task.plan_feedback).toEqual([]);
-    expect(fs.existsSync(server.runtime.worktree(id))).toBe(true);
-    expect(fs.existsSync(server.runtime.sessionDir(id, "planner"))).toBe(
-      true,
+    const body = fs.readFileSync(
+      path.join(fixture.tasksDir, `${id}.md`),
+      "utf-8",
     );
+    expect(body).toContain("## Todos");
+    expect(body).toContain("1. write hello.txt");
+    expect(body).toContain("2. run the check");
+    expect(fs.existsSync(server.runtime.worktree(id))).toBe(true);
+    expect(fs.existsSync(server.runtime.sessionDir(id, "planner"))).toBe(true);
 
     const submits = server.transitions
       .read()
@@ -180,8 +246,8 @@ describe("the server: the planning phase", () => {
     setPlan(fixture, {
       [id]: {
         PLANNING: [
-          { add_todos: ["write hello.txt"] },
-          { add_todos: ["run the check"] },
+          { todos: ["write hello.txt"], submit: true },
+          { todos: ["run the check"], submit: true },
         ],
         PLAN_REVIEWING: [
           { submit: true, findings: ["no todo covers the check"] },
@@ -193,25 +259,17 @@ describe("the server: the planning phase", () => {
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
 
-    await until(server, () => server.tasks().get(id)!.plan_feedback.length > 0);
-
-    expect(server.tasks().get(id)!.plan_feedback).toEqual([
-      "no todo covers the check",
-    ]);
-
-    await reaches(server, id, "READY_PLAN_REVIEW");
-
-    const replan = fs.readFileSync(server.runtime.assignment(id), "utf-8");
-    expect(replan).toContain("no todo covers the check");
-
     await reaches(server, id, "READY_WORK");
 
-    const task = server.tasks().get(id)!;
-    expect(task.plan_feedback).toEqual([]);
-    expect(task.todos.map((t) => t.message)).toEqual([
-      "write hello.txt",
-      "run the check",
-    ]);
+    const planner = server.runtime.sessionDir(id, "planner");
+    expect(promptsTo(planner).join("\n")).toContain("no todo covers the check");
+
+    const body = fs.readFileSync(
+      path.join(fixture.tasksDir, `${id}.md`),
+      "utf-8",
+    );
+    expect(body).toContain("1. run the check");
+    expect(body).not.toContain("1. write hello.txt");
 
     server.shutdown();
     await server.drain();
@@ -223,7 +281,10 @@ describe("the server: the planning phase", () => {
 
     setPlan(fixture, {
       [id]: {
-        PLANNING: [{ submit: true }, { add_todos: ["write hello.txt"] }],
+        PLANNING: [
+          { submit: true },
+          { todos: ["write hello.txt"], submit: true },
+        ],
         PLAN_REVIEWING: [{ submit: true }],
       },
     });
@@ -233,7 +294,7 @@ describe("the server: the planning phase", () => {
     await reaches(server, id, "READY_WORK");
 
     const planner = server.runtime.sessionDir(id, "planner");
-    expect(promptsTo(planner)[1]).toContain("no todos at all");
+    expect(promptsTo(planner)[1]).toContain("## Todos");
 
     server.shutdown();
     await server.drain();
@@ -254,90 +315,12 @@ describe("the server: the planning phase", () => {
     await reaches(server, id, "HELD_PLAN");
 
     const task = server.tasks().get(id)!;
-    expect(task.held_reason).toBe("the planner submitted a plan with no todos");
-    expect(task.state).toBe("HELD_PLAN");
-    expect(
-      promptsTo(server.runtime.sessionDir(id, "planner")),
-    ).toHaveLength(ISSUES["missing-plan"].attempts + 1);
-
-    server.shutdown();
-  }, 30000);
-
-  test("the planner can remove decided todos by index before adding", async () => {
-    const fixture = makeFixture();
-    const id = unplannedTask(fixture, "Add a greeting");
-    applyTransition(fixture.tasksDir, id, "addTodo", {
-      message: "the manager's wrong todo",
-    });
-
-    setPlan(fixture, {
-      [id]: {
-        PLANNING: [{ add_todos: ["write hello.txt"], remove_todos: [0] }],
-        PLAN_REVIEWING: [{ submit: true }],
-      },
-    });
-
-    const server = await serverFor(fixture);
-    server.setSchedulerEnabled(true);
-    await reaches(server, id, "READY_WORK");
-
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .todos.map((t) => t.message),
-    ).toEqual(["write hello.txt"]);
-
-    server.shutdown();
-    await server.drain();
-  }, 30000);
-
-  test("a plan that removes every todo is refused as empty, and nothing is removed", async () => {
-    const fixture = makeFixture();
-    const id = unplannedTask(fixture, "Add a greeting");
-    applyTransition(fixture.tasksDir, id, "addTodo", {
-      message: "the only todo",
-    });
-
-    setPlan(fixture, {
-      [id]: {
-        PLANNING: [{ submit: true, remove_todos: [0] }],
-      },
-    });
-
-    const server = await serverFor(fixture);
-    server.setSchedulerEnabled(true);
-    await reaches(server, id, "HELD_PLAN");
-
-    expect(server.tasks().get(id)!.held_reason).toBe(
-      "the planner submitted a plan with no todos",
+    expect(task.held_reason).toContain(
+      "the planner submitted without appending a todo list",
     );
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .todos.map((t) => t.message),
-    ).toEqual(["the only todo"]);
-
-    server.shutdown();
-  }, 30000);
-
-  test("a removeTodos index outside the plan is refused as unreadable", async () => {
-    const fixture = makeFixture();
-    const id = unplannedTask(fixture, "Add a greeting");
-
-    setPlan(fixture, {
-      [id]: {
-        PLANNING: [{ submit: true, remove_todos: [5] }],
-      },
-    });
-
-    const server = await serverFor(fixture);
-    server.setSchedulerEnabled(true);
-    await reaches(server, id, "HELD_PLAN");
-
-    expect(server.tasks().get(id)!.held_reason).toBe(
-      "the planner named removeTodos indices that do not exist: the task has no todos to remove",
+    expect(task.state).toBe("HELD_PLAN");
+    expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
+      ISSUES["missing-todos"].attempts + 1,
     );
 
     server.shutdown();
@@ -352,9 +335,10 @@ describe("the server: the planning phase", () => {
         PLANNING: [
           {
             write: { path: "oops.txt", contents: "nope" },
-            add_todos: ["write hello.txt"],
+            todos: ["write hello.txt"],
+            submit: true,
           },
-          { clean: ["oops.txt"], add_todos: ["write hello.txt"] },
+          { clean: ["oops.txt"], todos: ["write hello.txt"], submit: true },
         ],
         PLAN_REVIEWING: [{ submit: true }],
       },
@@ -380,7 +364,8 @@ describe("the server: the planning phase", () => {
         PLANNING: [
           {
             commit: { path: "oops.txt", contents: "nope" },
-            add_todos: ["write hello.txt"],
+            todos: ["write hello.txt"],
+            submit: true,
           },
         ],
       },
@@ -403,7 +388,7 @@ describe("the server: the planning phase", () => {
 
     setPlan(fixture, {
       [id]: {
-        PLANNING: [{ add_todos: ["write hello.txt"] }],
+        PLANNING: [{ todos: ["write hello.txt"], submit: true }],
         PLAN_REVIEWING: [
           { write: { path: "oops.txt", contents: "nope" }, submit: true },
           { clean: ["oops.txt"], submit: true },
@@ -450,7 +435,7 @@ describe("the server: the planning phase", () => {
     const id = unplannedTask(fixture, "Add a greeting");
     setPlan(fixture, {
       [id]: {
-        PLANNING: [{ add_todos: ["write hello.txt"] }],
+        PLANNING: [{ todos: ["write hello.txt"], submit: true }],
         PLAN_REVIEWING: [{ blocked: "the criteria contradict the goal" }],
       },
     });
@@ -469,6 +454,25 @@ describe("the server: the planning phase", () => {
     server.shutdown();
   }, 30000);
 
+  test("the manager resolves a held task by writing the body and resuming", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task");
+    setPlan(fixture, {
+      [id]: { WORKING: [{ blocked: "the criteria are unclear" }] },
+    });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await reaches(server, id, "HELD_WORK");
+    server.setSchedulerEnabled(false);
+
+    writeTaskBody(fixture.tasksDir, id, "# Goal\n\nclarified the criteria");
+    server.transition(id, "resume", {}, "manager");
+    expect(stateOf(server, id)).toBe("READY_WORK");
+
+    server.shutdown();
+  }, 30000);
+
   test("planning ranks below work, and plan review below both", async () => {
     const fixture = makeFixture();
     const worked = readyTask(fixture, "Ready for work");
@@ -482,12 +486,6 @@ describe("the server: the planning phase", () => {
       "claim",
       { agentName: "planner", pid: process.pid },
       "test",
-    );
-    server.transition(
-      reviewing,
-      "addTodo",
-      { message: "write hello.txt" },
-      "server",
     );
     server.transition(reviewing, "submit", {}, "server");
     await server.tick();
@@ -504,7 +502,7 @@ describe("the server: the planning phase", () => {
     server.shutdown();
   }, 30000);
 
-  test("a task still queued in READY_PLAN can be aborted", async () => {
+  test("a task still queued in READY_PLAN can be held and aborted", async () => {
     const fixture = makeFixture();
     const id = unplannedTask(fixture, "The wrong shape");
 
@@ -512,14 +510,12 @@ describe("the server: the planning phase", () => {
     server.setSchedulerEnabled(false);
     await server.tick();
 
-    expect(() => server.attemptAbort(id)).toThrow(/no task graph updates/);
-    server.transition(
-      id,
-      "addTaskGraph",
-      { op: "add", message: "split this in two" },
-      "manager",
+    expect(() => server.attemptAbort(id)).toThrow(
+      /not in MANAGER_REVIEWING or HELD_PLAN or HELD_WORK/,
     );
-    expect(server.attemptAbort(id).to).toBe("READY_TASK_GRAPH_UPDATE");
+    server.transition(id, "hold", { reason: "abandoning" }, "manager");
+    expect(server.attemptAbort(id).to).toBe("CLOSED");
+    expect(server.tasks().has(id)).toBe(false);
 
     server.shutdown();
   }, 30000);
@@ -566,29 +562,6 @@ describe("the server: dispatch", () => {
       "prompts/dispatch.md",
       "Start on ../ASSIGNMENT.md.\n",
     );
-    writeOverride(
-      fixture,
-      "templates/WORKING.md",
-      [
-        "---",
-        'assignment: "{{id}}"',
-        "todos: []",
-        "checks:",
-        "  {{#checks}}",
-        '  - "{{command}}"',
-        "  {{/checks}}",
-        "result: null",
-        "---",
-        "",
-        "# {{title}}",
-        "",
-        "House style: no comments.",
-        "",
-        "## Notes",
-        "",
-      ].join("\n"),
-    );
-
     setPlan(fixture, { [id]: { WORKING: [{ notes: "still thinking" }] } });
 
     const server = await serverFor(fixture);
@@ -603,10 +576,7 @@ describe("the server: dispatch", () => {
     expect(promptsTo(sessionDir)[0]).toBe("Start on ../ASSIGNMENT.md.\n");
 
     const assignment = fs.readFileSync(server.runtime.assignment(id), "utf-8");
-    expect(assignment).toContain("House style: no comments.");
-    expect(
-      readAssignment(server.runtime.assignment(id), "WORKING").meta.assignment,
-    ).toBe(id);
+    expect(assignment).toContain("# Goal");
 
     server.shutdown();
   }, 30000);
@@ -625,9 +595,6 @@ describe("the server: dispatch", () => {
     const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
     expect(log).toContain(
       `cached ${path.join(fixture.overridesDir, "prompts", "dispatch.md")}`,
-    );
-    expect(log).toContain(
-      `cached ${path.join(fixture.orchestratorDir, "templates", "WORKING.md")}`,
     );
     expect(log).not.toContain(
       `cached ${path.join(fixture.orchestratorDir, "prompts", "dispatch.md")}`,
@@ -661,9 +628,6 @@ describe("the server: dispatch", () => {
         "utf-8",
       ),
     );
-    expect(
-      readAssignment(server.runtime.assignment(id), "WORKING").meta.result,
-    ).toBeNull();
 
     server.shutdown();
   }, 30000);
@@ -671,10 +635,6 @@ describe("the server: dispatch", () => {
   test("a dispatched task gets a worktree, a branch and an ASSIGNMENT.md beside it", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing", ["true"]);
-    applyTransition(fixture.tasksDir, id, "addTodo", {
-      message: "the null case",
-    });
-    commitGraph(fixture, "todo");
 
     setPlan(fixture, { [id]: { WORKING: [{ notes: "still thinking" }] } });
 
@@ -691,11 +651,8 @@ describe("the server: dispatch", () => {
     expect(assignment.startsWith(worktree)).toBe(false);
     expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(true);
 
-    const { meta } = readAssignment(assignment, "WORKING");
-    expect(meta.assignment).toBe(id);
-    expect(meta.todos).toEqual([{ message: "the null case", done: false }]);
-    expect(meta.checks).toEqual(["true"]);
-    expect(meta.result).toBeNull();
+    const body = fs.readFileSync(assignment, "utf-8");
+    expect(body).toContain("# Goal");
 
     server.shutdown();
   }, 30000);
@@ -705,8 +662,14 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -734,7 +697,7 @@ describe("the server: dispatch", () => {
   test("a workspace claimed under an older branch prefix keeps the branch it recorded", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task from before the prefix changed");
-    setPlan(fixture, { [id]: { AGENT_REVIEWING: [{ submit: true }] } });
+    setPlan(fixture, { [id]: { WORK_REVIEWING: [{ submit: true }] } });
 
     const server = await serverFor(fixture);
     const legacy = `work/${id}`;
@@ -746,18 +709,19 @@ describe("the server: dispatch", () => {
     git.gitOrThrow(worktree, ["commit", "-q", "-m", "work from before"]);
     git.harvest(fixture.repo, worktree, legacy);
 
+    const body = readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body;
     for (const [name, args] of [
       [
         "claim",
         { agentName: "pi-old-1", pid: process.pid, branch: legacy, worktree },
       ],
-      ["submit", {}],
+      ["submit", { body }],
       ["claim", { agentName: "server", pid: process.pid }],
       ["pass", {}],
     ] as const) {
       applyTransition(fixture.tasksDir, id, name, args);
     }
-    expect(stateOf(server, id)).toBe("READY_AGENT_REVIEW");
+    expect(stateOf(server, id)).toBe("READY_WORK_REVIEW");
 
     server.setSchedulerEnabled(true);
     await reaches(server, id, "READY_MANAGER_REVIEW");
@@ -784,7 +748,7 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ busy_ms: 200, submit: true }],
+        WORKING: [{ busy_ms: 200, submit: true, notes: "did the work" }],
       },
     });
 
@@ -824,7 +788,13 @@ describe("the server: dispatch", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
       },
     });
 
@@ -835,7 +805,7 @@ describe("the server: dispatch", () => {
     await server.drain();
     await settle(server, 2);
 
-    expect(stateOf(server, id)).toBe("READY_AGENT_REVIEW");
+    expect(stateOf(server, id)).toBe("READY_WORK_REVIEW");
     expect(server.schedulerEnabled).toBe(false);
 
     server.shutdown();
@@ -848,25 +818,32 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["echo boom >&2; exit 3"]);
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.failures.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
 
     const task = server.tasks().get(id)!;
     expect(task.state).toBe("READY_WORK");
-    expect(task.todos).toEqual([]);
-    expect(task.failures).toHaveLength(1);
-    expect(task.failures[0]).toMatchObject({
-      type: "check",
-      command: "echo boom >&2; exit 3",
-      exit_code: 3,
-    });
-    expect((task.failures[0] as { output: string }).output).toContain("boom");
+    const queued = fs.readFileSync(
+      path.join(server.runtime.queueDir(id), "WORKING.md"),
+      "utf-8",
+    );
+    expect(queued).toContain("echo boom >&2; exit 3");
+    expect(queued).toContain("boom");
 
     server.shutdown();
   }, 30000);
@@ -876,21 +853,30 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["exit 1", "true", "exit 2"]);
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.failures.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
 
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .failures.map((f) => (f.type === "check" ? f.exit_code : 0)),
-    ).toEqual([1, 2]);
+    const queued = fs.readFileSync(
+      path.join(server.runtime.queueDir(id), "WORKING.md"),
+      "utf-8",
+    );
+    expect(queued).toContain("(exit 1)");
+    expect(queued).toContain("(exit 2)");
 
     server.shutdown();
   }, 30000);
@@ -900,15 +886,20 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["true", "test -d ."]);
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await reaches(server, id, "READY_AGENT_REVIEW");
-    expect(server.tasks().get(id)!.failures).toEqual([]);
+    await reaches(server, id, "READY_WORK_REVIEW");
 
     server.shutdown();
   }, 30000);
@@ -918,7 +909,13 @@ describe("the server: checks", () => {
     const id = readyTask(fixture, "Do a thing", ["echo written-to-the-log"]);
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
       },
     });
 
@@ -935,7 +932,7 @@ describe("the server: checks", () => {
 });
 
 describe("the server: the agent review", () => {
-  test("a finding becomes a todo verbatim and the task drops back to READY_WORK", async () => {
+  test("a finding lands under # Review findings and the task drops back to READY_WORK", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
@@ -947,7 +944,7 @@ describe("the server: the agent review", () => {
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        AGENT_REVIEWING: [
+        WORK_REVIEWING: [
           { submit: true, findings: ["the null case is untested"] },
         ],
       },
@@ -955,20 +952,33 @@ describe("the server: the agent review", () => {
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.todos.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    server.setSchedulerEnabled(false);
+    await server.drain();
 
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .todos.map((t) => t.message),
-    ).toEqual(["the null case is untested"]);
+    const body = fs.readFileSync(
+      path.join(fixture.tasksDir, `${id}.md`),
+      "utf-8",
+    );
+    expect(body).toContain("# Review findings");
+    expect(body).toContain("- the null case is untested");
+
+    const queued = fs.readFileSync(
+      path.join(server.runtime.queueDir(id), "WORKING.md"),
+      "utf-8",
+    );
+    expect(queued).toContain("the null case is untested");
 
     const applied = server.transitions
       .read()
       .find(
-        (e) => e.transition === "addFeedback" && e.from === "AGENT_REVIEWING",
+        (e) => e.transition === "addFeedback" && e.from === "WORK_REVIEWING",
       )!;
     expect(applied.to).toBe("READY_WORK");
     expect(applied.by).toBe("server");
@@ -976,7 +986,7 @@ describe("the server: the agent review", () => {
     server.shutdown();
   }, 30000);
 
-  test("the reviewer gets its own session, the worktree and a commit range", async () => {
+  test("the reviewer gets its own session and a worktree with the work on it", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
@@ -988,7 +998,7 @@ describe("the server: the agent review", () => {
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -997,20 +1007,13 @@ describe("the server: the agent review", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    const { body } = readAssignment(
-      server.runtime.assignment(id),
-      "AGENT_REVIEWING",
-    );
     const head = git
       .gitOrThrow(server.runtime.worktree(id), ["rev-parse", "HEAD"])
       .trim();
     const base = git
       .gitOrThrow(server.runtime.worktree(id), ["rev-parse", "master"])
       .trim();
-
-    expect(body).toContain(`${base}..${head}`);
-    expect(body).toContain(server.runtime.worktree(id));
-    expect(body).not.toContain("I decided the flaky test");
+    expect(head).not.toBe(base);
 
     const workSessions = fs.readdirSync(
       server.runtime.sessionDir(id, "worker"),
@@ -1033,30 +1036,36 @@ describe("the server: the agent review", () => {
         WORKING: [
           {
             submit: true,
+            notes: "did the work",
             commit: { path: "tasks/000001.md", contents: "rewritten\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.todos.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    server.setSchedulerEnabled(false);
+    await server.drain();
 
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .todos.map((t) => t.message)
-        .join(" "),
-    ).toContain("writes to tasks/");
+    const queued = fs.readFileSync(
+      path.join(server.runtime.queueDir(id), "WORKING.md"),
+      "utf-8",
+    );
+    expect(queued).toContain("writes to tasks/");
 
     const applied = server.transitions
       .read()
       .find(
-        (e) => e.transition === "addFeedback" && e.from === "AGENT_REVIEWING",
+        (e) => e.transition === "addFeedback" && e.from === "WORK_REVIEWING",
       )!;
     expect(applied.to).toBe("READY_WORK");
 
@@ -1074,7 +1083,7 @@ describe("the server: a submit with nothing in the git history", () => {
           { submit: true, notes: "I forgot to commit" },
           { submit: true, commit: { path: "a.txt", contents: "a\n" } },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1103,12 +1112,17 @@ describe("the server: a submit with nothing in the git history", () => {
         WORKING: [
           {
             submit: true,
+            notes: "wrote a.txt and half of b.txt",
             commit: { path: "a.txt", contents: "a\n" },
             write: { path: "b.txt", contents: "half a fix\n" },
           },
-          { submit: true, commit: { path: "b.txt", contents: "half a fix\n" } },
+          {
+            submit: true,
+            notes: "finished b.txt",
+            commit: { path: "b.txt", contents: "half a fix\n" },
+          },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1135,7 +1149,7 @@ describe("the server: a submit with nothing in the git history", () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
-      [id]: { WORKING: [{ submit: true }] },
+      [id]: { WORKING: [{ submit: true, notes: "forgot to commit" }] },
     });
 
     const server = await serverFor(fixture);
@@ -1147,9 +1161,7 @@ describe("the server: a submit with nothing in the git history", () => {
       "the agent submitted work it never committed: nothing is committed on the branch",
     );
     expect(task.claimed_by).toBeNull();
-    expect(
-      promptsTo(server.runtime.sessionDir(id, "worker")),
-    ).toHaveLength(5);
+    expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(5);
     expect(server.agentRows()[0]!.state).toBe("IDLE");
 
     server.shutdown();
@@ -1195,9 +1207,13 @@ describe("the server: an agent that stops short", () => {
       [id]: {
         WORKING: [
           { loop: LOOP_LIMIT },
-          { submit: true, commit: { path: "a.txt", contents: "a" } },
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1209,7 +1225,7 @@ describe("the server: an agent that stops short", () => {
     const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("zig build");
-    expect(prompts[1]).toContain("type: blocked");
+    expect(prompts[1]).toContain("call the `blocked` tool");
     expect(server.transitions.read().some((e) => e.transition === "hold")).toBe(
       false,
     );
@@ -1227,9 +1243,9 @@ describe("the server: an agent that stops short", () => {
     await reaches(server, id, "HELD_WORK");
 
     expect(server.tasks().get(id)!.held_reason).toContain("zig build");
-    expect(
-      promptsTo(server.runtime.sessionDir(id, "worker")),
-    ).toHaveLength(ISSUES.looping.attempts + 1);
+    expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      ISSUES.looping.attempts + 1,
+    );
 
     server.shutdown();
   }, 30000);
@@ -1239,8 +1255,14 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [
           { blocked: "the retry loop in fetch.ts has the same bug" },
           {
             submit: true,
@@ -1262,14 +1284,6 @@ describe("the server: an agent that stops short", () => {
     expect(server.transitions.read().some((e) => e.transition === "hold")).toBe(
       false,
     );
-    expect(
-      readAssignment(server.runtime.assignment(id), "AGENT_REVIEWING").meta
-        .result,
-    ).toEqual({
-      type: "submit",
-      findings: [],
-      delegations: ["the retry loop in fetch.ts has the same bug"],
-    });
 
     server.shutdown();
   }, 30000);
@@ -1294,11 +1308,15 @@ describe("the server: an agent that stops short", () => {
     server.shutdown();
   }, 30000);
 
-  test("stopping with no result is prompted four times, then held", async () => {
+  test("a result tool that does not fit the state is prompted four times, then held", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
-      [id]: { WORKING: [{ notes: "I forgot to set a result" }] },
+      [id]: {
+        WORKING: [
+          { result_tool: { name: "submit", args: { findings: ["x"] } } },
+        ],
+      },
     });
 
     const server = await serverFor(fixture);
@@ -1307,13 +1325,12 @@ describe("the server: an agent that stops short", () => {
 
     const task = server.tasks().get(id)!;
     expect(task.state).toBe("HELD_WORK");
-    expect(task.held_reason).toBe("the agent stopped without setting a result");
+    expect(task.held_reason).toContain("not a valid one for its state");
 
     const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
     expect(prompts).toHaveLength(5);
-    expect(prompts[1]).toContain("Edit `../ASSIGNMENT.md`");
-    expect(prompts[1]).toContain("what you write in your reply is discarded");
-    expect(prompts[1]).not.toContain("findings");
+    expect(prompts[1]).toContain("Your last action was not a valid result");
+    expect(prompts[1]).not.toContain("delegations");
 
     server.shutdown();
   }, 30000);
@@ -1323,7 +1340,7 @@ describe("the server: an agent that stops short", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ notes: "I forgot to set a result", start_delay_ms: 50 }],
+        WORKING: [{ raw_final_message: "prose", start_delay_ms: 50 }],
       },
     });
 
@@ -1338,19 +1355,26 @@ describe("the server: an agent that stops short", () => {
     server.shutdown();
   }, 30000);
 
-  test("an edited header is put back by the server, not argued about", async () => {
+  test("an edited assignment is nudged to restore it, and the redo passes", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
         WORKING: [
           {
-            edit_header: { assignment: '"000099"' },
+            tamper: { from: "# Goal", to: "# Changed" },
             submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+          {
+            tamper: { from: "# Changed", to: "# Goal" },
+            submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1359,66 +1383,21 @@ describe("the server: an agent that stops short", () => {
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    expect(
-      readAssignment(
-        path.join(server.runtime.history(id), "ASSIGNMENT.1.md"),
-        "WORKING",
-      ).meta.assignment,
-    ).toBe(id);
-    expect(
-      promptsTo(server.runtime.sessionDir(id, "worker")),
-    ).toHaveLength(1);
+    const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("Restore every character above your section");
 
     server.shutdown();
   }, 30000);
 
-  test("a todo the agent invented is dropped and the real one still counts", async () => {
+  test("a worker that submits without appending notes is prompted, then held", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
-    applyTransition(fixture.tasksDir, id, "addTodo", { message: "the fix" });
-    commitGraph(fixture, "todo");
-
     setPlan(fixture, {
       [id]: {
-        WORKING: [
-          {
-            todos_done: true,
-            add_todo: "and this too",
-            submit: true,
-            commit: { path: "a.txt", contents: "a" },
-          },
-        ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
       },
     });
-
-    const server = await serverFor(fixture);
-    server.setSchedulerEnabled(true);
-    await reaches(server, id, "READY_MANAGER_REVIEW");
-    server.setSchedulerEnabled(false);
-
-    const live = readAssignment(
-      server.runtime.assignment(id),
-      "AGENT_REVIEWING",
-    ).meta;
-    expect(live.todos).toEqual([{ message: "the fix", done: true }]);
-    expect(
-      server
-        .tasks()
-        .get(id)!
-        .todos.map((todo) => todo.done),
-    ).toEqual([true]);
-
-    server.shutdown();
-  }, 30000);
-
-  test("claiming submitted with an open todo is refused four times, then held", async () => {
-    const fixture = makeFixture();
-    const id = readyTask(fixture, "Do a thing");
-    applyTransition(fixture.tasksDir, id, "addTodo", { message: "the fix" });
-    commitGraph(fixture, "todo");
-
-    setPlan(fixture, { [id]: { WORKING: [{ submit: true }] } });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -1426,54 +1405,61 @@ describe("the server: an agent that stops short", () => {
 
     const task = server.tasks().get(id)!;
     expect(task.state).toBe("HELD_WORK");
-    expect(task.held_reason).toContain("1 todo(s) still open");
-    expect(task.todos[0]!.done).toBe(false);
-    expect(
-      promptsTo(server.runtime.sessionDir(id, "worker")),
-    ).toHaveLength(5);
+    expect(task.held_reason).toContain(
+      "without appending implementation notes",
+    );
+    expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(5);
 
     server.shutdown();
   }, 30000);
 });
 
 describe("the server: rotation and history", () => {
-  test("a rejected task is regenerated and the previous attempt is kept", async () => {
+  test("a re-dispatch rotates the previous attempt into history", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [
-          {
-            submit: true,
-            notes: "attempt one",
-            commit: { path: "a.txt", contents: "a" },
-          },
-          { notes: "attempt two, still going" },
-        ],
-        AGENT_REVIEWING: [{ submit: true, findings: ["not good enough"] }],
+        WORKING: [{ raw_final_message: "prose", notes: "attempt one" }],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => {
-      const history = server.runtime.history(id);
-      return fs.existsSync(history) && fs.readdirSync(history).length >= 2;
+    await reaches(server, id, "HELD_WORK");
+    server.setSchedulerEnabled(false);
+
+    setPlan(fixture, {
+      [id]: {
+        WORKING: [
+          {
+            submit: true,
+            notes: "attempt two",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
+      },
     });
+    server.transition(id, "resume", {}, "manager");
+    server.setSchedulerEnabled(true);
+    await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
     const history = fs.readdirSync(server.runtime.history(id)).sort();
-    expect(history).toEqual(["ASSIGNMENT.1.md", "ASSIGNMENT.2.md"]);
+    expect(history).toEqual(["ASSIGNMENT.1.md"]);
     expect(
-      readAssignment(
+      fs.readFileSync(
         path.join(server.runtime.history(id), "ASSIGNMENT.1.md"),
-        "WORKING",
-      ).body,
+        "utf-8",
+      ),
     ).toContain("attempt one");
 
-    const live = readAssignment(server.runtime.assignment(id), "WORKING").meta;
-    expect(live.result).toBeNull();
-    expect(live.todos.map((t) => t.message)).toEqual(["not good enough"]);
+    const body = fs.readFileSync(
+      path.join(fixture.tasksDir, `${id}.md`),
+      "utf-8",
+    );
+    expect(body).toContain("attempt two");
 
     server.shutdown();
   }, 30000);
@@ -1486,10 +1472,11 @@ describe("the server: rotation and history", () => {
         WORKING: [
           {
             submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1575,9 +1562,13 @@ describe("the server: the views", () => {
     const fixture = makeFixture();
     const dep = readyTask(fixture, "the dependency");
     const held = readyTask(fixture, "the held one");
-    applyTransition(fixture.tasksDir, held, "addDependencies", {
-      taskIds: [dep],
+    applyTransition(fixture.tasksDir, held, "hold", {
+      reason: "waiting on its dependency",
     });
+    editTaskFile(fixture, held, (meta) => {
+      meta.depends_on = [dep];
+    });
+    applyTransition(fixture.tasksDir, held, "resume", {});
 
     const server = await serverFor(fixture);
     server.transition(
@@ -1604,9 +1595,13 @@ describe("the server: the queue view", () => {
     const fixture = makeFixture();
     const first = readyTask(fixture, "the first");
     const second = readyTask(fixture, "the second");
-    applyTransition(fixture.tasksDir, second, "addDependencies", {
-      taskIds: [first],
+    applyTransition(fixture.tasksDir, second, "hold", {
+      reason: "waiting on the first",
     });
+    editTaskFile(fixture, second, (meta) => {
+      meta.depends_on = [first];
+    });
+    applyTransition(fixture.tasksDir, second, "resume", {});
 
     const server = await serverFor(fixture);
     await server.writeViews();
@@ -1700,8 +1695,14 @@ describe("the server: the transition log", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1780,10 +1781,11 @@ describe("the server: integration", () => {
         WORKING: [
           {
             submit: true,
+            notes: "did the work",
             commit: { path: "shared.txt", contents: "from the branch\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1804,7 +1806,6 @@ describe("the server: integration", () => {
 
     expect(server.attemptMerge(id)).rejects.toThrow(/no longer rebases/);
     expect(stateOf(server, id)).toBe("MANAGER_REVIEWING");
-    expect(server.tasks().get(id)!.todos).toEqual([]);
 
     server.shutdown();
   }, 30000);
@@ -1815,9 +1816,13 @@ describe("the server: integration", () => {
     setPlan(fixture, {
       [id]: {
         WORKING: [
-          { submit: true, commit: { path: "wanted.txt", contents: "here\n" } },
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "wanted.txt", contents: "here\n" },
+          },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -1842,7 +1847,6 @@ describe("the server: integration", () => {
 
     expect(server.attemptMerge(id)).rejects.toThrow(/test -f wanted\.txt/);
     expect(stateOf(server, id)).toBe("MANAGER_REVIEWING");
-    expect(server.tasks().get(id)!.todos).toEqual([]);
 
     server.shutdown();
   }, 30000);
@@ -1855,21 +1859,28 @@ describe("the server: integration", () => {
     setPlan(fixture, {
       [id]: {
         WORKING: [
-          { submit: true, commit: { path: "made.txt", contents: "here\n" } },
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "made.txt", contents: "here\n" },
+          },
         ],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.failures.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
 
-    const failure = server.tasks().get(id)!.failures[0]!;
-    expect(failure).toMatchObject({ type: "check" });
-    expect((failure as { output: string }).output).toContain(
-      "Read-only file system",
+    const queued = fs.readFileSync(
+      path.join(server.runtime.queueDir(id), "WORKING.md"),
+      "utf-8",
     );
+    expect(queued).toContain("Read-only file system");
     expect(fs.existsSync(path.join(fixture.repo, "poke"))).toBe(false);
 
     expect(
@@ -1882,11 +1893,26 @@ describe("the server: integration", () => {
 
 describe("the mcp surface", () => {
   async function connect(fixture: Fixture, cwd = fixture.repo) {
+    fs.mkdirSync(fixture.tasksDir, { recursive: true });
+    const agentsPath = path.join(fixture.tasksDir, "agents.json");
+    if (!fs.existsSync(agentsPath)) {
+      fs.writeFileSync(
+        agentsPath,
+        JSON.stringify({
+          agents: [{ type: "pi", provider: "fake", model: "fake", slots: 1 }],
+        }),
+      );
+    }
     const client = new Client({ name: "test", version: "1.0.0" });
+    openClients.push(client);
     await client.connect(
       new StdioClientTransport({
         command: "bun",
-        args: [path.join(import.meta.dir, "mcp.ts"), fixture.repo],
+        args: [
+          path.join(import.meta.dir, "mcp.ts"),
+          fixture.repo,
+          fixture.tasksDir,
+        ],
         cwd,
         env: {
           ...(process.env as Record<string, string>),
@@ -1913,17 +1939,12 @@ describe("the mcp surface", () => {
       "enable_scheduler",
       "reload_prompts",
       "task_abort",
-      "task_add_check",
-      "task_add_dependencies",
-      "task_add_task_graph_update",
-      "task_add_todo",
+      "task_add_feedback",
       "task_claim",
       "task_create",
-      "task_done_create",
-      "task_done_task_graph_updates",
-      "task_merge",
-      "task_remove_dependencies",
+      "task_hold",
       "task_resume",
+      "task_submit",
       "task_write_body",
     ]);
     expect(
@@ -1932,10 +1953,72 @@ describe("the mcp surface", () => {
       "orchestrator://agents",
       "orchestrator://checks",
       "orchestrator://inbox",
+      "orchestrator://paths",
       "orchestrator://queue",
       "orchestrator://tasks",
       "orchestrator://workspace_path",
     ]);
+
+    const paths = await client.readResource({ uri: "orchestrator://paths" });
+    const parsed = JSON.parse(
+      (paths.contents as { text: string }[])[0]!.text,
+    ) as Record<string, unknown>;
+    expect(parsed.tasks_dir).toBe(fixture.tasksDir);
+    expect(parsed.agents_file).toBe(path.join(fixture.tasksDir, "agents.json"));
+    expect(parsed.overrides_prompts_dir).toBe(
+      path.join(fixture.tasksDir, "prompts"),
+    );
+
+    await client.close();
+  }, 60000);
+
+  test("task_add_feedback sends the task back with the findings in the body and the queue", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task");
+    applyTransition(fixture.tasksDir, id, "claim", {
+      agentName: "manager",
+      pid: process.pid,
+    });
+    applyTransition(fixture.tasksDir, id, "submit", {
+      body: readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body,
+    });
+    applyTransition(fixture.tasksDir, id, "claim", {
+      agentName: "server",
+      pid: process.pid,
+    });
+    applyTransition(fixture.tasksDir, id, "pass", {});
+    applyTransition(fixture.tasksDir, id, "claim", {
+      agentName: "manager",
+      pid: process.pid,
+    });
+    applyTransition(fixture.tasksDir, id, "submit", {});
+    applyTransition(fixture.tasksDir, id, "claim", {
+      agentName: "manager",
+      pid: process.pid,
+    });
+
+    const client = await connect(fixture);
+    const result = await client.callTool({
+      name: "task_add_feedback",
+      arguments: { id, findings: ["the null case is untested"] },
+    });
+    expect(textOf(result)).toContain('"READY_WORK"');
+
+    const body = readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body;
+    expect(body).toContain("# Review findings");
+    expect(body).toContain("- the null case is untested");
+
+    const queued = fs.readFileSync(
+      path.join(
+        fixture.serverRoot,
+        repoKey(fixture.repo),
+        id,
+        "queue",
+        "WORKING.md",
+      ),
+      "utf-8",
+    );
+    expect(queued).toContain("the null case is untested");
 
     await client.close();
   }, 60000);
@@ -1946,24 +2029,23 @@ describe("the mcp surface", () => {
     const client = await connect(fixture);
 
     const before = JSON.parse(
-      textOf(
-        await client.callTool({ name: "reload_prompts", arguments: {} }),
-      ),
+      textOf(await client.callTool({ name: "reload_prompts", arguments: {} })),
     );
-    expect(before).not.toContain(
-      path.join(fixture.overridesDir, "prompts", "dispatch.md"),
-    );
+    const override = path.join(fixture.tasksDir, "prompts", "dispatch.md");
+    expect(before).not.toContain(override);
 
-    writeOverride(fixture, "prompts/dispatch.md", "Start on ../ASSIGNMENT.md.\n");
+    writeOverride(
+      fixture,
+      "prompts/dispatch.md",
+      "Start on ../ASSIGNMENT.md.\n",
+    );
+    fs.mkdirSync(path.join(fixture.tasksDir, "prompts"), { recursive: true });
+    fs.writeFileSync(override, "Start on ../ASSIGNMENT.md.\n");
 
     const after = JSON.parse(
-      textOf(
-        await client.callTool({ name: "reload_prompts", arguments: {} }),
-      ),
+      textOf(await client.callTool({ name: "reload_prompts", arguments: {} })),
     );
-    expect(after).toContain(
-      path.join(fixture.overridesDir, "prompts", "dispatch.md"),
-    );
+    expect(after).toContain(override);
 
     await client.close();
   }, 60000);
@@ -2012,11 +2094,13 @@ describe("the mcp surface", () => {
     const client = await connect(fixture);
 
     const result = await client.callTool({
-      name: "task_merge",
+      name: "task_submit",
       arguments: { id },
     });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("is not in MANAGER_REVIEWING");
+    expect(textOf(result)).toContain(
+      'Transition "submit" is not valid from state "READY_WORK"',
+    );
 
     const document = fs.readFileSync(
       path.join(fixture.tasksDir, `${id}.md`),
@@ -2027,7 +2111,7 @@ describe("the mcp surface", () => {
     await client.close();
   }, 60000);
 
-  test("authoring runs create → write body → done create", async () => {
+  test("authoring runs create → write body → submit", async () => {
     const fixture = makeFixture();
     const client = await connect(fixture);
 
@@ -2043,14 +2127,13 @@ describe("the mcp surface", () => {
       name: "task_write_body",
       arguments: { id: created.id, body: "# Goal\n\nDo it." },
     });
-    await client.callTool({
-      name: "task_add_check",
-      arguments: { id: created.id, command: "bun test" },
+    editTaskFile(fixture, created.id, (meta) => {
+      meta.checks = ["bun test"];
     });
     const done = JSON.parse(
       textOf(
         await client.callTool({
-          name: "task_done_create",
+          name: "task_submit",
           arguments: { id: created.id },
         }),
       ),
@@ -2062,7 +2145,7 @@ describe("the mcp surface", () => {
     await client.close();
   }, 60000);
 
-  test("a task that still has dependencies cannot be done creating", async () => {
+  test("a task with dependencies is submitted into BLOCKED", async () => {
     const fixture = makeFixture();
     const dep = readyTask(fixture, "the dependency");
     const client = await connect(fixture);
@@ -2075,31 +2158,34 @@ describe("the mcp surface", () => {
         }),
       ),
     );
-    await client.callTool({
-      name: "task_add_dependencies",
-      arguments: { id: created.id, task_ids: [dep] },
+    editTaskFile(fixture, created.id, (meta) => {
+      meta.depends_on = [dep];
     });
 
-    const result = await client.callTool({
-      name: "task_done_create",
-      arguments: { id: created.id },
-    });
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain(
-      'Transition "noDependencies" is not valid from state "BLOCKED"',
+    const done = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "task_submit",
+          arguments: { id: created.id },
+        }),
+      ),
     );
+    expect(done.from).toBe("NEW");
+    expect(done.to).toBe("BLOCKED");
 
     await client.close();
   }, 60000);
 
-  test("task_done_task_graph_updates closes the task in one call", async () => {
+  test("task_submit closes the task once the graph updates are marked done", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task");
     applyTransition(fixture.tasksDir, id, "claim", {
       agentName: "manager",
       pid: process.pid,
     });
-    applyTransition(fixture.tasksDir, id, "submit", {});
+    applyTransition(fixture.tasksDir, id, "submit", {
+      body: readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body,
+    });
     applyTransition(fixture.tasksDir, id, "claim", {
       agentName: "manager",
       pid: process.pid,
@@ -2114,20 +2200,25 @@ describe("the mcp surface", () => {
       agentName: "manager",
       pid: process.pid,
     });
-    for (const message of ["split this in two", "and delete the old one"]) {
-      applyTransition(fixture.tasksDir, id, "addTaskGraph", {
-        op: "add",
-        message,
-      });
-    }
-    applyTransition(fixture.tasksDir, id, "abort", {});
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push(
+        { op: "add", message: "split this in two", done: false },
+        { op: "add", message: "and delete the old one", done: false },
+      );
+    });
+    applyTransition(fixture.tasksDir, id, "submit", {});
 
     const client = await connect(fixture);
     await client.callTool({ name: "task_claim", arguments: { id } });
+    editTaskFile(fixture, id, (meta) => {
+      for (const update of meta.task_graph_updates) {
+        update.done = true;
+      }
+    });
     const result = JSON.parse(
       textOf(
         await client.callTool({
-          name: "task_done_task_graph_updates",
+          name: "task_submit",
           arguments: { id },
         }),
       ),
@@ -2139,6 +2230,43 @@ describe("the mcp surface", () => {
     ).toBe(true);
 
     await client.close();
+  }, 60000);
+
+  test("task_submit from MANAGER_REVIEWING lands the work and closes the task", async () => {
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task");
+    setPlan(fixture, {
+      [id]: {
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
+      },
+    });
+
+    const server = await serverFor(fixture);
+    server.setSchedulerEnabled(true);
+    await reaches(server, id, "READY_MANAGER_REVIEW");
+    server.setSchedulerEnabled(false);
+
+    const client = await connect(fixture);
+    await client.callTool({ name: "task_claim", arguments: { id } });
+    const result = JSON.parse(
+      textOf(await client.callTool({ name: "task_submit", arguments: { id } })),
+    );
+
+    expect(result.to).toBe("CLOSED");
+    expect(
+      fs.existsSync(path.join(fixture.tasksDir, "closed", `${id}.md`)),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
+
+    await client.close();
+    server.shutdown();
   }, 60000);
 
   test("the views are readable as resources and carry a cursor", async () => {
@@ -2168,9 +2296,8 @@ describe("the mcp surface", () => {
 
   test("disable_agent and enable_agent move every slot of one agent", async () => {
     const fixture = makeFixture();
-    const launchedFrom = tempDir("launch-");
     fs.writeFileSync(
-      path.join(launchedFrom, "agents.json"),
+      path.join(fixture.tasksDir, "agents.json"),
       JSON.stringify({
         agents: [
           { type: "pi", provider: "a", model: "a", slots: 2 },
@@ -2178,7 +2305,7 @@ describe("the mcp surface", () => {
         ],
       }),
     );
-    const client = await connect(fixture, launchedFrom);
+    const client = await connect(fixture);
 
     const disabled = JSON.parse(
       textOf(
@@ -2218,22 +2345,21 @@ describe("the mcp surface", () => {
     await client.close();
   }, 60000);
 
-  test("the pool is read from the directory the server was launched from", async () => {
+  test("the pool is read from the tasks directory", async () => {
     const fixture = makeFixture();
-    const launchedFrom = tempDir("launch-");
     fs.writeFileSync(
-      path.join(launchedFrom, "agents.json"),
+      path.join(fixture.tasksDir, "agents.json"),
       JSON.stringify({
-        agents: [{ type: "pi", provider: "cwd", model: "cwd", slots: 2 }],
+        agents: [{ type: "pi", provider: "tasks", model: "tasks", slots: 2 }],
       }),
     );
-    const client = await connect(fixture, launchedFrom);
+    const client = await connect(fixture);
 
     const view = await client.readResource({ uri: "orchestrator://agents" });
     const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
     expect(parsed.agents.map((agent: { name: string }) => agent.name)).toEqual([
-      "pi-cwd-cwd-1",
-      "pi-cwd-cwd-2",
+      "pi-tasks-tasks-1",
+      "pi-tasks-tasks-2",
     ]);
 
     await client.close();
@@ -2357,12 +2483,12 @@ describe("the server: the reaper", () => {
       [id]: {
         WORKING: [
           {
-            todos_done: true,
             submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -2378,7 +2504,9 @@ describe("the server: the reaper", () => {
       agentName: "manager",
       pid: dead.pid,
     });
-    applyTransition(fixture.tasksDir, id, "addCheck", { command: "sleep 2" });
+    editTaskFile(fixture, id, (meta) => {
+      meta.checks.push("sleep 2");
+    });
     expect(stateOf(server, id)).toBe("MANAGER_REVIEWING");
 
     const merging = server.attemptMerge(id);
@@ -2411,11 +2539,16 @@ describe("the server: the reaper", () => {
 });
 
 describe("the server: an abort that races a dispatch", () => {
-  function abortable(fixture: Fixture, id: string): void {
-    applyTransition(fixture.tasksDir, id, "addTaskGraph", {
-      op: "add",
-      message: "split this into two tasks that are actually separable",
+  function abortable(fixture: Fixture, server: Server, id: string): void {
+    server.transition(id, "hold", { reason: "abandoning" }, "manager");
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push({
+        op: "add",
+        message: "split this into two tasks that are actually separable",
+        done: false,
+      });
     });
+    server.attemptAbort(id);
   }
 
   test("a task aborted while its agent is spawning is not claimed into TASK_GRAPH_UPDATING", async () => {
@@ -2424,7 +2557,6 @@ describe("the server: an abort that races a dispatch", () => {
     setPlan(fixture, {
       [id]: { WORKING: [{ new_session_delay_ms: 500, submit: true }] },
     });
-    abortable(fixture, id);
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -2433,7 +2565,7 @@ describe("the server: an abort that races a dispatch", () => {
     await Bun.sleep(150);
     expect(stateOf(server, id)).toBe("READY_WORK");
 
-    server.attemptAbort(id);
+    abortable(fixture, server, id);
     expect(stateOf(server, id)).toBe("READY_TASK_GRAPH_UPDATE");
 
     await ticking;
@@ -2456,14 +2588,13 @@ describe("the server: an abort that races a dispatch", () => {
     setPlan(fixture, {
       [id]: { WORKING: [{ new_session_delay_ms: 500, submit: true }] },
     });
-    abortable(fixture, id);
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
 
     const ticking = server.tick();
     await Bun.sleep(150);
-    server.attemptAbort(id);
+    abortable(fixture, server, id);
     await ticking;
     await server.drain();
 
@@ -2485,7 +2616,6 @@ describe("the server: an abort that races a dispatch", () => {
     setPlan(fixture, {
       [id]: { WORKING: [{ new_session_delay_ms: 200, submit: true }] },
     });
-    abortable(fixture, id);
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
@@ -2520,12 +2650,12 @@ describe("the server: a task file that does not parse", () => {
       [fine]: {
         WORKING: [
           {
-            todos_done: true,
             submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
     corrupt(fixture, broken);
@@ -2656,12 +2786,12 @@ describe("the server: enabling and disabling an agent", () => {
       [id]: {
         WORKING: [
           {
-            todos_done: true,
             submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -2686,8 +2816,8 @@ describe("the server: enabling and disabling an agent", () => {
         WORKING: [
           {
             start_delay_ms: 250,
-            todos_done: true,
             submit: true,
+            notes: "did the work",
             commit: { path: "a.txt", contents: "a\n" },
           },
         ],
@@ -2710,7 +2840,7 @@ describe("the server: enabling and disabling an agent", () => {
 
     expect(server.agentRows()[0]!.state).toBe("DISABLED");
     expect(server.agentRows()[0]!.task_id).toBeNull();
-    expect(stateOf(server, id)).toBe("READY_AGENT_REVIEW");
+    expect(stateOf(server, id)).toBe("READY_WORK_REVIEW");
 
     server.shutdown();
   }, 30000);
@@ -2983,8 +3113,14 @@ describe("the server: the agent view", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -3061,25 +3197,28 @@ describe("the server: resuming a failed check", () => {
             commit: { path: "fixed.txt", contents: "now it is here\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
+    await server.tick();
+    server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
 
-    await until(server, () => server.tasks().get(id)!.failures.length > 0);
     const afterFailure = server.tasks().get(id)!;
     expect(afterFailure.state).toBe("READY_WORK");
     expect(afterFailure.workspace!.session).not.toBeNull();
 
+    server.setSchedulerEnabled(true);
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
 
-    expect(server.tasks().get(id)!.failures).toEqual([]);
-
     const history = fs.readdirSync(server.runtime.history(id));
-    expect(history).toHaveLength(1);
+    expect(history).toHaveLength(0);
 
     const claims = server.transitions
       .read()
@@ -3095,25 +3234,37 @@ describe("the server: resuming a failed check", () => {
     setPlan(fixture, {
       [id]: {
         WORKING: [
-          { submit: true, commit: { path: "a.txt", contents: "a" } },
           {
             submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+          {
+            submit: true,
+            notes: "added fixed.txt",
             commit: { path: "fixed.txt", contents: "now it is here\n" },
           },
         ],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await reaches(server, id, "READY_MANAGER_REVIEW");
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
+    server.setSchedulerEnabled(true);
+    await server.tick();
+    server.setSchedulerEnabled(false);
+    await server.drain();
 
     const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("`test -f fixed.txt` (exit 1)");
-    expect(prompts[1]).toContain("reset to null");
+    expect(prompts[1]).toContain("Fix each one in this worktree");
 
     server.shutdown();
   }, 30000);
@@ -3124,7 +3275,11 @@ describe("the server: resuming a failed check", () => {
     setPlan(fixture, {
       [id]: {
         WORKING: [
-          { submit: true, commit: { path: "a.txt", contents: "a" } },
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
           { busy_ms: 2000 },
         ],
       },
@@ -3132,8 +3287,11 @@ describe("the server: resuming a failed check", () => {
 
     const server = await serverFor(fixture);
     server.setSchedulerEnabled(true);
-    await until(server, () => server.tasks().get(id)!.failures.length > 0);
+    await server.tick();
     server.setSchedulerEnabled(false);
+    await server.drain();
+    await server.tick();
+    await server.drain();
 
     const opened = server.tasks().get(id)!.workspace!.session!;
     const legacyDir = path.join(server.runtime.taskDir(id), "session", "work");
@@ -3163,14 +3321,20 @@ describe("the server: resuming a failed check", () => {
 });
 
 describe("the server: a review that comes back unusable", () => {
-  test("a malformed result is prompted about in place, without leaving AGENT_REVIEWING", async () => {
+  test("a malformed result is prompted about in place, without leaving WORK_REVIEWING", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [
-          { raw_result: "result:\n  type: submit" },
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [
+          { result_tool: { name: "submit", args: {} } },
           { submit: true },
         ],
       },
@@ -3184,17 +3348,13 @@ describe("the server: a review that comes back unusable", () => {
     const log = server.transitions.read();
     expect(log.some((e) => e.transition === "fail")).toBe(false);
     expect(
-      log.filter((e) => e.transition === "claim" && e.to === "AGENT_REVIEWING"),
+      log.filter((e) => e.transition === "claim" && e.to === "WORK_REVIEWING"),
     ).toHaveLength(1);
 
     const prompts = promptsTo(server.runtime.sessionDir(id, "reviewer"));
     expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain("could not be read");
-    expect(prompts[1]).toContain("result.findings");
-    expect(prompts[1]).toContain("delegations: []");
-
-    expect(server.tasks().get(id)!.failures).toEqual([]);
-    expect(server.tasks().get(id)!.todos).toEqual([]);
+    expect(prompts[1]).toContain("not a valid result");
+    expect(prompts[1]).toContain("findings");
 
     server.shutdown();
   }, 30000);
@@ -3204,8 +3364,14 @@ describe("the server: a review that comes back unusable", () => {
     const id = readyTask(fixture, "Do a thing");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [
           { submit: true, delegations: ["the same bug lives in fetch.ts"] },
         ],
       },
@@ -3215,17 +3381,6 @@ describe("the server: a review that comes back unusable", () => {
     server.setSchedulerEnabled(true);
     await reaches(server, id, "READY_MANAGER_REVIEW");
     server.setSchedulerEnabled(false);
-
-    const result = readAssignment(
-      server.runtime.assignment(id),
-      "AGENT_REVIEWING",
-    ).meta.result;
-    expect(result).toEqual({
-      type: "submit",
-      findings: [],
-      delegations: ["the same bug lives in fetch.ts"],
-    });
-    expect(server.tasks().get(id)!.todos).toEqual([]);
 
     server.shutdown();
   }, 30000);
@@ -3237,8 +3392,14 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -3265,8 +3426,14 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -3281,12 +3448,13 @@ describe("the server: closing", () => {
       { agentName: "manager", pid: process.pid },
       "manager",
     );
-    server.transition(
-      id,
-      "addTaskGraph",
-      { op: "add", message: "the follow-up this uncovered" },
-      "manager",
-    );
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push({
+        op: "add",
+        message: "the follow-up this uncovered",
+        done: false,
+      });
+    });
     await server.attemptMerge(id);
 
     expect(stateOf(server, id)).toBe("READY_TASK_GRAPH_UPDATE");
@@ -3302,8 +3470,14 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 
@@ -3323,12 +3497,13 @@ describe("the server: closing", () => {
 
   test("abort takes a branch that never landed, and tears it down at CLOSED", async () => {
     const { fixture, server, id } = await atManagerReview();
-    server.transition(
-      id,
-      "addTaskGraph",
-      { op: "add", message: "this task was the wrong shape" },
-      "manager",
-    );
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push({
+        op: "add",
+        message: "this task was the wrong shape",
+        done: false,
+      });
+    });
 
     expect(server.attemptAbort(id).to).toBe("READY_TASK_GRAPH_UPDATE");
     expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(true);
@@ -3340,23 +3515,26 @@ describe("the server: closing", () => {
       { agentName: "graph-agent", pid: process.pid },
       "manager",
     );
-    expect(
-      server.transition(id, "doneTaskGraph", { index: 0 }, "manager").to,
-    ).toBe("CLOSED");
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates[0]!.done = true;
+    });
+    expect(server.transition(id, "submit", {}, "manager").to).toBe("CLOSED");
     expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
     expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
   }, 30000);
 
-  test("abort takes a task still queued in READY_WORK, before any branch exists", async () => {
+  test("abort takes a task still queued in READY_WORK, via HELD_WORK", async () => {
     const fixture = makeFixture();
     const id = readyTask(fixture, "A task nobody should start");
     const server = await serverFor(fixture);
-    server.transition(
-      id,
-      "addTaskGraph",
-      { op: "add", message: "the two tasks this should have been" },
-      "manager",
-    );
+    server.transition(id, "hold", { reason: "abandoning" }, "manager");
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push({
+        op: "add",
+        message: "the two tasks this should have been",
+        done: false,
+      });
+    });
 
     expect(server.attemptAbort(id).to).toBe("READY_TASK_GRAPH_UPDATE");
     expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
@@ -3367,9 +3545,10 @@ describe("the server: closing", () => {
       { agentName: "graph-agent", pid: process.pid },
       "manager",
     );
-    expect(
-      server.transition(id, "doneTaskGraph", { index: 0 }, "manager").to,
-    ).toBe("CLOSED");
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates[0]!.done = true;
+    });
+    expect(server.transition(id, "submit", {}, "manager").to).toBe("CLOSED");
   }, 30000);
 
   test("abort refuses a task an agent is already working on", async () => {
@@ -3386,19 +3565,20 @@ describe("the server: closing", () => {
     expect(stateOf(server, id)).toBe("WORKING");
 
     expect(() => server.attemptAbort(id)).toThrow(
-      /is not in MANAGER_REVIEWING or READY_WORK/,
+      /is not in MANAGER_REVIEWING or HELD_PLAN or HELD_WORK/,
     );
     expect(stateOf(server, id)).toBe("WORKING");
   }, 30000);
 
   test("abort refuses a branch that already landed", async () => {
     const { fixture, server, id } = await atManagerReview();
-    server.transition(
-      id,
-      "addTaskGraph",
-      { op: "add", message: "too late" },
-      "manager",
-    );
+    editTaskFile(fixture, id, (meta) => {
+      meta.task_graph_updates.push({
+        op: "add",
+        message: "too late",
+        done: false,
+      });
+    });
     git.gitOrThrow(fixture.repo, ["merge", "--ff-only", `task/${id}`]);
 
     expect(() => server.attemptAbort(id)).toThrow(/already part of master/);
@@ -3410,8 +3590,14 @@ describe("the server: closing", () => {
     const id = readyTask(fixture, "A task");
     setPlan(fixture, {
       [id]: {
-        WORKING: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
-        AGENT_REVIEWING: [{ submit: true }],
+        WORKING: [
+          {
+            submit: true,
+            notes: "did the work",
+            commit: { path: "a.txt", contents: "a" },
+          },
+        ],
+        WORK_REVIEWING: [{ submit: true }],
       },
     });
 

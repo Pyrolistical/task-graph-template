@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  type Failure,
+  normalizeBody,
   type TaskId,
   type TaskMeta,
   type TaskState,
   type ValidState,
   isProcessAlive,
-  openCount,
 } from "./task.ts";
 import {
   CLAIM_TARGETS,
@@ -25,16 +24,15 @@ import {
   idleRow,
   loadAgents,
 } from "./agents.ts";
+import { rotate } from "./assignment.ts";
+import { append, drain, queueFile } from "./queue.ts";
 import {
+  ResultError,
   type AgentResult,
-  type AssignmentMeta,
-  type PlanResults,
   type PlanReviewResults,
-  readAssignment,
-  repair,
-  resetResult,
-  rotate,
-} from "./assignment.ts";
+  type WorkReviewResults,
+  resultFromCall,
+} from "./results.ts";
 import { CheckRunner, type CheckResult } from "./checks.ts";
 import * as git from "./git.ts";
 import {
@@ -66,17 +64,17 @@ import {
   type ClaimState,
   type Role,
   branchName,
+  defaultTasksDir,
   snapshot,
   writeAtomic,
 } from "./runtime.ts";
 import type { TemplateVars } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
-import { SchemaError } from "./schema.ts";
 
 const ABORTABLE_STATES: TaskState[] = [
   "MANAGER_REVIEWING",
-  "READY_WORK",
-  "READY_PLAN",
+  "HELD_PLAN",
+  "HELD_WORK",
 ];
 
 export const BACKOFF_START_MS = 1000;
@@ -85,7 +83,7 @@ export const MODEL_LOADING_MS = 5000;
 
 export interface ServerOptions {
   repo: string;
-  agentsPath: string;
+  agentsPath?: string;
   tasksDir?: string;
   orchestratorDir?: string;
   overridesDir?: string;
@@ -102,7 +100,7 @@ interface Worker {
   role: Role | null;
   process: PiProcess | null;
   started_at: string | null;
-  dispatched: AssignmentMeta | null;
+  dispatched: string | null;
   detachedPid: number | null;
   session: string | null;
   tokens: number | null;
@@ -139,6 +137,7 @@ export class Server {
   readonly tasksDir: string;
   readonly orchestratorDir: string;
   readonly overridesDir: string;
+  readonly agentsPath: string;
   readonly transitions: TransitionLog;
   readonly checks = new CheckRunner();
   readonly prompts: Prompts;
@@ -159,21 +158,25 @@ export class Server {
   private dispatching = false;
   private detached = false;
 
-  private constructor(options: ServerOptions, slots: AgentSlot[]) {
+  private constructor(options: ServerOptions) {
     this.repo = path.resolve(options.repo);
-    this.tasksDir = options.tasksDir ?? path.join(this.repo, "tasks");
+    this.tasksDir = options.tasksDir ?? defaultTasksDir(this.repo);
+    if (options.tasksDir === undefined) {
+      this.seedTasksDir();
+    }
     this.orchestratorDir = options.orchestratorDir ?? import.meta.dir;
-    this.overridesDir =
-      options.overridesDir ?? path.join(this.repo, "orchestrator");
+    this.overridesDir = options.overridesDir ?? this.tasksDir;
     this.piCommand = options.piCommand ?? "pi";
     this.sandboxCommand = options.sandboxCommand ?? SANDBOX_COMMAND;
     this.runtime = new Runtime(this.repo, options.serverRoot);
     this.transitions = new TransitionLog(this.runtime.transitionLog);
     this.prompts = new Prompts(this.orchestratorDir, this.overridesDir);
     this.base = options.base ?? git.defaultBranch(this.repo);
-    this.slots = slots;
+    this.agentsPath =
+      options.agentsPath ?? path.join(this.tasksDir, "agents.json");
+    this.slots = loadAgents(this.agentsPath);
 
-    for (const slot of slots) {
+    for (const slot of this.slots) {
       this.workers.set(slot.name, freshWorker(slot));
       if (!slot.enabled) {
         this.disabled.add(slot.agent);
@@ -187,13 +190,28 @@ export class Server {
     }
   }
 
+  private seedTasksDir(): void {
+    fs.mkdirSync(this.tasksDir, { recursive: true });
+    const templatePath = path.join(this.tasksDir, "template.md");
+    if (!fs.existsSync(templatePath)) {
+      fs.copyFileSync(
+        path.join(import.meta.dir, "..", "tasks", "template.md"),
+        templatePath,
+      );
+    }
+    const nextIdPath = path.join(this.tasksDir, "next-task-id");
+    if (!fs.existsSync(nextIdPath)) {
+      fs.writeFileSync(nextIdPath, "1\n");
+    }
+  }
+
   static async start(options: ServerOptions): Promise<Server> {
     const repo = path.resolve(options.repo);
     if (!git.isRepo(repo)) {
       throw new Error(`${repo} is not a git repository`);
     }
 
-    const server = new Server(options, loadAgents(options.agentsPath));
+    const server = new Server(options);
 
     server.runtime.log(`starting against ${repo} (base ${server.base})`);
     for (const filePath of server.prompts.cachedFiles()) {
@@ -463,9 +481,9 @@ export class Server {
     for (const [id, task] of tasks) {
       if (
         task.state === "READY_WORK" &&
-        task.failures.length > 0 &&
         task.workspace?.session != null &&
-        fs.existsSync(task.workspace.session)
+        fs.existsSync(task.workspace.session) &&
+        fs.existsSync(queueFile(this.runtime.taskDir(id), "WORKING"))
       ) {
         ids.add(id);
       }
@@ -619,6 +637,7 @@ export class Server {
         name: `${taskId} ${state}`,
         cwd,
         systemPrompt: this.prompts.systemPrompt(state),
+        extension: path.join(this.orchestratorDir, `result-tools-${role}.ts`),
         log: this.runtime.rpcLog(taskId),
       },
       this.piCommand,
@@ -653,7 +672,14 @@ export class Server {
       git.addWorkspace(this.repo, branch, worktree, this.base);
     }
 
-    worker.dispatched = this.writeAssignment(task, claimed, worktree);
+    if (claimed === "PLAN_REVIEWING" || claimed === "WORK_REVIEWING") {
+      const assignmentPath = this.runtime.assignment(task.id);
+      worker.dispatched = fs.existsSync(assignmentPath)
+        ? fs.readFileSync(assignmentPath, "utf-8")
+        : this.writeAssignment(task);
+    } else {
+      worker.dispatched = this.writeAssignment(task);
+    }
 
     const process = this.spawn(task.id, role, claimed, slot, worktree);
     worker.process = process;
@@ -669,8 +695,21 @@ export class Server {
     );
 
     worker.state = "BUSY";
-    await process.prompt(this.prompts.fragment("dispatch"));
+    const queued = drain(this.runtime.taskDir(task.id), claimed);
+    const nudge = this.prompts.fragment("dispatch");
+    await process.prompt(queued === "" ? nudge : `${queued}\n\n${nudge}`);
     this.track(worker, this.awaitSettle(worker));
+  }
+
+  private async promptQueued(
+    process: PiProcess,
+    taskId: TaskId,
+    state: ClaimState,
+  ): Promise<void> {
+    const queued = drain(this.runtime.taskDir(taskId), state);
+    if (queued !== "") {
+      await process.prompt(queued);
+    }
   }
 
   private async resume(task: TaskMeta, worker: Worker): Promise<void> {
@@ -691,9 +730,6 @@ export class Server {
     await process.switchSession(workspace.session!);
     worker.session = workspace.session;
     this.requireStill(task, slot);
-    if (role === "worker") {
-      resetResult(live, "WORKING");
-    }
     this.transition(
       task.id,
       "claim",
@@ -707,62 +743,20 @@ export class Server {
       slot.name,
     );
 
-    worker.dispatched = readAssignment(live, "WORKING").meta;
+    worker.dispatched = fs.readFileSync(live, "utf-8");
     worker.state = "BUSY";
 
-    await process.prompt(
-      this.prompts.fragment("check-failed", {
-        failures: task.failures.flatMap((failure) =>
-          failure.type === "check"
-            ? [
-                {
-                  command: failure.command,
-                  exit_code: String(failure.exit_code),
-                  output: failure.output,
-                },
-              ]
-            : [],
-        ),
-      }),
-    );
+    await this.promptQueued(process, task.id, "WORKING");
     this.track(worker, this.awaitSettle(worker));
   }
 
-  private writeAssignment(
-    task: TaskMeta,
-    state: ClaimState,
-    worktree: string,
-  ): AssignmentMeta {
+  private writeAssignment(task: TaskMeta): string {
     const live = this.runtime.assignment(task.id);
     rotate(live, this.runtime.history(task.id));
 
-    const vars: TemplateVars = {
-      id: task.id,
-      title: task.title,
-      body: readTaskBody(this.tasksDir, task.id),
-      checks: task.checks.map((command) => ({ command })),
-    };
-
-    if (state === "AGENT_REVIEWING") {
-      vars.worktree = worktree;
-      vars.range = git.range(worktree, this.base);
-      vars.todos = task.todos.map((todo) => ({
-        message: todo.message,
-        done: todo.done,
-      }));
-    } else {
-      vars.todos = task.todos
-        .filter((todo) => !todo.done)
-        .map((todo) => ({ message: todo.message }));
-    }
-
-    if (state === "PLANNING") {
-      vars.plan_feedback = task.plan_feedback.map((finding) => ({ finding }));
-      vars.plan_feedback_head = task.plan_feedback.length === 0 ? [] : [{}];
-    }
-
-    fs.writeFileSync(live, this.prompts.template(state, vars), "utf-8");
-    return readAssignment(live, state).meta;
+    const body = normalizeBody(readTaskBody(this.tasksDir, task.id));
+    fs.writeFileSync(live, body, "utf-8");
+    return body;
   }
 
   private async awaitSettle(worker: Worker): Promise<void> {
@@ -853,57 +847,164 @@ export class Server {
     const state = this.tasks().get(taskId)!.state as ClaimState;
     const live = this.runtime.assignment(taskId);
 
-    let read: AssignmentMeta;
+    const calls = worker.process!.stream.state.resultCalls;
+
+    if (stopReason === "length" || calls.length === 0) {
+      await this.raise(worker, "missing-result", "");
+      return;
+    }
+
+    let result: AgentResult;
     try {
-      read = readAssignment(live, state).meta;
+      result = resultFromCall(state, calls[calls.length - 1]!);
     } catch (err) {
       const issues =
-        err instanceof SchemaError ? err.issues : [(err as Error).message];
+        err instanceof ResultError ? err.issues : [(err as Error).message];
       await this.raise(worker, "unparsable-result", issues.join("; "), {
         issues: issues.map((message) => ({ message })),
       });
       return;
     }
 
-    const { meta, restored } = repair(live, worker.dispatched!, read);
-    if (restored.length > 0) {
-      this.runtime.log(
-        `${worker.slot.name} on ${taskId}: restored ${restored.join("; ")}`,
-      );
-    }
-
-    if (stopReason === "length" || meta.result === null) {
-      await this.raise(worker, "missing-result", "");
-      return;
-    }
-
-    if (meta.result.type === "blocked") {
-      await this.raise(worker, "blocked", meta.result.message);
+    if (result.type === "blocked") {
+      await this.raise(worker, "blocked", result.message);
       return;
     }
 
     if (state === "PLANNING") {
-      if ("addTodos" in meta.result) {
-        await this.settlePlan(worker, meta.result);
-      }
+      await this.settlePlan(worker);
       return;
     }
 
     if (state === "PLAN_REVIEWING") {
-      if ("findings" in meta.result && !("delegations" in meta.result)) {
-        this.settlePlanReview(worker, meta.result);
-      }
+      this.settlePlanReview(
+        worker,
+        result as Extract<PlanReviewResults, { type: "submit" }>,
+      );
       return;
     }
 
-    if (state === "AGENT_REVIEWING") {
-      this.submitReview(worker, meta.result);
+    if (state === "WORK_REVIEWING") {
+      this.submitReview(
+        worker,
+        result as Extract<WorkReviewResults, { type: "submit" }>,
+      );
       return;
     }
 
-    const open = openCount(meta.todos);
-    if (open > 0) {
-      await this.raise(worker, "incomplete-todos", String(open), { open });
+    await this.settleWork(worker);
+  }
+
+  private diffAssignment(
+    state: ClaimState,
+    dispatched: string,
+    live: string,
+  ): "ok" | "unchanged" | "modified" {
+    if (live.trimEnd() === dispatched.trimEnd()) {
+      return "unchanged";
+    }
+    if (live.startsWith(dispatched)) {
+      return "ok";
+    }
+    return "modified";
+  }
+
+  private async settlePlan(worker: Worker): Promise<void> {
+    const taskId = worker.task_id!;
+    const task = this.tasks().get(taskId)!;
+    const live = this.runtime.assignment(taskId);
+
+    const diff = this.diffAssignment(
+      "PLANNING",
+      worker.dispatched!,
+      fs.readFileSync(live, "utf-8"),
+    );
+    if (diff === "unchanged") {
+      await this.raise(worker, "missing-todos", "");
+      return;
+    }
+    if (diff === "modified") {
+      await this.raise(worker, "modified-assignment", "");
+      return;
+    }
+
+    const issue = this.touchedWorktree(task);
+    if (issue !== null) {
+      await this.raise(worker, "modified-worktree", issue.detail, issue.vars);
+      return;
+    }
+
+    worker.process!.close();
+    this.transition(taskId, "submit", {}, worker.slot.name);
+    this.finish(worker);
+  }
+
+  private settlePlanReview(
+    worker: Worker,
+    result: Extract<PlanReviewResults, { type: "submit" }>,
+  ): void {
+    const taskId = worker.task_id!;
+    const task = this.tasks().get(taskId)!;
+    const live = this.runtime.assignment(taskId);
+
+    const diff = this.diffAssignment(
+      "PLAN_REVIEWING",
+      worker.dispatched!,
+      fs.readFileSync(live, "utf-8"),
+    );
+    if (diff !== "unchanged") {
+      this.raise(worker, "modified-assignment", "");
+      return;
+    }
+
+    const issue = this.touchedWorktree(task);
+    if (issue !== null) {
+      this.raise(worker, "modified-worktree", issue.detail, issue.vars);
+      return;
+    }
+
+    worker.process!.close();
+
+    if (result.findings.length === 0) {
+      this.transition(
+        taskId,
+        "submit",
+        { body: fs.readFileSync(live, "utf-8") },
+        worker.slot.name,
+      );
+    } else {
+      append(
+        this.runtime.taskDir(taskId),
+        "PLANNING",
+        this.prompts.fragment("plan-findings", {
+          findings: result.findings.map((finding) => ({ finding })),
+        }),
+      );
+      this.transition(
+        taskId,
+        "addFeedback",
+        { findings: result.findings },
+        "server",
+      );
+    }
+    this.finish(worker);
+  }
+
+  private async settleWork(worker: Worker): Promise<void> {
+    const taskId = worker.task_id!;
+    const live = this.runtime.assignment(taskId);
+
+    const diff = this.diffAssignment(
+      "WORKING",
+      worker.dispatched!,
+      fs.readFileSync(live, "utf-8"),
+    );
+    if (diff === "unchanged") {
+      await this.raise(worker, "missing-notes", "");
+      return;
+    }
+    if (diff === "modified") {
+      await this.raise(worker, "modified-assignment", "");
       return;
     }
 
@@ -914,14 +1015,59 @@ export class Server {
       return;
     }
 
-    task.todos.forEach((todo, index) => {
-      if (!todo.done) {
-        this.transition(taskId, "doneTodo", { index }, worker.slot.name);
-      }
-    });
+    worker.process!.close();
+    this.transition(
+      taskId,
+      "submit",
+      { body: fs.readFileSync(live, "utf-8") },
+      worker.slot.name,
+    );
+    this.finish(worker);
+  }
+
+  private submitReview(
+    worker: Worker,
+    result: Extract<WorkReviewResults, { type: "submit" }>,
+  ): void {
+    const taskId = worker.task_id!;
+    const task = this.tasks().get(taskId)!;
+    const branch = task.workspace!.branch;
+    const live = this.runtime.assignment(taskId);
+
+    const diff = this.diffAssignment(
+      "WORK_REVIEWING",
+      worker.dispatched!,
+      fs.readFileSync(live, "utf-8"),
+    );
+    if (diff !== "unchanged") {
+      this.raise(worker, "modified-assignment", "");
+      return;
+    }
+
+    const findings = [...result.findings];
+
+    if (
+      git.branchExists(this.repo, branch) &&
+      git.touchesTasks(this.repo, this.base, branch)
+    ) {
+      findings.push(this.prompts.fragment("wrote-to-tasks").trim());
+    }
 
     worker.process!.close();
-    this.transition(taskId, "submit", {}, worker.slot.name);
+
+    if (findings.length === 0) {
+      this.transition(taskId, "submit", {}, worker.slot.name);
+    } else {
+      append(
+        this.runtime.taskDir(taskId),
+        "WORKING",
+        this.prompts.fragment("work-findings", {
+          findings: findings.map((finding) => ({ finding })),
+        }),
+      );
+      this.transition(taskId, "addFeedback", { findings }, "server");
+    }
+
     this.finish(worker);
   }
 
@@ -974,106 +1120,6 @@ export class Server {
         base: this.base,
       },
     };
-  }
-
-  private async settlePlan(
-    worker: Worker,
-    result: Extract<PlanResults, { type: "submit" }>,
-  ): Promise<void> {
-    const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const open = task.todos.filter((todo) => !todo.done);
-    const distinct = new Set(result.removeTodos);
-
-    if (
-      distinct.size !== result.removeTodos.length ||
-      result.removeTodos.some((index) => index >= open.length)
-    ) {
-      await this.raise(
-        worker,
-        "invalid-remove-todo",
-        open.length === 0
-          ? "the task has no todos to remove"
-          : `an index outside 0..${open.length - 1} or a repeated index`,
-      );
-      return;
-    }
-
-    if (
-      open.length - result.removeTodos.length + result.addTodos.length ===
-      0
-    ) {
-      await this.raise(worker, "missing-plan", "");
-      return;
-    }
-
-    const issue = this.touchedWorktree(task);
-    if (issue !== null) {
-      await this.raise(worker, "modified-worktree", issue.detail, issue.vars);
-      return;
-    }
-
-    for (const index of [...result.removeTodos].sort((a, b) => b - a)) {
-      this.transition(taskId, "removeTodo", { index }, "server");
-    }
-    for (const message of result.addTodos) {
-      this.transition(taskId, "addTodo", { message }, "server");
-    }
-
-    worker.process!.close();
-    this.transition(taskId, "submit", {}, worker.slot.name);
-    this.finish(worker);
-  }
-
-  private settlePlanReview(
-    worker: Worker,
-    result: Extract<PlanReviewResults, { type: "submit" }>,
-  ): void {
-    const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const issue = this.touchedWorktree(task);
-    if (issue !== null) {
-      this.raise(worker, "modified-worktree", issue.detail, issue.vars);
-      return;
-    }
-
-    worker.process!.close();
-
-    if (result.findings.length === 0) {
-      this.transition(taskId, "submit", {}, worker.slot.name);
-    } else {
-      this.transition(
-        taskId,
-        "addFeedback",
-        { findings: result.findings },
-        "server",
-      );
-    }
-    this.finish(worker);
-  }
-
-  private submitReview(worker: Worker, result: AgentResult): void {
-    const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const branch = task.workspace!.branch;
-    const findings = [...("findings" in result ? result.findings : [])];
-
-    if (
-      git.branchExists(this.repo, branch) &&
-      git.touchesTasks(this.repo, this.base, branch)
-    ) {
-      findings.push(this.prompts.fragment("wrote-to-tasks").trim());
-    }
-
-    worker.process!.close();
-
-    if (findings.length === 0) {
-      this.transition(taskId, "submit", {}, worker.slot.name);
-    } else {
-      this.transition(taskId, "addFeedback", { findings }, "server");
-    }
-
-    this.finish(worker);
   }
 
   private async raise(
@@ -1170,15 +1216,15 @@ export class Server {
 
     const task = this.tasks().get(taskId)!;
     const worktree = task.workspace?.worktree ?? this.repo;
-    const failures: Failure[] = [];
+    const failures: { command: string; exit_code: string; output: string }[] =
+      [];
 
     for (const [index, command] of task.checks.entries()) {
       const result = await this.runCheck(taskId, index, command, worktree);
       if (result.code !== 0) {
         failures.push({
-          type: "check",
           command: result.command,
-          exit_code: result.code,
+          exit_code: String(result.code),
           output: result.tail,
         });
       }
@@ -1188,7 +1234,12 @@ export class Server {
       this.transition(taskId, "pass", {}, "server");
       return;
     }
-    this.transition(taskId, "fail", { failures }, "server");
+    append(
+      this.runtime.taskDir(taskId),
+      "WORKING",
+      this.prompts.fragment("check-failed", { failures }),
+    );
+    this.transition(taskId, "fail", {}, "server");
   }
 
   private runCheck(
@@ -1256,7 +1307,7 @@ export class Server {
       }
     }
 
-    const result = this.transition(taskId, "merged", {}, "manager");
+    const result = this.transition(taskId, "submit", {}, "manager");
     this.teardown(task);
     return result;
   }

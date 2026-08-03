@@ -159,8 +159,6 @@ Five snapshots, each written to a temp file and renamed, so a reader always sees
       "title": "Parse frontmatter with Bun.YAML",
       "state": "WORKING",
       "state_entered": "2026-07-29T01:58:02.004Z",
-      "open_todos": 1,
-      "failures": 0,
       "open_task_graph_updates": 0,
       "depends_on": ["000007"],
       "blocking": 3,
@@ -194,7 +192,7 @@ Five snapshots, each written to a temp file and renamed, so a reader always sees
 }
 ```
 
-A queued task is one waiting on a slot — `READY_AGENT_REVIEW`, `READY_WORK`, `READY_PLAN_REVIEW`, `READY_PLAN`, or a failed task with a session to resume. Everything else in the graph is waiting on a person, a check or an agent, and is in `inbox.json` or `tasks.json` instead.
+A queued task is one waiting on a slot — `READY_WORK_REVIEW`, `READY_WORK`, `READY_PLAN_REVIEW`, `READY_PLAN`, or a failed task with a session to resume. Everything else in the graph is waiting on a person, a check or an agent, and is in `inbox.json` or `tasks.json` instead.
 
 ### The transition log
 
@@ -222,111 +220,60 @@ The file keeps the **last 1000 lines**; `seq` keeps counting past them. A cursor
 
 `ASSIGNMENT.md` is the entire interface between an agent and the project. The server generates it at dispatch; the agent owns it from that moment until it settles.
 
-It is three things and no more:
+It is the task body, verbatim — nothing else. No frontmatter, no title, no role prose. The task document's body is the assignment, and the assignment becomes the task document's body again when the work is accepted: the graph and the agent read and write the same text. The rules of engagement — which section the role may write, and how it ends — live entirely in the role's system prompt.
 
-1. **Frontmatter.** Everything machine-readable: what is assigned, what has been done, and how it ended.
-2. **The body.** Goal, scope, acceptance criteria, verification criteria, notes — copied verbatim from the task document, plus what the role needs to start.
-3. **Notes.** One free-form section, the agent's own. Plan, progress, dead ends.
+### Append-only
 
-Nothing else. The rules of engagement live in the role's system prompt, which is appended to every agent's system prompt, so the assignment can be data.
+The agent may only append to `ASSIGNMENT.md`. What it may append depends on the role:
 
-### Frontmatter schema
+- the **planner** appends a `## Todos` section: a numbered list (`1.` to `n.`, consecutively) of the executable plan, each entry specific and verifiable enough for a worker to execute without the planner present;
+- the **worker** appends `## Implementation Notes`, addressing every todo by number — the change, the commit, and how it saw the work;
+- **reviewers** append nothing at all.
 
-```yaml
----
-assignment: "000042"
-todos:
-  - message: "fix null handling in the parser"
-    done: false
-checks:
-  - "bun test"
-result: null
----
-```
-
-| Field        | Type                    | Written by | Meaning                                         |
-| ------------ | ----------------------- | ---------- | ----------------------------------------------- |
-| `assignment` | quoted six-digit string | server     | which task this is                              |
-| `todos`      | `{ message, done }`     | server     | copied from the graph; **agent sets `done`**    |
-| `checks`     | list of commands        | server     | what the work will be judged by                 |
-| `result`     | mapping or null         | **agent**  | set last, exactly once; `null` means unfinished |
-
-Four fields, and the agent may write two things: `todos[].done`, and `result`.
-
-Nothing here says which agent, which branch, which worktree or which attempt. The server knows all of that — it dispatched the process, it set the working directory, it counted the rotations — and an agent that is told its own branch name is an agent that can get it wrong. What the reviewer needs to find the work, it is given as prose in the body, where being wrong is visible.
+At settle the server compares the file to what it dispatched. `live.startsWith(dispatched)` is an append and passes; anything else is a divergence. A settle that changed nothing above the appended section is answered in the session, not argued about — the divergence and the missing append are told to the agent (`modified-assignment`, `missing-todos`, `missing-notes`) and it fixes the file. What is left for the agent to answer is only what the server genuinely cannot know: whether the work is done.
 
 ### The result
 
-`result` is a discriminated union on `type`, and the union is split per state — four result types, one per role-phase pair, sharing the `blocked` arm:
+The result is not a file edit. Every session is loaded with a terminating result tool — `submit`, or `blocked` when the one thing standing in the way is a wall — and the call ends the turn. There is one extension per role, so the same `submit` name works in every state while the schema the model sees stays role-appropriate: the planner's and the worker's `submit` takes no arguments, the reviewer's takes `findings` (and `delegations` for a work review). The union is split per state, four result types, one per role-phase pair, sharing the `blocked` arm:
 
-```yaml
-# a plan, submitted: the additions and removals are the deliverable
-result:
-  type: submit
-  addTodos:
-    - "parse the frontmatter with Bun.YAML and keep the raw block in history"
-  removeTodos:
-    - 0
-```
+| Tool      | Arguments                                      | Result                                    | States                |
+| --------- | ---------------------------------------------- | ----------------------------------------- | --------------------- |
+| `submit`  | none (planner/worker extension)                | `{type: "submit"}`                        | `PLANNING`, `WORKING` |
+| `submit`  | `findings: string[]` (reviewer extension)      | `{type: "submit", findings}`              | `PLAN_REVIEWING`      |
+| `submit`  | `findings`, `delegations` (reviewer extension) | `{type: "submit", findings, delegations}` | `WORK_REVIEWING`      |
+| `blocked` | `message: string`                              | `{type: "blocked", message}`              | every state           |
 
-```yaml
-# a plan review, submitted: empty findings approve the plan
-result:
-  type: submit
-  findings:
-    - "no todo covers the empty-input case the acceptance criteria name"
-```
+Each tool returns `terminate: true`, so the call ends the turn on the spot: the result is a tool call, not prose, and there is nothing to mis-parse on the way out. The system prompt names the exact shape for the state, and the wrong arguments are refused just like the wrong JSON shape was — a plain `submit` carrying `findings`, or a plan review carrying `delegations`, is an unparsable result, not a silent approval.
 
-```yaml
-# work, submitted: the claim is the whole message
-result:
-  type: submit
-```
-
-```yaml
-# a work review, submitted
-result:
-  type: submit
-  findings:
-    - "parseHeader returns null on an empty body, and every caller dereferences it"
-  delegations:
-    - "the retry loop in fetch.ts has the same bug, outside this task's scope"
-```
-
-```yaml
-# any state, stopped short
-result:
-  type: blocked
-  message: "the staging database refuses every connection"
-```
-
-- **`addTodos`** on a plan result are the new pieces of the executable plan. Each becomes a todo in the graph, verbatim. **`removeTodos`** name decided todos to drop, by the index they appear at in the assignment frontmatter, and are applied before the additions. A plan that leaves the task with no todos at all is refused and comes back to the planner.
-- **`findings`** on a plan review are the gaps between the plan and the acceptance criteria. Each becomes feedback to the planner, verbatim, and the task goes back to `READY_PLAN`. An empty list is the reviewer approving the plan.
-- **`findings`** on a work review are defects in _this_ work. Each becomes a todo in the graph, verbatim, and the task goes back to `READY_WORK`. An empty list is the reviewer saying it is satisfied.
+- **`findings`** on a plan review are the gaps between the plan and the acceptance criteria, plus any way the list is missing or misnumbered. Each goes to the planner's prompt queue, verbatim, and the task goes back to `READY_PLAN`. An empty list approves the plan.
+- **`findings`** on a work review are defects in _this_ work. Each is appended to the task body under `# Review findings`, verbatim, with a fresh `## Implementation Notes` heading for the next round, and the worker is reminded of the findings at dispatch. The task goes back to `READY_WORK`. An empty list is the reviewer saying it is satisfied.
 - **`delegations`** are defects outside it. They go to the manager, who decides whether they become tasks. Keeping them out of `findings` is what stops a review from growing the task it is reviewing.
 - **`message`** on a `blocked` result is required, and becomes `held_reason` verbatim.
 
-Both lists are held to the same standard, and it is a standard about **description, not instruction**: name the symbol, the file and the input that breaks it, say what goes wrong, and stop. A reviewer that writes "use a Map here" has skipped the part only it can supply — what it saw — and substituted the part the implementer is better placed to decide. A delegation phrased as a fix is worse still: the manager is being asked to approve a solution to a problem it has not been shown.
+Both lists are held to the same standard, and it is a standard about **description, not instruction**: name the symbol, the file and the input that breaks it, say what goes wrong, and stop. A reviewer that writes "use a Map here" has skipped the part only it can supply — what it saw — and substituted the part the worker is better placed to decide. A delegation phrased as a fix is worse still: the manager is being asked to approve a solution to a problem it has not been shown.
 
-A work result that carries fields, a review result missing either list, a plan review without `findings` or a planner result that does not parse as its shape is refused: the server tells the agent what is wrong and lets it fix the file. Being strict here is cheap — the agent has the file open — and it is the only way the four states can share one parser without one of them silently writing into the void.
-
-The frontmatter is a zod schema per claimed state, so the message an agent gets back is the schema's, keyed by path: `result.delegations: Invalid input: expected array, received undefined`. The same holds for `agents.json` and for the `pi` records on the wire. One parser, one error shape, no hand-rolled validators drifting apart.
+A result tool call is refused when it does not fit the state: the server tells the agent what is wrong and lets it call again. Being strict here is cheap — the agent is still in the session — and it is the only way the four states can share one result contract without one of them silently writing into the void. The tool schemas validate the arguments at execution (`findings` is a list of non-empty strings or the call is rejected), and the server re-validates against the claimed state before it applies anything.
 
 ### Validation on settle
 
-The server re-reads the file when the agent settles and compares it to what it dispatched. `assignment`, the todo messages and the checks are fixed; a change to any of them is a divergence.
+The server reads the result tool calls out of the session's rpc stream — the same records it already parses for activity — and maps the last one through the state's contract. A settle whose last call does not fit the state's shape (prose instead of a call included) is answered in the session with the contract's issues (`unparsable-result`), and a settle with no result call at all (a truncated context, an aborted turn) is `missing-result`. Both are retried a fixed number of times and then held.
 
-A divergence is **repaired, not argued about**. The server rewrites the fixed fields back to what it dispatched, keeps the two fields the agent owns — a `done` flag survives if its todo message does, the `result` is untouched — and carries on with the settle in the same pass. The repair is one line in `server.log` and nothing else.
+### The prompt queues
 
-That is a deliberate reversal. Prompting an agent to restore a field it was told not to touch spends a turn re-establishing a fact the server already holds, and it spends it at the exact moment the agent believes it is finished. The server knows what it wrote; putting it back costs nothing and cannot fail. What is left for the agent to answer is only what the server genuinely cannot know: whether the work is done.
+Transient feedback is queued per state in the runtime directory — `queue/<STATE>.md`, plain markdown, nothing structured — and delivered into the agent's session as one prompt at the next dispatch of that state:
+
+- plan review findings queue to `PLANNING`;
+- failing checks, work review findings and manager findings queue to `WORKING`.
+
+The queue is drained when the state is dispatched, so a task that fails its checks is resumed with the failures already in its session. Nothing in the queues is ever written to the task document.
 
 ### Rotation
 
-The server writes `ASSIGNMENT.md` exactly once per dispatch and never again — not even to record a failed check. Anything it wants to say mid-run goes through the session as a `prompt`, and the agent folds it into its own notes. One writer per file at all times, so notes can never be clobbered mid-thought.
+The server writes `ASSIGNMENT.md` exactly once per dispatch and never again — not even to record a failed check. Anything it wants to say mid-run goes through the session as a `prompt`, and the agent folds it into its own appended notes. One writer per file at all times, so notes can never be clobbered mid-thought.
 
-On every dispatch that generates a file, the previous one rotates into `history/ASSIGNMENT.<n>.md` first, numbered in order. Nothing an agent wrote is ever overwritten, and the manager sees every attempt rather than the last.
+On every dispatch that generates a file, the previous one rotates into `history/ASSIGNMENT.<n>.md` first, numbered in order. Nothing an agent wrote is ever overwritten, and the manager sees every attempt rather than the last. A re-dispatch after a hold rotates; a resume reopens the same file in the same session and rotates nothing.
 
-Rotation is also the role handoff. When a reviewer is dispatched, the implementer's file rotates out and the reviewer's is generated from a different template. Two agents, two files, one directory, no shared session.
+Rotation is also the role handoff. When a reviewer is dispatched, the worker's file is carried forward, not regenerated — the reviewer reads the worker's own appended sections. The file is regenerated from the task body only at a fresh planner or worker dispatch.
 
 ### The task graph is visible but off-limits
 
@@ -340,115 +287,112 @@ The server enforces the other half: any diff touching `tasks/` becomes a finding
 
 The graph has one writer process — the server — but two authorities behind it.
 
-**Mechanical transitions.** The server applies these on its own. Each is fully determined by an observed fact: a process settled, a command returned an exit code, a field was set.
+**Mechanical transitions.** The server applies these on its own. Each is fully determined by an observed fact: a process settled, a command returned an exit code, a result tool was called.
 
-| Transition                         | Triggering fact                                                                               |
-| ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| `claim`                            | a free slot started a process, or the server started checking                                 |
-| `release`                          | the claiming process is gone                                                                  |
-| `doneTodo <i>`                     | `todos[i].done` is true in `ASSIGNMENT.md`                                                    |
-| `submit` from `WORKING`            | `result.type` is `submit`, every assigned todo is done, and the branch is committed and clean |
-| `submit` from `PLANNING`           | a plan result whose `addTodos` are recorded verbatim, after its `removeTodos` are applied     |
-| `submit` from `PLAN_REVIEWING`     | a plan review with empty `findings`; entering `READY_WORK` clears `plan_feedback`             |
-| `pass` from `CHECKING`             | every check exited 0                                                                          |
-| `fail` from `CHECKING`             | at least one check did not; the failures carry command, code and tail                         |
-| `addTodo` in `PLANNING`            | a planner todo, copied verbatim                                                               |
-| `removeTodo <i>` in `PLANNING`     | a planner removal, by index, applied before the additions                                     |
-| `addFeedback` in `AGENT_REVIEWING` | a `findings` list, copied verbatim, one todo per entry                                        |
-| `addFeedback` in `PLAN_REVIEWING`  | a plan review finding, copied verbatim into `plan_feedback`                                   |
-| `hold <reason>`                    | an issue outlasted its attempts; the reason names it                                          |
+| Transition                                               | Triggering fact                                                                                                            |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `claim`                                                  | a free slot started a process, or the server started checking                                                              |
+| `release`                                                | the claiming process is gone                                                                                               |
+| `submit` from `PLANNING`                                 | a `submit` call with the `## Todos` section appended                                                                       |
+| `submit` from `PLAN_REVIEWING`                           | a `submit` call with empty `findings`; the accepted `ASSIGNMENT.md` becomes the task body                                  |
+| `submit` from `WORKING`                                  | a `submit` call with notes appended, and the branch committed and clean                                                    |
+| `submit` from `WORK_REVIEWING`                           | a `submit` call with empty `findings`                                                                                      |
+| `pass` from `CHECKING`                                   | every check exited 0                                                                                                       |
+| `fail` from `CHECKING`                                   | at least one check did not; command, code and tail go to the worker's prompt queue                                         |
+| `addFeedback` in `WORK_REVIEWING` or `MANAGER_REVIEWING` | a `findings` list, copied verbatim into the body under `# Review findings`, with a fresh `## Implementation Notes` heading |
+| `addFeedback` in `PLAN_REVIEWING`                        | a plan review finding, copied verbatim into the planner's prompt queue                                                     |
+| `hold <reason>`                                          | an issue outlasted its attempts; the reason names it                                                                       |
 
 **Judgement transitions.** Only the manager, through MCP tools. Nothing here is derivable from an observation.
 
-| Transition                                                     | Tool                                                 | Why it needs a judge                 |
-| -------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `create`                                                       | `task_create`                                        | new work                             |
-| `noDependencies`                                               | `task_done_create`                                   | whether a task is ready to be worked |
-| `addTodo` in `MANAGER_REVIEWING`                               | `task_add_todo`                                      | whether a finding is real            |
-| `addCheck`                                                     | `task_add_check`                                     | what counts as verification          |
-| `addDependencies` / `removeDependencies`                       | `task_add_dependencies` / `task_remove_dependencies` | the shape of the graph               |
-| `addTaskGraph`                                                 | `task_add_task_graph_update`                         | which tasks should exist             |
-| `doneTaskGraph`                                                | `task_done_task_graph_updates`                       | whether the graph now says the truth |
-| `claim` into a manager state                                   | `task_claim`                                         | which task it is working on          |
-| `merged` from `MANAGER_REVIEWING`                              | `task_merge`                                         | whether the work is acceptable       |
-| `abort` from `MANAGER_REVIEWING`, `READY_WORK` or `READY_PLAN` | `task_abort`                                         | whether the task should exist at all |
-| `resume` from `HELD_PLAN` or `HELD_WORK`                       | `task_resume`                                        | whether the wall is gone             |
+| Transition                                                                   | Tool                | Why it needs a judge                             |
+| ---------------------------------------------------------------------------- | ------------------- | ------------------------------------------------ |
+| `create`                                                                     | `task_create`       | new work                                         |
+| `submit` from `NEW`, `BLOCKED`, `MANAGER_REVIEWING` or `TASK_GRAPH_UPDATING` | `task_submit`       | whether the task is done with the stage it is in |
+| `addFeedback` in `MANAGER_REVIEWING`                                         | `task_add_feedback` | whether a finding is real                        |
+| `hold` from any planning or work state                                       | `task_hold`         | whether a task should wait                       |
+| `claim` into a manager state                                                 | `task_claim`        | which task it is working on                      |
+| `abort` from `MANAGER_REVIEWING`, `HELD_PLAN` or `HELD_WORK`                 | `task_abort`        | whether the task should exist at all             |
+| `resume` from `HELD_PLAN` or `HELD_WORK`                                     | `task_resume`       | whether the wall is gone                         |
 
-One tool per judgement, named for the judgement. There is no generic `task_transition` taking a transition name and a list of strings: it made every judgement look alike in the tool list, put the manager one typo away from a transition it did not mean, and pushed argument validation from the schema into a string parser. `submit`, `pass`, `fail`, `hold`, `doneTodo` and `release` are not in this table and have no tools — they are the server's, and a tool for them would be a way for the manager to state a fact it has not observed.
+One tool per judgement, named for the judgement. There is no generic `task_transition` taking a transition name and a list of strings: it made every judgement look alike in the tool list, put the manager one typo away from a transition it did not mean, and pushed argument validation from the schema into a string parser. `task_submit` is the one name that spans three states because they are the same judgement — the task is done with where it is — with the branch landing added when it is asked at `MANAGER_REVIEWING`; the rest is not in this table and has no tools, because the manager edits the task document directly for what it is allowed to change (`checks`, `depends_on`, `task_graph_updates`, the title), and the server's transitions (`pass`, `fail`, `release`, and the agent `submit`s) are the server's, a tool for them being a way for the manager to state a fact it has not observed.
 
 The line is: **the server states facts, the manager states opinions.** An agent's opinion is neither — it sits in `findings` or `delegations` until something with authority reads it.
 
-The two mechanical `addFeedback`s are the edge the server sits on deliberately: a written finding is copied, never interpreted. A failed check does not even get that far — it is a `fail` carrying the output, not a todo, because nobody has to decide anything about a red build.
+The mechanical `addFeedback`s are the edge the server sits on deliberately: a written finding is copied, never interpreted. A failed check does not even get that far — it is a `fail` whose details go to the prompt queue, not to the graph, because nobody has to decide anything about a red build.
+
+To resolve a held task the manager edits the task directly — the document, or `task_write_body` — and `resume`s. There is no todo-adding anywhere; the todo list is the planner's to write.
 
 ## States
 
 | State                                             | Actor       | Mechanism                                                       |
 | ------------------------------------------------- | ----------- | --------------------------------------------------------------- |
-| `NEW`                                             | manager     | authors body, `addCheck`, dependencies                          |
+| `NEW`                                             | manager     | authors the document; `submit` routes it by the dependencies    |
 | `BLOCKED`                                         | —           | cleared automatically when the last dependency closes           |
-| `HELD_PLAN`                                       | **manager** | reads `held_reason`; `resume` or restructures, back to the plan |
-| `HELD_WORK`                                       | **manager** | reads `held_reason`; `resume` or restructures, back to the work |
-| `READY_PLAN` → `PLANNING`                         | **agent**   | a fresh `planner` decomposes the task into todos                |
-| `READY_PLAN_REVIEW` → `PLAN_REVIEWING`            | **agent**   | a `reviewer` checks the todos against the criteria              |
-| `READY_WORK` → `WORKING`                          | **agent**   | worktree + `ASSIGNMENT.md`; produces commits and edits          |
+| `HELD_PLAN`                                       | **manager** | reads `held_reason`; `resume`, `abort` or restructures          |
+| `HELD_WORK`                                       | **manager** | reads `held_reason`; `resume`, `abort` or restructures          |
+| `READY_PLAN` → `PLANNING`                         | **agent**   | a fresh `planner` appends the numbered `## Todos` list          |
+| `READY_PLAN_REVIEW` → `PLAN_REVIEWING`            | **agent**   | a `reviewer` checks the list against the criteria               |
+| `READY_WORK` → `WORKING`                          | **agent**   | worktree + `ASSIGNMENT.md`; produces commits and notes          |
 | `READY_CHECK` → `CHECKING`                        | **server**  | runs every check in the worktree                                |
-| `READY_AGENT_REVIEW` → `AGENT_REVIEWING`          | **agent**   | fresh session, reads the commit range, writes findings          |
-| `READY_MANAGER_REVIEW` → `MANAGER_REVIEWING`      | **manager** | reads the range + assignment history; then `merged`             |
-| `READY_TASK_GRAPH_UPDATE` → `TASK_GRAPH_UPDATING` | **manager** | creates and edits tasks, `doneTaskGraph`                        |
+| `READY_WORK_REVIEW` → `WORK_REVIEWING`            | **agent**   | fresh session, reads the commits and the notes, writes findings |
+| `READY_MANAGER_REVIEW` → `MANAGER_REVIEWING`      | **manager** | reads the task document; then `submit` or `task_add_feedback`   |
+| `READY_TASK_GRAPH_UPDATE` → `TASK_GRAPH_UPDATING` | **manager** | creates and edits tasks, then `submit`                          |
 
-Four of the twelve spend model tokens: `PLANNING`, `PLAN_REVIEWING`, `WORKING` and `AGENT_REVIEWING`. `CHECKING` is deterministic — running `bun test` and reading an exit code does not need an LLM, and making it mechanical removes the most common failure in agent pipelines, which is a checker reporting a pass it did not get.
+Four of the twelve spend model tokens: `PLANNING`, `PLAN_REVIEWING`, `WORKING` and `WORK_REVIEWING`. `CHECKING` is deterministic — running `bun test` and reading an exit code does not need an LLM, and making it mechanical removes the most common failure in agent pipelines, which is a checker reporting a pass it did not get.
 
 ### Why the review is split in two
 
 Catching what a careful reader catches and deciding whether the work is acceptable are different jobs. The first is cheap, mechanical to trigger, and scales with slots. The second is a judgement and belongs to the manager. Merging them means every typo-level finding costs a manager round trip.
 
-- **`AGENT_REVIEWING`** runs after the checks pass. A fresh agent, a fresh session, the worktree, the commit range and the acceptance criteria. It writes `findings` and `delegations` and settles. It cannot pass or close anything: the server reads what it wrote and applies it, in the same claim, before the slot is released. Findings become todos and the task drops to `READY_WORK`; no findings and it moves up to `READY_MANAGER_REVIEW`.
+- **`WORK_REVIEWING`** runs after the checks pass. A fresh agent, a fresh session, the worktree and the acceptance criteria; the worker's appended notes are in the assignment it carries forward. It calls `submit` with `findings` and `delegations` and settles. It cannot pass or close anything: the server reads its tool call and applies it, in the same claim, before the slot is released. Findings are appended to the task body under `# Review findings` and the task drops to `READY_WORK`; no findings and it moves up to `READY_MANAGER_REVIEW`.
 - **`MANAGER_REVIEWING`** is the manager, seeing only work that survived both a machine and a peer.
 
-The reviewer never applies its own findings and the server never interprets them. A finding is copied verbatim into a todo, which is the only thing that makes the copy safe to do without a judge.
+The reviewer never applies its own findings and the server never interprets them. A finding is copied verbatim into the body, which is the only thing that makes the copy safe to do without a judge.
 
 ### The planning phase
 
-Every task is planned before it is worked. `task_done_create` sends it to `READY_PLAN` instead of `READY_WORK`, a `planner` in a fresh session reads the goal and the acceptance criteria and writes the executable plan as `result.type: submit` with `addTodos` and `removeTodos` lists, and only a plan that survived a `reviewer` opens `READY_WORK`.
+Every task is planned before it is worked. `task_submit` sends it to `READY_PLAN` — or `BLOCKED`, when the manager edited dependencies into it — and a `planner` in a fresh session reads the goal and the acceptance criteria and appends a `## Todos` section to `ASSIGNMENT.md` — a numbered list, `1.` to `n.` consecutively — and only a plan that survived a `reviewer` opens `READY_WORK`. At plan acceptance the whole assignment becomes the task body, so the todo list lands in the graph verbatim.
 
-The planner writes nothing but the plan. It runs in the same worktree the work will happen in, so it can read the code it is planning against — and the server checks, at every settle, that it left that worktree exactly as it found it: `git status` clean and no commits of its own. A planner that writes or commits is prompted in situ to undo it (up to four attempts, then `HELD_PLAN`), because a dirty worktree or a stray commit would poison the work phase that follows. The plan itself lives only in `../ASSIGNMENT.md`, like every other deliverable.
+The planner writes nothing but that section. It runs in the same worktree the work will happen in, so it can read the code it is planning against — and the server checks, at every settle, that it left that worktree exactly as it found it: `git status` clean and no commits of its own, and the assignment unchanged above its appended section. A planner that writes or commits is prompted in situ to undo it (up to four attempts, then `HELD_PLAN`), because a dirty worktree or a stray commit would poison the work phase that follows. The plan itself lives only in `../ASSIGNMENT.md`, like every other deliverable.
 
-An accepted plan's `removeTodos` are applied first, by index, then its `addTodos` are copied into the graph, verbatim, one `addTodo` per entry, in the same settle that moves the task to `READY_PLAN_REVIEW`. The planner's result is the only source of the changes: the server never rewrites a todo message and never guesses an index. A plan that leaves the task with no todos is refused (`missing-plan`, in situ, then `HELD_PLAN`), and an index outside the todos it was shown is refused the same way (`unparsable-result`) — a plan with no steps is not a plan, and the planner is the one that knows.
+The accepted plan is the assignment itself: at `PLAN_REVIEWING` with empty `findings` the server submits the whole `ASSIGNMENT.md` as the new task body, so the appended todo list lands in the graph verbatim. A settle that appended nothing is refused (`missing-todos`, in situ, then `HELD_PLAN`) — a plan with no steps is not a plan, and the planner is the one that knows.
 
-The plan review is a review of the plan, not of code. The reviewer gets the graph's todos and the acceptance criteria, and its `findings` — the gaps between the two — go back to the planner **verbatim** through a `plan_feedback` field on the task, rendered into the next `PLANNING` assignment under "The previous plan was rejected with these findings". The planner must address every one; a second rejection replaces the feedback rather than growing it, so the planner is always answering the latest review. The first plan that satisfies the reviewer moves the task to `READY_WORK` — and entering `READY_WORK` clears `plan_feedback`, by the transition rule rather than by the settle, so no trace of the rejection survives into the work. A finding is a description of the gap, not a prescription of the fix — the same standard as the work review, for the same reason: the planner is the one better placed to decide how to cover the criterion.
+The plan review is a review of the plan, not of code. The reviewer carries the planner's own file forward — the appended `## Todos` list is what it reads — and its `findings` — the gaps between the list and the acceptance criteria, plus any way the list is missing or misnumbered — go back to the planner **verbatim** through its prompt queue. The planner must address every one; a second rejection queues again, so the planner is always answering the latest review. The first plan that satisfies the reviewer moves the task to `READY_WORK` — and the rejected plan itself never touches the body, by the transition rule rather than by the settle, so no trace of the rejection survives into the work. A finding is a description of the gap, not a prescription of the fix — the same standard as the work review, for the same reason: the planner is the one better placed to decide how to cover the criterion.
 
-The two planning states share the worktree with the work phase. The workspace is created at the first `PLANNING` claim and survives through planning, work, checks and reviews, so the planner's reading of the code and the implementer's edits happen against the same tree and the same branch. A task held from `PLANNING` or `PLAN_REVIEWING` lands in `HELD_PLAN` and resumes to `READY_PLAN`; one held from the work phase lands in `HELD_WORK` and resumes to `READY_WORK` — the state itself records which phase the wall stopped, so `resume` sends the task back to the plan it does not have.
+The two planning states share the worktree with the work phase. The workspace is created at the first `PLANNING` claim and survives through planning, work, checks and reviews, so the planner's reading of the code and the worker's edits happen against the same tree and the same branch. A task held from `PLANNING` or `PLAN_REVIEWING` lands in `HELD_PLAN` and resumes to `READY_PLAN`; one held from the work phase lands in `HELD_WORK` and resumes to `READY_WORK` — the state itself records which phase the wall stopped, so `resume` sends the task back to the plan it does not have.
 
 ### Failing forward
 
-`fail` is how both mechanical states send work back, and it is the only transition that writes to `failures`:
+`fail` is how `CHECKING` sends work back, and it records nothing in the graph:
 
-| From       | To           | What is recorded                     | Who picks it up           |
-| ---------- | ------------ | ------------------------------------ | ------------------------- |
-| `CHECKING` | `READY_WORK` | every failing command, code and tail | the implementer's session |
+| From       | To           | What is delivered                                                  | Who picks it up      |
+| ---------- | ------------ | ------------------------------------------------------------------ | -------------------- |
+| `CHECKING` | `READY_WORK` | every failing command, code and tail, in the worker's prompt queue | the worker's session |
 
-A result that cannot be read is not a failure and never reaches the graph. The agent that wrote it is still holding the claim, so the server says what is wrong in that session and the state does not move; only an agent that gets it wrong twice is `hold`.
+A result that cannot be read is not a failure and never reaches the graph. The agent that wrote it is still holding the claim, so the server says what is wrong in that session and the state does not move; only an agent that gets it wrong repeatedly is `hold`.
 
-The graph carries the failure rather than the server holding it in memory, because the resume may happen after a manager restart. Everything the resume prompt says is rendered from `failures` at dispatch time; nothing about it is remembered anywhere else. A `submit` clears the list — the agent is claiming the failures are gone, and `CHECKING` is about to re-run everything and file a fresh list if it lied.
+The queue carries the failure rather than the server holding it in memory, because the resume may happen after a manager restart. Everything the resume prompt says is rendered from the queue at dispatch time; nothing about it is remembered anywhere else. The queue is drained when the state is dispatched — the agent is claiming the failures are gone, and `CHECKING` is about to re-run everything and file a fresh entry if it lied.
 
 ### HELD_PLAN and HELD_WORK
 
-An agent that cannot finish sets `result.type: blocked` with a message. The server asks once whether it really is a wall — for a reviewer, a blocker that is work outside this task's scope is a `delegation`; for an implementer, a wall it can work around is not a wall — and if the next settle is blocked again it applies `hold`, which clears the claim and records the message verbatim in `held_reason`. A person is the most expensive thing the system can spend, so it is worth one prompt to be sure.
+An agent that cannot finish sets `result.type: blocked` with a message. The server asks once whether it really is a wall — for a reviewer, a blocker that is work outside this task's scope is a `delegation`; for a worker, a wall it can work around is not a wall — and if the next settle is blocked again it applies `hold`, which clears the claim and records the message verbatim in `held_reason`. A person is the most expensive thing the system can spend, so it is worth one prompt to be sure.
 
-The four halves of that question are four files, `blocked-WORKING.md`, `blocked-AGENT_REVIEWING.md`, `blocked-PLANNING.md` and `blocked-PLAN_REVIEWING.md`, each with its alternative already written into it. There is no shared fragment with a hole in it: the alternatives have nothing in common but their position in the sentence, and a template that interpolates one prose paragraph into another is a worse way to read either of them.
+The four halves of that question are four files, `blocked-WORKING.md`, `blocked-WORK_REVIEWING.md`, `blocked-PLANNING.md` and `blocked-PLAN_REVIEWING.md`, each with its alternative already written into it. There is no shared fragment with a hole in it: the alternatives have nothing in common but their position in the sentence, and a template that interpolates one prose paragraph into another is a worse way to read either of them.
 
-The two held states are states rather than a flag on `READY_WORK` or `READY_PLAN`, and that is the whole point of them. A flag needs the scheduler to remember to check it and leaves a task sitting in a queue it is not eligible for. A state cannot be forgotten: the dispatcher pulls from `READY_WORK` and `READY_PLAN`, a held task is in neither, and nothing has to be careful. The split is the flag: `hold` lands the task in `HELD_PLAN` when the wall stopped the planner or the plan reviewer, and in `HELD_WORK` when it stopped the implementer or the work reviewer — so the phase a task is held from is a fact about the state, not a field on it, and `resume` never has to guess where the task belongs.
+The two held states are states rather than a flag on `READY_WORK` or `READY_PLAN`, and that is the whole point of them. A flag needs the scheduler to remember to check it and leaves a task sitting in a queue it is not eligible for. A state cannot be forgotten: the dispatcher pulls from `READY_WORK` and `READY_PLAN`, a held task is in neither, and nothing has to be careful. The split is the flag: `hold` lands the task in `HELD_PLAN` from any planning-phase state — `READY_PLAN`, `PLANNING`, `READY_PLAN_REVIEW`, `PLAN_REVIEWING` — and in `HELD_WORK` from any work-phase state — `READY_WORK`, `WORKING`, `READY_CHECK`, `CHECKING`, `READY_WORK_REVIEW`, `WORK_REVIEWING` — so the phase a task is held from is a fact about the state, not a field on it, and `resume` never has to guess where the task belongs.
 
-Four ways out, all judgement:
+Three ways out, all judgement:
 
-| Transition        | To                                                           | The manager decided                                                          |
-| ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `resume`          | `READY_PLAN` from `HELD_PLAN`, `READY_WORK` from `HELD_WORK` | the wall is gone; try again unchanged, back to the phase the wall stopped    |
-| `addTodo`         | `READY_PLAN` from `HELD_PLAN`, `READY_WORK` from `HELD_WORK` | here is the missing piece of work (re-planned when the task has no plan yet) |
-| `addDependencies` | `BLOCKED`                                                    | it was waiting on something that isn't done                                  |
-| `addTaskGraph`    | `READY_TASK_GRAPH_UPDATE`                                    | the graph was wrong, not the attempt                                         |
+| Transition            | To                                                           | The manager decided                                                       |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `resume`              | `READY_PLAN` from `HELD_PLAN`, `READY_WORK` from `HELD_WORK` | the wall is gone; try again unchanged, back to the phase the wall stopped |
+| `resume` (deps added) | `BLOCKED`                                                    | it was waiting on something that isn't done                               |
+| `abort`               | `READY_TASK_GRAPH_UPDATE` (updates) or `CLOSED`              | the task was the wrong shape; the graph may need rewriting first          |
 
-`addDependencies` is the common one, and it is the reason the held states and `BLOCKED` are separate. "Waiting on another task" is a machine-resolvable condition that clears itself when the dependency closes; "waiting on a person" never clears itself. Collapsing them would mean a task that nothing can ever unblock sitting in the same bucket as one that will unblock itself in an hour.
+To resolve a hold the manager first **updates the task directly** — edit the document, or `task_write_body` to fix the acceptance criteria or append guidance, editing `checks`, `depends_on` and `task_graph_updates` in the frontmatter if those are what was missing — then `resume`, or `abort` to throw the task away. There is no todo-adding; the todo list is the planner's to write, and a task held before it was planned is re-planned.
+
+The dependencies-added `resume` is the common one, and it is the reason the held states and `BLOCKED` are separate. "Waiting on another task" is a machine-resolvable condition that clears itself when the dependency closes; "waiting on a person" never clears itself. Collapsing them would mean a task that nothing can ever unblock sitting in the same bucket as one that will unblock itself in an hour.
 
 When the manager genuinely cannot resolve it, it escalates to a human. That escalation is the only unbounded thing in the system, and it is deliberately a person rather than a state — the task stays in `HELD_PLAN` or `HELD_WORK` while it happens, which is exactly what those states mean.
 
@@ -456,9 +400,9 @@ When the manager genuinely cannot resolve it, it escalates to a human. That esca
 
 ### Mapping pi signals onto the graph
 
-This is the load-bearing one: everything the server does to a task in `PLANNING`, `PLAN_REVIEWING`, `WORKING` or `AGENT_REVIEWING` comes out of it.
+This is the load-bearing one: everything the server does to a task in `PLANNING`, `PLAN_REVIEWING`, `WORKING` or `WORK_REVIEWING` comes out of it.
 
-Two inputs, and they are not interchangeable. The **event stream** says how the turn ended; the **`ASSIGNMENT.md` on disk** says what the agent believes it accomplished. The stream is never the outcome — a run whose every attempt failed still exits 0, and `agent_end` fires once per attempt — so the file is authoritative and the stream only decides whether the file is worth reading yet.
+Two inputs, and they are not interchangeable. The **event stream** says how the turn ended; the **`ASSIGNMENT.md` on disk** says what the agent believes it accomplished. The stream is also where the result tool calls land — a `submit` or `blocked` call is an event like any other, read back at settle with the activity that surrounded it — and the file is authoritative for everything else: a run whose every attempt failed still exits 0, and `agent_end` fires once per attempt, so the file is only worth reading once the stream says the turn settled.
 
 ```text
 on agent_settled:
@@ -472,48 +416,51 @@ on agent_settled:
     if stopReason = aborted:                      # shutdown or timeout
         close stdin, release the slot, done
 
-    parse ASSIGNMENT.md as the claimed state
-    if it does not parse           → raise "unparsable-result"
+    calls ← the result tools called this turn, from the rpc stream
+    if stopReason = length, or there is no call → raise "missing-result"
 
-    repair any divergence from dispatch, in place, silently
+    map the last call through the claimed state's result contract
+    if it does not fit the state   → raise "unparsable-result"
+    if the tool is blocked         → raise "blocked"
 
-    if stopReason = length         → raise "missing-result"
-    if result = null               → raise "missing-result"
-    if result.type = blocked       → raise "blocked"
+    compare ASSIGNMENT.md to what was dispatched
+    if it changed above the appended section       → raise "modified-assignment"
 
     if the claimed state is PLANNING:
-        if the removals and additions leave no todos → raise "missing-plan"
+        if nothing was appended                   → raise "missing-todos"
         if the worktree is dirty or carries commits  → raise "modified-worktree"
-        removeTodo each index, addTodo each added todo, submit, release the slot, done
+        submit, release the slot, done
 
     if the claimed state is PLAN_REVIEWING:
+        if the assignment changed at all          → raise "modified-assignment"
         if the worktree is dirty or carries commits
                                                 → raise "modified-worktree"
-        if findings is empty → submit (→ READY_WORK), done
-        plan_feedback ← findings, release the slot, done
+        if findings is empty → submit with the assignment as the new body, done
+        findings → the planner's prompt queue, release the slot, done
 
-    if the claimed state is AGENT_REVIEWING:
+    if the claimed state is WORK_REVIEWING:
+        if the assignment changed at all          → raise "modified-assignment"
         findings ← result.findings (+ the tasks/ guard)
-        addFeedback with the findings, or submit if there are none, release the slot, done
+        findings → the body under # Review findings and the worker's queue,
+                   or submit if there are none, release the slot, done
 
     # the claimed state is WORKING
-    if any assigned todo is still open            → raise "incomplete-todos"
+    if nothing was appended                       → raise "missing-notes"
     if the workspace is dirty, or the branch carries no commit of its own
                                                   → raise "uncommitted"
-    doneTodo every open todo in the graph
-    submit, release the slot
+    submit with the assignment as the new body, release the slot
 ```
 
 As a table, since these are the cases that matter:
 
-| `stopReason` | `result`  | Server action                                            |
-| ------------ | --------- | -------------------------------------------------------- |
-| `stop`       | `submit`  | mark todos done, `submit`, close stdin, release the slot |
-| `stop`       | `blocked` | raise `blocked`                                          |
-| `stop`       | `null`    | raise `missing-result`                                   |
-| `length`     | any       | raise `missing-result`                                   |
-| `error`      | any       | leave the process up; re-prompt on backoff               |
-| `aborted`    | any       | close stdin, release the slot                            |
+| `stopReason` | result tool call | Server action                                             |
+| ------------ | ---------------- | --------------------------------------------------------- |
+| `toolUse`    | `submit`         | per-state settle, `submit`, close stdin, release the slot |
+| `stop`       | `blocked`        | raise `blocked`                                           |
+| `toolUse`    | wrong arguments  | raise `unparsable-result`                                 |
+| `length`     | any              | raise `missing-result`                                    |
+| `error`      | any              | leave the process up; re-prompt on backoff                |
+| `aborted`    | any              | close stdin, release the slot                             |
 
 A `length` or resultless outcome still keeps the branch, so the next attempt starts from the partial work rather than from the base.
 
@@ -521,35 +468,35 @@ A `length` or resultless outcome still keeps the branch, so the next attempt sta
 
 Everything the server can find wrong with a settle — and one thing it can find wrong before the settle — is a **named issue** with its own prompt fragment and its own number of attempts. Raising one prompts the live session with that fragment; the attempt after the last one is a `hold` whose reason names the issue.
 
-| Issue                 | Attempts | Fragment                                                        | Held as                                                   |
-| --------------------- | -------- | --------------------------------------------------------------- | --------------------------------------------------------- |
-| `unparsable-result`   | 4        | `unparsable-result-<state>.md`, rendered from the schema issues | the agent never wrote a readable result                   |
-| `missing-result`      | 4        | `missing-result-<state>.md`                                     | the agent stopped without setting a result                |
-| `incomplete-todos`    | 4        | `incomplete-todos.md`, rendered from the open count             | the agent submitted with _n_ todo(s) open                 |
-| `uncommitted`         | 4        | `uncommitted.md`, rendered from `git status`                    | the agent submitted work it never committed               |
-| `looping`             | 3        | `looping-<state>.md`, rendered from the repeated command        | the agent kept repeating one command                      |
-| `blocked`             | 1        | `blocked-<state>.md`, one per claimed state                     | the agent's own `message`, verbatim                       |
-| `missing-plan`        | 4        | `missing-plan.md`                                               | the planner submitted a plan with no todos                |
-| `invalid-remove-todo` | 4        | `invalid-remove-todo.md`                                        | the planner named `removeTodos` indices that do not exist |
-| `modified-worktree`   | 4        | `modified-worktree-<state>.md`                                  | the agent wrote to the worktree during planning           |
+| Issue                 | Attempts | Fragment                                                          | Held as                                                        |
+| --------------------- | -------- | ----------------------------------------------------------------- | -------------------------------------------------------------- |
+| `unparsable-result`   | 4        | `unparsable-result-<state>.md`, rendered from the contract issues | the agent's result tool call was not a valid one for its state |
+| `missing-result`      | 4        | `missing-result-<state>.md`                                       | the agent stopped without calling a submit or blocked tool     |
+| `missing-todos`       | 4        | `missing-todos.md`                                                | the planner submitted without appending a todo list            |
+| `missing-notes`       | 4        | `missing-notes.md`                                                | the worker submitted without appending implementation notes    |
+| `modified-assignment` | 4        | `modified-assignment-<state>.md`                                  | the agent changed parts of the assignment it may not           |
+| `uncommitted`         | 4        | `uncommitted.md`, rendered from `git status`                      | the agent submitted work it never committed                    |
+| `looping`             | 3        | `looping-<state>.md`, rendered from the repeated command          | the agent kept repeating one command                           |
+| `blocked`             | 1        | `blocked-<state>.md`, one per claimed state                       | the agent's own `message`, verbatim                            |
+| `modified-worktree`   | 4        | `modified-worktree-<state>.md`                                    | the agent wrote to the worktree during planning                |
 
-Each issue is scoped to the states that can raise it: `incomplete-todos`, `uncommitted`, `missing-plan` and `invalid-remove-todo` fire from exactly one state and keep a plain fragment name, while an issue that can fire from several — `looping`, `blocked`, `modified-worktree`, and the parse-and-result issues — is one file per state, so a project can override the planner's looping nudge without touching the implementer's.
+Each issue is scoped to the states that can raise it: `missing-todos`, `missing-notes` and `uncommitted` fire from exactly one state and keep a plain fragment name, while an issue that can fire from several — `looping`, `blocked`, `modified-worktree`, `modified-assignment`, and the parse-and-result issues — is one file per state, so a project can override the planner's looping nudge without touching the worker's.
 
 Attempts are counted per issue per dispatch, not per settle, so an agent that fails a parse twice and then stops without a result has spent two of one budget and one of another.
 
-Four rather than one, because the failures these catch are ordinary and recoverable: a YAML block with the wrong indentation, a turn that ran out of context before the last line was written, a todo left unticked. Each retry costs one turn against a session that already has the whole task in it, and the alternative — a hold — costs a person. Escalating to the most expensive resource in the system after a single misplaced colon is the wrong trade.
+Four rather than one, because the failures these catch are ordinary and recoverable: a result tool call with the wrong arguments, a turn that ran out of context before the final call was made, a section not yet appended. Each retry costs one turn against a session that already has the whole task in it, and the alternative — a hold — costs a person. Escalating to the most expensive resource in the system after a single misplaced brace is the wrong trade.
 
 `looping` is the one issue not raised from a settle, because the agent it catches never settles. Ten identical tool calls in a row — same tool, same arguments, byte for byte — and the stream flags it, `PiProcess` aborts the turn on the spot, and the settle that the abort produces raises the issue. Consecutive and within one turn: a command run ten times across ten turns is an agent checking its work, and a run broken by anything else starts the count again.
 
-Ten, because a handful of repeats is a retry and a screenful is an agent that has stopped reading. The number that matters more is the reaction. A loop is not a failed submit, so the fragment does not correct anything — it says the command was repeated, that the answer is not in its output, and that the cause may sit outside the diff entirely, in the environment rather than the code. Then it offers the two ways out: try something else, or write `result: type: blocked` and say what the wall is. Handing the agent straight to a person would throw away a session that still has the whole task in it, and would hand over "it kept running `zig build`" instead of the blocker the agent can write in one line. Three attempts rather than four, because each one costs ten tool calls to reach, and an agent that loops three times is not going to read its way out on the fourth.
+Ten, because a handful of repeats is a retry and a screenful is an agent that has stopped reading. The number that matters more is the reaction. A loop is not a failed submit, so the fragment does not correct anything — it says the command was repeated, that the answer is not in its output, and that the cause may sit outside the diff entirely, in the environment rather than the code. Then it offers the two ways out: try something else, or send `{"type": "blocked", "message": ...}` and say what the wall is. Handing the agent straight to a person would throw away a session that still has the whole task in it, and would hand over "it kept running `zig build`" instead of the blocker the agent can write in one line. Three attempts rather than four, because each one costs ten tool calls to reach, and an agent that loops three times is not going to read its way out on the fourth.
 
-`blocked` keeps its single attempt for the opposite reason. It is not a failure: the agent stated an outcome and the second look is there to catch the one confusion the fragment can resolve — a reviewer that meant a delegation, an implementer that could route around the wall. If the agent says it again, it means it, and asking a third time is arguing with the answer.
+`blocked` keeps its single attempt for the opposite reason. It is not a failure: the agent stated an outcome and the second look is there to catch the one confusion the fragment can resolve — a reviewer that meant a delegation, a worker that could route around the wall. If the agent says it again, it means it, and asking a third time is arguing with the answer.
 
 Naming the issues is what makes any of this legible. `server.log` says which issue and how many of its attempts are gone, `held_reason` says which one won, and each fragment is a file that can be rewritten without touching the server.
 
 ### A submit has to be in the git history
 
-`uncommitted` is one of two issues that reads something other than `ASSIGNMENT.md` — `modified-worktree` is the other, and it is the same check with the requirements inverted: the planner and the plan reviewer must leave the worktree exactly as they found it, so any dirty file or any commit is an issue for them, where an implementer is required to have both. `uncommitted` is the one that catches the most expensive lie an implementer can tell. Two facts are checked in the workspace before the `submit` is applied, both cheap:
+`uncommitted` is one of two issues that reads something other than `ASSIGNMENT.md` — `modified-worktree` is the other, and it is the same check with the requirements inverted: the planner and the plan reviewer must leave the worktree exactly as they found it, so any dirty file or any commit is an issue for them, where a worker is required to have both. `uncommitted` is the one that catches the most expensive lie a worker can tell. Two facts are checked in the workspace before the `submit` is applied, both cheap:
 
 - `git status --porcelain` is empty. `ASSIGNMENT.md` sits outside the tree, so anything reported here is real work the agent left behind.
 - `refs/remotes/origin/<base>..HEAD` counts at least one commit, so the branch carries something of the agent's own.
@@ -567,15 +514,15 @@ Right to left across the state machine: capacity goes to whatever is closest to 
 ```text
 every tick, while the scheduler is running:
     queue ← every task that is dispatchable, ranked
-        1  resume            — READY_WORK or READY_AGENT_REVIEW with failures
-                               recorded and a session file still on disk
-        2  READY_AGENT_REVIEW
+        1  resume            — READY_WORK with a queued check failure
+                               and a session file still on disk
+        2  READY_WORK_REVIEW
         3  READY_WORK with a workspace          (started, sent back)
         4  READY_WORK with none                 (never started)
         5  READY_PLAN_REVIEW
         6  READY_PLAN with a workspace          (re-planning after a rejection)
         7  READY_PLAN with none                 (never planned)
-    ties: most blocking first, then fewest open todos, then lowest id
+    ties: most blocking first, then lowest id
 
     for each candidate, in order, while slots remain free:
         skip free slots whose roles do not include the one this task needs
@@ -601,8 +548,9 @@ when a task enters READY_CHECK:
     run every check, in order, in the task's workspace, sandboxed
     failures ← the ones that exited non-zero, each with its output tail
 
-    if failures is empty → pass       (→ READY_AGENT_REVIEW)
-    else                 → fail ⟨failures⟩   (→ READY_WORK)
+    if failures is empty → pass       (→ READY_WORK_REVIEW)
+    else                 → fail, and queue the failures to the
+                           worker's prompt queue   (→ READY_WORK)
 ```
 
 A check is spawned into the same sandbox the agent gets, except that only its own directory is writable — a check runs code the agent wrote, so it is no more trusted than the agent.
@@ -612,26 +560,32 @@ Every check runs every time. Nothing records that a check has passed, so there i
 ### Applying a review
 
 ```text
-when a reviewer settles in AGENT_REVIEWING:
-    read ASSIGNMENT.md as a review
+when a reviewer settles in WORK_REVIEWING:
+    call ← the last result tool called this turn
 
-    if it does not parse, or result is null:
+    if the call is not the state's submit or blocked:
         raise the issue in the session it is still holding,
-        stay in AGENT_REVIEWING (past its attempts → hold)
+        stay in WORK_REVIEWING (past its attempts → hold)
+
+    if the assignment changed at all:
+        raise "modified-assignment", stay in WORK_REVIEWING
 
     findings ← result.findings
     if the branch changed anything under tasks/:
         findings += "the diff writes to tasks/ …"
 
     if findings is empty → submit                (→ READY_MANAGER_REVIEW)
-    else                 → addFeedback with the findings   (→ READY_WORK)
+    else → addFeedback with the findings, which appends them to the body
+           under # Review findings, plus a fresh ## Implementation Notes
+           heading; the findings are also queued to the worker's
+           session                                    (→ READY_WORK)
 ```
 
-`delegations` are not touched here. They stay in the assignment for the manager to read at `MANAGER_REVIEWING`, where deciding what should become a task is the job.
+`delegations` are not touched here. They are part of the `submit` call and the manager decides at `MANAGER_REVIEWING` what should become a task.
 
 ### Integration
 
-`merged` is not a graph decision the manager can make alone — whether a branch landed is a fact about git — so the tool call does the work first and applies the transition only if it worked:
+The manager-review `submit` is not a graph decision the manager can make alone — whether a branch landed is a fact about git — so the tool call does the work first and applies the transition only if it worked:
 
 ```text
 attemptMerge(task):
@@ -643,13 +597,13 @@ attemptMerge(task):
     fast-forward the base onto the branch
         refused  → error back to the manager
     assert the branch is now an ancestor of the base
-    apply merged        → CLOSED, or READY_TASK_GRAPH_UPDATE if updates are queued
+    apply submit        → CLOSED, or READY_TASK_GRAPH_UPDATE if updates are queued
     remove the workspace, delete the branch
 
 attemptAbort(task):
-    refuse unless the task is in MANAGER_REVIEWING or READY_WORK
+    refuse unless the task is in MANAGER_REVIEWING or HELD_PLAN or HELD_WORK
     refuse if the branch is already an ancestor of the base
-    apply abort         → READY_TASK_GRAPH_UPDATE
+    apply abort         → CLOSED, or READY_TASK_GRAPH_UPDATE if updates are queued
     (the workspace and branch are torn down when the task closes)
 ```
 
@@ -657,11 +611,11 @@ Every failure in `attemptMerge` is an error on the tool call, and the task stays
 
 The rebase and the recheck happen **after** the manager accepts, not before. A green review does not mean a mergeable branch — the base moved — and rebasing before review means reviewing a diff that no longer exists.
 
-`abort` is the other outcome: the work is being thrown away because the task was the wrong shape, and what replaces it is a task graph update. Requiring at least one queued update is what makes an abort constructive rather than a silent delete; requiring the branch to be unmerged is what stops it from being used to disown work that already landed.
+`abort` is the other outcome: the work is being thrown away because the task was the wrong shape, and what replaces it is a task graph update when the manager edited one in. Requiring the branch to be unmerged is what stops it from being used to disown work that already landed; an abort with no queued updates closes the task outright.
 
-The same judgement is available one state earlier. A task in `READY_WORK` is one the manager already regrets and no agent has claimed yet — it may never have been started, or it may have come back from a failed check or a review finding — and waiting for it to be dispatched, worked, checked and reviewed before it can be thrown away spends a slot on an answer the manager already has. `task_abort` therefore takes a task in `READY_WORK` as well, on the same two conditions: something queued that says what the graph should become, and a branch that never landed. A task that was worked before it came back keeps its branch and worktree until it closes, exactly as an abort from `MANAGER_REVIEWING` does.
+The same judgement is available while a task waits. A task in `READY_WORK` or `READY_PLAN` is one the manager already regrets and no agent has claimed yet — it may never have been started, or it may have come back from a failed check or a review finding — and waiting for it to be dispatched, worked, checked and reviewed before it can be thrown away spends a slot on an answer the manager already has. `task_hold` parks it and `task_abort` then throws it away, with the same branch rule: a task that was worked before it came back keeps its branch and worktree until it closes, exactly as an abort from `MANAGER_REVIEWING` does.
 
-`READY_WORK` is the one abortable state the scheduler is also reading, so the dispatcher has to lose that race rather than win it. Every claim asserts the task is still in the state the plan saw it in, immediately before applying `claim` and after the last `await` that could have let an abort through — without it a task aborted mid-spawn would be claimed into `TASK_GRAPH_UPDATING` by an agent dispatched to work on it, since `claim` is legal from `READY_TASK_GRAPH_UPDATE` too. A claim that lost the race is a dispatch error: the slot is released and the process torn down, and the next tick plans against the graph as it now is.
+`READY_WORK` is one of the abortable task's holding states that the scheduler is also reading, so the dispatcher has to lose that race rather than win it. Every claim asserts the task is still in the state the plan saw it in, immediately before applying `claim` and after the last `await` that could have let a hold-and-abort through — without it a task aborted mid-spawn would be claimed into `TASK_GRAPH_UPDATING` by an agent dispatched to work on it, since `claim` is legal from `READY_TASK_GRAPH_UPDATE` too. A claim that lost the race is a dispatch error: the slot is released and the process torn down, and the next tick plans against the graph as it now is.
 
 ### The manager inbox
 
@@ -709,8 +663,8 @@ stateDiagram-v2
     LIVE --> LIVE : commits, checks, reviews, rotations, fetch back to task/<id>
     LIVE --> MISSING : /tmp cleared
     MISSING --> LIVE : recreate from branch (server startup)
-    LIVE --> INTEGRATING : merged
-    INTEGRATING --> LIVE : rebase conflict or recheck failed (addTodo)
+    LIVE --> INTEGRATING : submit (task_submit)
+    INTEGRATING --> LIVE : rebase conflict or recheck failed (addFeedback)
     INTEGRATING --> GONE : ff-only merge, rm -rf the clone, branch -D
     LIVE --> GONE : abort, then CLOSED
     GONE --> [*]
@@ -755,9 +709,9 @@ stateDiagram-v2
     IDLE --> GRAPH_UPDATE : inbox head is READY_TASK_GRAPH_UPDATE
     IDLE --> UNBLOCKING : inbox head is HELD_PLAN or HELD_WORK
     IDLE --> AUTHORING : inbox head is NEW, or the inbox is empty
-    MANAGER_REVIEWING --> IDLE : merged, abort, addTodo, or addTaskGraph
-    GRAPH_UPDATE --> IDLE : doneTaskGraph (last)
-    UNBLOCKING --> IDLE : resume, addTodo, addDependencies, or addTaskGraph
+    MANAGER_REVIEWING --> IDLE : submit, abort, or addFeedback
+    GRAPH_UPDATE --> IDLE : submit (all updates done)
+    UNBLOCKING --> IDLE : resume or abort
     AUTHORING --> IDLE : task reaches READY_WORK
     IDLE --> [*] : session ends, server dies, agents detach
 ```
@@ -784,6 +738,16 @@ stateDiagram-v2
 `PAUSED` still applies transitions. Disabling the scheduler means "start nothing new", not "stop watching" — an agent mid-run when the manager pauses still gets its submit applied and its slot released.
 
 `DETACHING` is why the runtime directory exists at all. The MCP server dies with the manager; the agents are detached and do not. The next manager reads `agents.json`, finds pids that are still alive, and reattaches to their rpc streams instead of orphaning live work.
+
+### The four system prompts differ because the four jobs do
+
+They are not one file with a conditional. A planner is told that the deliverable is the `## Todos` section it appends to `ASSIGNMENT.md` — numbered `1.` to `n.`, consecutively — that a submit that appends nothing is refused, and that it writes nothing else and commits nothing — the assignment is verified unchanged above its section and the worktree untouched at every settle. A plan reviewer is told it reviews a plan, not code: the list must be present and correctly numbered, each todo must be executable without the planner present, and the todos together must cover every acceptance criterion; an empty `findings` list approves. An worker is told to append `## Implementation Notes` addressing every todo by number, to commit as it goes, to stop at the scope boundary, and that `submit` means every todo is addressed, every check passes and the work is committed. A work reviewer is told that it did not write the code and was not told why any of it is the way it is, that a finding it cannot phrase as a concrete defect is not a finding, and that anything it would have fixed but must not belongs in `delegations`. Each prompt shows exactly the final-message JSON object that state is allowed to send, which is the same thing the parser enforces.
+
+The overlap — read `ASSIGNMENT.md` first, append only your own section, ignore `tasks/`, stopping without calling a submit or blocked tool is the only unrecoverable failure — is short enough to state four times and worth stating in each state's own terms.
+
+### The schema jig
+
+`bun orchestrator/tools-jig.ts --provider <provider> --model <model> [--trials N] [--states ...]` measures how reliably a model ends with the right result tool. For each state and each scenario — submit, blocked, and the reviewer variants — it spawns a `pi` session loaded with the state's real role extension (`result-tools-<role>.ts`) and the real `prompts/<STATE>.md`, sends a trivial assignment, and checks which result tool the last call was. The report is a per-scenario pass rate with the failure modes (wrong tool, no call) and the calls that failed, and the exit code is non-zero when any scenario passes nothing. It is the tool for iterating on the wording of the result contract in the prompts: run it against a provider, read where it fails, tighten the prompt, run it again.
 
 ## Sessions
 
@@ -816,46 +780,42 @@ The process is started **before** the claim. It has a pid the moment it exists, 
 
 ### Roles never share a session
 
-Session directories are per role: `session/worker`, `session/reviewer`, `session/planner`. A reviewer is given a new session that has never seen the implementer's, and a planner one that has never seen either. A plan review runs in `session/reviewer` like a work review does — the role owns the session directory, the phase names the files inside it — but a re-plan is always a fresh `planner` session, because the previous planner's reasoning is exactly what the review rejected.
+Session directories are per role: `session/worker`, `session/reviewer`, `session/planner`. A reviewer is given a new session that has never seen the worker's, and a planner one that has never seen either. A plan review runs in `session/reviewer` like a work review does — the role owns the session directory, the phase names the files inside it — but a re-plan is always a fresh `planner` session, because the previous planner's reasoning is exactly what the review rejected.
 
-This is not tidiness. An implementer's session contains every rationalisation it built while convincing itself the work was done — the shortcut it decided was acceptable, the test it decided was flaky, the edge case it decided was out of scope. A reviewer that inherits that context inherits the conclusions with it, and agrees. The entire value of the review is that it is an independent read of the commits against the acceptance criteria by something that was not there.
+This is not tidiness. An worker's session contains every rationalisation it built while convincing itself the work was done — the shortcut it decided was acceptable, the test it decided was flaky, the edge case it decided was out of scope. A reviewer that inherits that context inherits the conclusions with it, and agrees. The entire value of the review is that it is an independent read of the commits against the acceptance criteria by something that was not there.
 
-So the reviewer gets: the worktree, the commit range, the goal, the acceptance criteria and the checks that passed. It does not get the implementer's notes, and it does not get the reasoning behind them.
+So the reviewer gets: the worktree, the commit range, the goal, the acceptance criteria and the checks that passed. It does not get the worker's notes, and it does not get the reasoning behind them.
 
 The same applies in reverse. A rejected task starts a fresh session rather than switching back: by the time review comes back, the context worth keeping has been distilled into todos, and the context not worth keeping is the part that produced the rejection.
 
 **Resume only within the same submit cycle.** A failed check is seconds after the work — the agent still holds every reason it made its choices, and re-reading the assignment from scratch would waste all of it. A review rejection is minutes or hours later, after todos have been restructured; that gets a fresh session and a regenerated file.
 
-| Trigger                       | Session          | `ASSIGNMENT.md`                                   |
-| ----------------------------- | ---------------- | ------------------------------------------------- |
-| first dispatch                | `new_session`    | generated                                         |
-| plan review rejected          | `new_session`    | regenerated, with the findings in `plan_feedback` |
-| check failed                  | `switch_session` | `result` cleared                                  |
-| result unreadable             | `prompt` in situ | untouched                                         |
-| settled without a result      | `prompt` in situ | untouched                                         |
-| submitted with todos open     | `prompt` in situ | untouched                                         |
-| came back blocked             | `prompt` in situ | untouched                                         |
-| divergence from what was sent | none             | repaired by the server                            |
-| agent review rejected         | `new_session`    | regenerated                                       |
-| manager review rejected       | `new_session`    | regenerated                                       |
-| resumed out of a held state   | `new_session`    | regenerated                                       |
-| provider error                | `prompt` in situ | untouched                                         |
+| Trigger                                       | Session          | `ASSIGNMENT.md`                                                                                                |
+| --------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| first dispatch                                | `new_session`    | generated from the task body                                                                                   |
+| plan review rejected                          | `new_session`    | regenerated; the findings arrive in the prompt queue                                                           |
+| check failed                                  | `switch_session` | carried forward, with the worker's notes                                                                       |
+| result unreadable                             | `prompt` in situ | untouched                                                                                                      |
+| settled without a result                      | `prompt` in situ | untouched                                                                                                      |
+| appended nothing                              | `prompt` in situ | untouched                                                                                                      |
+| came back blocked                             | `prompt` in situ | untouched                                                                                                      |
+| assignment changed above the appended section | `prompt` in situ | untouched; the agent restores it                                                                               |
+| work review rejected                          | `switch_session` | regenerated from the body, which now carries `# Review findings` and a fresh `## Implementation Notes` heading |
+| manager review rejected                       | `switch_session` | regenerated the same way                                                                                       |
+| resumed out of a held state                   | `new_session`    | regenerated                                                                                                    |
+| provider error                                | `prompt` in situ | untouched                                                                                                      |
 
 The `in situ` rows are the ones where the process is still alive and still holds the session — nothing needs switching. Only a resume arriving after the slot was released has to reopen the file.
 
-A check-failed resume clears `result` and nothing else. The fragment tells the agent its result was reset, and it has to be true: the file is not regenerated, so a standing `submit` would let the agent settle without touching anything and the server could not tell the difference. Clearing one field between the old process dying and the new one starting is safe — there is no writer at that moment.
+A check-failed resume cannot carry a stale submit: the result is the tool call in the stream, and a fresh process starts with an empty call record, so the agent must call `submit` again — the fragment tells it exactly that. Nothing is cleared because nothing persists.
 
-An unreadable result is **not** cleared. The agent needs to see the block it wrote in order to fix it, and the fragment quotes the schema issues that came back.
+An unreadable result is **not** reset either. The agent needs to see the call it made in order to fix it, and the fragment quotes the contract issues that came back.
 
 The divergence row is the only one where the file changes without the agent being told. It is safe for the same reason the check-failed clear is: the server is writing between two of the agent's turns, and the fields it touches are ones the agent was never allowed to write.
 
-### Resuming on a different agent
+### Resuming a failed check
 
-A session file is JSONL on disk, not a provider handle, so any agent can open one. Continuing a `claude-sonnet-4-5` session on a local model works: the transcript is replayed as context and the new model reads what the old one wrote.
-
-It is worse, though, and predictably so — the reasoning in that transcript was produced by a different model, and the resuming model treats it as given rather than as its own. So the rule is a preference, not a constraint: a free slot of the same `type-provider-model` takes the resume; if none is free and the resume is the highest-ranked item in the queue, any free slot takes it.
-
-`workspace.agent` records the full agent name; the match is on everything before the final `-<slot>`, because two slots of the same model are interchangeable. The fallback is what stops a single saturated provider from stalling every fix in flight; the preference is what keeps that from being the normal case.
+A failed check returns the task to `READY_WORK`, and the scheduler's top rank is the resume: the same session is reopened, the same branch and worktree, and the queued failures are already in the session as the first prompt. The assignment is not regenerated — the worker's file, with its appended notes, is carried forward, and `worker.dispatched` is re-based on it so the append-only check still holds for the round that follows.
 
 ### The slot handoff
 
@@ -985,7 +945,7 @@ pi --mode rpc \
 
 - No `-p` and no positional message. `--mode rpc` is a run mode, not an output mode: the process reads commands from stdin until stdin closes, and the work is requested with a `prompt` command.
 - There is no `--cwd`. The working directory is set at spawn, as `--chdir <workspace>` on the sandbox around it.
-- The system prompt is the **claimed state's**: `prompts/PLANNING.md`, `prompts/PLAN_REVIEWING.md`, `prompts/WORKING.md` or `prompts/AGENT_REVIEWING.md`. The path is absolute and points into the orchestrator's own checkout, because the child's cwd is the worktree and the prompts do not live in the driven repo.
+- The system prompt is the **claimed state's**: `prompts/PLANNING.md`, `prompts/PLAN_REVIEWING.md`, `prompts/WORKING.md` or `prompts/WORK_REVIEWING.md`. The path is absolute and points into the orchestrator's own checkout, because the child's cwd is the worktree and the prompts do not live in the driven repo.
 - The prompt stays one line on purpose. The work lives in `ASSIGNMENT.md`, where it can be re-read after compaction; a brief pasted into the conversation cannot be re-read once it scrolls out.
 - `pi` has no MCP client — the project rejects MCP by design and expects agents to drive CLI tools over bash. That and the manager-owns-the-graph rule point the same way: the agent's interface to the outside world is a file, not a tool.
 - Spawn detached, tee stdout to `/tmp/task-graph-server/<repo>/000042/agent-rpc.jsonl`, appending. Every process that ever ran against this task writes to that one file, in order, so the record of an assignment that took four attempts across three roles reads as one stream.
@@ -1043,16 +1003,17 @@ Commands are JSONL on stdin, one object per line, `\n` only. Every command may c
 
 ### Reading the stream
 
-Verified against pi 0.81.1:
+Verified against pi 0.83.0:
 
-| Signal             | Value                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| completion         | `agent_settled` — the only event meaning "pi will not continue"                                |
-| **not** completion | `agent_end` — fires once per attempt; a failing run emitted four, three with `willRetry: true` |
-| outcome            | `stopReason` on the final assistant message: `stop`, `length`, `toolUse`, `error`, `aborted`   |
-| error text         | `errorMessage` on that same message                                                            |
-| progress           | `tool_execution_start` / `tool_execution_end` (`isError`)                                      |
-| trouble            | `auto_retry_start` (`attempt`, `maxAttempts`), `compaction_start` (`reason: "overflow"`)       |
+| Signal             | Value                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| completion         | `agent_settled` — the only event meaning "pi will not continue"                                 |
+| **not** completion | `agent_end` — fires once per attempt; a failing run emitted four, three with `willRetry: true`  |
+| outcome            | `stopReason` on the final assistant message: `stop`, `length`, `toolUse`, `error`, `aborted`    |
+| error text         | `errorMessage` on that same message                                                             |
+| progress           | `tool_execution_start` / `tool_execution_end` (`isError`)                                       |
+| result             | `tool_execution_start` on the `submit*` / `blocked` tools — name and args, the last one settles |
+| trouble            | `auto_retry_start` (`attempt`, `maxAttempts`), `compaction_start` (`reason: "overflow"`)        |
 
 Treating `agent_end` as "the agent finished" is the mistake this design is most likely to make; `willRetry` is the field that distinguishes them, and `agent_settled` is the one to wait on. The exit code is no help at all — in rpc mode the process outlives the turn.
 
@@ -1062,30 +1023,27 @@ One stdio server, calling `task.ts` and `transition.ts` in process. There is no 
 
 **Authoring**
 
-| Tool                                     | Effect                                 |
-| ---------------------------------------- | -------------------------------------- |
-| `task_create(title)`                     | a new document in `NEW`, path returned |
-| `task_write_body(id, body)`              | replaces the body under the lock       |
-| `task_add_check(id, command)`            | one more command the work is judged by |
-| `task_add_dependencies(id, task_ids)`    | `NEW` → `BLOCKED`                      |
-| `task_remove_dependencies(id, task_ids)` | the last one removed → `READY_WORK`    |
-| `task_done_create(id)`                   | `NEW` → `READY_WORK`                   |
+| Tool                        | Effect                                 |
+| --------------------------- | -------------------------------------- |
+| `task_create(title)`        | a new document in `NEW`, path returned |
+| `task_write_body(id, body)` | replaces the body under the lock       |
+
+Checks, dependencies and task graph updates are not tools: they are frontmatter fields in the document, and authoring is editing the file directly.
 
 **Judgement**
 
-| Tool                                                    | Effect                                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `task_claim(id)`                                        | `READY_*` → the matching manager state                                          |
-| `task_add_todo(id, message)`                            | → `READY_WORK` from a review or `HELD_WORK`; → `READY_PLAN` from `HELD_PLAN`    |
-| `task_resume(id)`                                       | `HELD_PLAN` → `READY_PLAN`, `HELD_WORK` → `READY_WORK`                          |
-| `task_add_task_graph_update(id, op, task_id?, message)` | queues a change the graph needs                                                 |
-| `task_done_task_graph_updates(id)`                      | every queued update done → `CLOSED`                                             |
-| `task_merge(id)`                                        | rebase, recheck, fast-forward, then `merged`                                    |
-| `task_abort(id)`                                        | `abort` from `MANAGER_REVIEWING` or `READY_WORK`, refusing a branch that landed |
+| Tool                              | Effect                                                                                                                                                                                                                                                                             |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_submit(id)`                 | `NEW` → `READY_PLAN` or `BLOCKED`; `BLOCKED` → `READY_PLAN` once the dependencies are gone; from `MANAGER_REVIEWING` the branch is landed first (rebase, recheck, fast-forward) and the task closes; `TASK_GRAPH_UPDATING` → `CLOSED`, refused while any queued update is not done |
+| `task_claim(id)`                  | `READY_*` → the matching manager state                                                                                                                                                                                                                                             |
+| `task_add_feedback(id, findings)` | `MANAGER_REVIEWING` → `READY_WORK`, findings appended under `# Review findings`                                                                                                                                                                                                    |
+| `task_hold(id, reason)`           | planning states → `HELD_PLAN`, work states → `HELD_WORK`                                                                                                                                                                                                                           |
+| `task_resume(id)`                 | `HELD_PLAN` → `READY_PLAN`, `HELD_WORK` → `READY_WORK`, or `BLOCKED` if dependencies were added while held                                                                                                                                                                         |
+| `task_abort(id)`                  | `abort` from `MANAGER_REVIEWING`, `HELD_PLAN` or `HELD_WORK`, refusing a branch that landed                                                                                                                                                                                        |
 
-`task_merge` and `task_abort` are the two that do work before they touch the graph, and the two whose failures come straight back to the caller rather than into the task.
+`task_submit` from `MANAGER_REVIEWING` and `task_abort` are the two that do work before they touch the graph, and the two whose failures come straight back to the caller rather than into the task.
 
-`task_done_task_graph_updates` takes no index and is called once. The manager does not report progress through a queue of its own edits — it says the graph now matches what it promised, and the task closes. An index-at-a-time tool would be a way to close a task with half the graph updated.
+`task_submit` from `TASK_GRAPH_UPDATING` takes no index and is called once. The manager does not report progress through a queue of its own edits — it marks each update done in the document as it applies it, then says the graph now matches what it promised, and the task closes. An index-at-a-time tool would be a way to close a task with half the graph updated.
 
 **Dispatch**
 
@@ -1114,318 +1072,62 @@ Prompts and templates are cached when the server starts, so an edit to the proje
 
 ### The manager owns what it holds
 
-`task_create` returns a path, and the document at that path is the manager's to edit with ordinary file writes until it transitions out of `NEW`. The same applies on the other end: when the manager claims a task into `MANAGER_REVIEWING`, the document becomes its to edit directly — folding the assignment history into the Implementation History section is exactly the kind of prose work that should not go through a tool.
+`task_create` returns a path, and the document at that path is the manager's to edit with ordinary file writes until it transitions out of `NEW` — the checks, the `depends_on` list and the body are all just fields in that file, so authoring never goes through a tool. The same applies wherever the manager owns the state: a task in `HELD_PLAN` or `HELD_WORK` is edited in place before `resume` or `abort`; a task claimed into `MANAGER_REVIEWING` is edited in place before `submit` — folding the assignment history into the Implementation History section is exactly the kind of prose work that should not go through a tool; and a task claimed into `TASK_GRAPH_UPDATING` is edited in place as each queued graph update is applied, marking it done in the frontmatter before the closing `submit`.
 
-This is safe because ownership follows the claim. The server applies no transitions to a task the manager holds, so there is no second writer to race with. `task_write_body` exists for the case where the manager wants to rewrite a body it does not hold; direct editing is for the case where it does.
+This is safe because ownership follows the state. The server applies no transitions to a task the manager holds, so there is no second writer to race with. `task_write_body` exists for the case where the manager wants to rewrite a body it does not hold; direct editing is for the case where it does.
 
 ## Prompts and templates
 
 Every word an agent reads is a file. Nothing in `orchestrator/*.ts` builds a sentence, so a prompt can be rewritten without a diff to the server, and reading the thirty-three files is reading everything the agents are told.
 
-| File                                           | Kind            | Given to                                                                                   |
-| ---------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
-| `prompts/PLANNING.md`                          | system prompt   | every `PLANNING` agent                                                                     |
-| `prompts/PLAN_REVIEWING.md`                    | system prompt   | every `PLAN_REVIEWING` agent                                                               |
-| `prompts/WORKING.md`                           | system prompt   | every `WORKING` agent                                                                      |
-| `prompts/AGENT_REVIEWING.md`                   | system prompt   | every `AGENT_REVIEWING` agent                                                              |
-| `prompts/dispatch.md`                          | prompt fragment | every agent, as the first thing it is asked                                                |
-| `prompts/check-failed.md`                      | prompt fragment | a resumed implementer, rendered from `failures`                                            |
-| `prompts/missing-result-PLANNING.md`           | prompt fragment | a planner that settled without a result                                                    |
-| `prompts/missing-result-PLAN_REVIEWING.md`     | prompt fragment | a plan reviewer that settled without a result                                              |
-| `prompts/missing-result-WORKING.md`            | prompt fragment | an implementer that settled without a result                                               |
-| `prompts/missing-result-AGENT_REVIEWING.md`    | prompt fragment | a reviewer that settled without a result                                                   |
-| `prompts/unparsable-result-PLANNING.md`        | prompt fragment | a planner whose frontmatter did not parse                                                  |
-| `prompts/unparsable-result-PLAN_REVIEWING.md`  | prompt fragment | a plan reviewer whose frontmatter did not parse                                            |
-| `prompts/unparsable-result-WORKING.md`         | prompt fragment | an implementer whose frontmatter did not parse                                             |
-| `prompts/unparsable-result-AGENT_REVIEWING.md` | prompt fragment | a reviewer whose frontmatter did not parse                                                 |
-| `prompts/missing-plan.md`                      | prompt fragment | a planner whose plan would leave the task with no todos                                    |
-| `prompts/invalid-remove-todo.md`               | prompt fragment | a planner whose `removeTodos` name indices that do not exist                               |
-| `prompts/modified-worktree-PLANNING.md`        | prompt fragment | a planner that wrote or committed                                                          |
-| `prompts/modified-worktree-PLAN_REVIEWING.md`  | prompt fragment | a plan reviewer that wrote or committed                                                    |
-| `prompts/incomplete-todos.md`                  | prompt fragment | an implementer that submitted with todos open                                              |
-| `prompts/uncommitted.md`                       | prompt fragment | an implementer that submitted uncommitted work                                             |
-| `prompts/looping-PLANNING.md`                  | prompt fragment | a planner, caught repeating one command                                                    |
-| `prompts/looping-PLAN_REVIEWING.md`            | prompt fragment | a plan reviewer, caught repeating one command                                              |
-| `prompts/looping-WORKING.md`                   | prompt fragment | an implementer, caught repeating one command                                               |
-| `prompts/looping-AGENT_REVIEWING.md`           | prompt fragment | a reviewer, caught repeating one command                                                   |
-| `prompts/blocked-PLANNING.md`                  | prompt fragment | a planner that came back blocked                                                           |
-| `prompts/blocked-PLAN_REVIEWING.md`            | prompt fragment | a plan reviewer that came back blocked                                                     |
-| `prompts/blocked-WORKING.md`                   | prompt fragment | an implementer that came back blocked                                                      |
-| `prompts/blocked-AGENT_REVIEWING.md`           | prompt fragment | a reviewer that came back blocked                                                          |
-| `prompts/wrote-to-tasks.md`                    | finding         | appended by the server when a diff touches `tasks/`                                        |
-| `templates/PLANNING.md`                        | state template  | generated at every planning dispatch, with `plan_feedback` when the last plan was rejected |
-| `templates/PLAN_REVIEWING.md`                  | state template  | generated at every plan review dispatch, with the plan's todos                             |
-| `templates/WORKING.md`                         | state template  | generated at every work dispatch                                                           |
-| `templates/AGENT_REVIEWING.md`                 | state template  | generated at every review dispatch                                                         |
+| File                                          | Kind            | Given to                                                                  |
+| --------------------------------------------- | --------------- | ------------------------------------------------------------------------- |
+| `prompts/PLANNING.md`                         | system prompt   | every `PLANNING` agent                                                    |
+| `prompts/PLAN_REVIEWING.md`                   | system prompt   | every `PLAN_REVIEWING` agent                                              |
+| `prompts/WORKING.md`                          | system prompt   | every `WORKING` agent                                                     |
+| `prompts/WORK_REVIEWING.md`                   | system prompt   | every `WORK_REVIEWING` agent                                              |
+| `prompts/dispatch.md`                         | prompt fragment | every agent, as the first thing it is asked                               |
+| `prompts/check-failed.md`                     | queue entry     | a failed check, rendered into the worker's prompt queue                   |
+| `prompts/missing-result-<state>.md`           | prompt fragment | an agent that settled without calling a result tool                       |
+| `prompts/unparsable-result-<state>.md`        | prompt fragment | an agent whose result tool call did not fit the state's contract          |
+| `prompts/missing-todos.md`                    | prompt fragment | a planner that submitted without appending a `## Todos` section           |
+| `prompts/missing-notes.md`                    | prompt fragment | a worker that submitted without appending `## Implementation Notes`       |
+| `prompts/modified-assignment-<state>.md`      | prompt fragment | an agent that changed the assignment above its allowed section            |
+| `prompts/modified-worktree-PLANNING.md`       | prompt fragment | a planner that wrote or committed                                         |
+| `prompts/modified-worktree-PLAN_REVIEWING.md` | prompt fragment | a plan reviewer that wrote or committed                                   |
+| `prompts/uncommitted.md`                      | prompt fragment | a worker that submitted uncommitted work                                  |
+| `prompts/looping-<state>.md`                  | prompt fragment | an agent, caught repeating one command                                    |
+| `prompts/blocked-<state>.md`                  | prompt fragment | an agent that came back blocked                                           |
+| `prompts/plan-findings.md`                    | queue entry     | plan review findings, rendered into the planner's prompt queue            |
+| `prompts/work-findings.md`                    | queue entry     | work review and manager findings, rendered into the worker's prompt queue |
+| `prompts/wrote-to-tasks.md`                   | finding         | appended by the server when a diff touches `tasks/`                       |
 
-There are no templates for `CHECKING`, `MANAGER_REVIEWING` or `TASK_GRAPH_UPDATING`: the first is the server, and the last two are the manager, which has the graph and does not need a file handed to it.
+Three files are code, not prose: `result-tools-planner.ts`, `result-tools-worker.ts` and `result-tools-reviewer.ts` are the pi extensions sessions are started with (`--extension`, chosen by role), each registering `submit` and `blocked` with `terminate: true` and their parameter schemas declared in zod. They are loaded into the agent's process, so they are the one thing the agents read that is not a file in `prompts/`.
+
+There are no templates any more: `ASSIGNMENT.md` is the task body, verbatim, and every role instruction lives in the prompts.
 
 ### A project can replace any of them
 
-The driven repo's own `orchestrator/prompts/` and `orchestrator/templates/` are searched before the orchestrator's, by the same file name. `<repo>/orchestrator/prompts/WORKING.md` becomes the implementer's system prompt for that project and nothing else changes; a name with no file there resolves in the checkout as before. Neither directory has to exist, and a file present in both is not merged — the repo's copy is the whole file.
+A project that wants its agents told something else adds files to `<task-dir>/prompts/`. Any file there is used in place of the one the orchestrator ships, matched by name; a name with no file there resolves in the checkout as before. The directory does not have to exist, and a file present in both is not merged — the project's copy is the whole file. `reload_prompts` re-reads them without a restart.
 
-The unit of override is the file rather than the directory because the thirty-three files are not equally project-specific. A house style, a build command an implementer should know about or a review that has to name a project's own invariants belongs to the project; `incomplete-todos.md` telling an agent which three edits end a hold does not, and a project that had to copy all thirty-three to change one would carry thirty-two stale files the moment the orchestrator's own moved on.
+The unit of override is the file rather than the directory because the files are not equally project-specific. A house style, a build command a worker should know about or a review that has to name a project's own invariants belongs to the project; `missing-notes.md` telling an agent which section to append does not, and a project that had to copy them all to change one would carry stale files the moment the orchestrator's own moved on.
 
-An override is rendered by the same `render()` with the same variables as the file it replaces, so a template still has to emit an assignment the parser accepts — a `templates/WORKING.md` without `result: null` in its frontmatter fails at the first dispatch, not at load. A `{{…}}` naming something the server does not pass throws there too. This is deliberate: every prompt and template is resolved once, when the server starts — the log lists the absolute path of each file it loaded, with the repo's copy winning over the checkout's — so an edit to an override takes effect on the next start, and a broken edit is reported against the task it broke at the first dispatch that renders it.
+A fragment is rendered by `render()` with the same variables as the file it replaces; a `{{…}}` naming something the server does not pass throws at load. This is deliberate: every prompt is resolved when the server starts — the log lists the absolute path of each file it loaded, with the project's copy winning over the checkout's — and `reload_prompts` re-resolves them.
 
-`agents.json` goes the other way — it is read from the launch directory, because the pool is a property of the machine and the overrides are a property of the project. They are committed with it.
+`agents.json` is read from the task directory, because the pool is a property of the machine the server runs on and the overrides are a property of the project.
 
-### A fragment names the edit, not the mistake
+### A fragment names the fix, not the mistake
 
-Every issue fragment is an instruction to make a specific edit to a specific file, and the exact block to write is in the fragment. None of them is a description of what the agent got wrong.
+Every issue fragment is an instruction to do the specific thing that ends the situation, with the exact tool to call in the fragment. None of them is a description of what the agent got wrong.
 
-That is a correction to how these read at first. `missing-result.md` used to say "You stopped without setting `result` … Set it now: `type: submit` if every todo is done", and a capable model answered it four times by writing `type: blocked` **as prose in its reply**, reasoning each time that it had already given the result and the system must not be picking it up. It was held with the work finished and a perfectly good blocker message that never reached the graph. Nothing about that prompt was untrue; it just never said "edit the file", and a model that has spent forty turns talking to a person will answer a sentence in the register it was asked in.
+That is a correction to how these read at first. `missing-result.md` used to say "You stopped without setting `result` … Set it now: `type: submit` if every todo is done", and a capable model answered it four times by writing `type: blocked` **as prose in its reply**, reasoning each time that it had already given the result and the system must not be picking it up. It was held with the work finished and a perfectly good blocker message that never reached the graph. Nothing about that prompt was untrue; it just never said "your final message", and a model that has spent forty turns talking to a person will answer a sentence in the register it was asked in.
 
-So each fragment now leads with the imperative — `Edit ../ASSIGNMENT.md and replace the result: null line …`, `Commit your work in this worktree, then submit again:` — carries the literal YAML or shell block to write, and says outright that the file is the only thing read and a reply is discarded. `incomplete-todos.md` lists the three edits that end the situation instead of counting the todos that are open.
+So each fragment now leads with the imperative — `Your last action was not a valid result for this step: … The result must be a call to one of these tools`, `Commit your work in this worktree, then submit again:` — names the tools, and says outright that the final action is a tool call, not prose. `missing-todos.md` tells the planner the exact section to append; `missing-notes.md` tells the worker the same. Making the result a tool call removes the register problem entirely: a model that would answer prose with prose has no way to send a result except the tool, and the tool's schema does the validation the parser used to do.
 
-The same reasoning splits `missing-result` and `unparsable-result` per state, the way `blocked` already was. A prompt that shows the exact block to write cannot show one block to all four states: an implementer writes a bare `type: submit`, a planner writes one with `addTodos` and `removeTodos`, a plan reviewer one with `findings`, and a work reviewer one with `findings` and `delegations` — an agent shown another state's block would be told to write something the parser refuses. One file per state, each with its own shape in it, and no fragment with a hole for the other one to fill.
+The same reasoning splits `missing-result` and `unparsable-result` per state, the way `blocked` already was. Every state calls the same two tools, but not the same shape: a worker calls bare `submit`, a plan reviewer `submit` with `findings` (and no `delegations`), and a work reviewer `submit` with `findings` and `delegations` — an agent shown another state's shape would be told to send something the state refuses. One file per state, each with its own shape in it, and no fragment with a hole for the other one to fill.
 
 ### The system prompt is what gives the path
 
 Both system prompts name `../ASSIGNMENT.md`, and that is the only place the location appears. The agent's working directory is the worktree and the assignment sits beside it, so one relative path is correct for every task, every role and every attempt.
 
 That is what lets `dispatch.md` be a static file — "Do the work `../ASSIGNMENT.md` describes." — rather than a string the server interpolates an absolute path into. A path in the system prompt is re-read on every turn and survives compaction; a path pasted into the first message scrolls away with it.
-
-### The four system prompts differ because the four jobs do
-
-They are not one file with a conditional. A planner is told that the `addTodos` in the `result` are the deliverable, that `removeTodos` name decided todos to drop by index, that a plan leaving the task with no todos is refused, and that it writes nothing and commits nothing — the worktree is verified untouched at every settle. A plan reviewer is told it reviews a plan, not code: each todo must be executable without the planner present and the todos together must cover every acceptance criterion, and an empty `findings` list approves. An implementer is told to commit as it goes, to stop at the scope boundary, and that `submit` means every check passes. A work reviewer is told that it did not write the code and was not told why any of it is the way it is, that a finding it cannot phrase as a concrete defect is not a finding, and that anything it would have fixed but must not belongs in `delegations`. Each prompt shows exactly the `result` shape that state is allowed to write, which is the same thing the parser enforces.
-
-The overlap — read `ASSIGNMENT.md` first, keep `## Notes` current, ignore `tasks/`, stopping without a result is the only unrecoverable failure — is short enough to state four times and worth stating in each state's own terms.
-
-### `templates/WORKING.md`
-
-```markdown
----
-assignment: "{{id}}"
-todos:
-  {{#todos}}
-  - message: "{{message}}"
-    done: false
-  {{/todos}}
-checks:
-  {{#checks}}
-  - "{{command}}"
-  {{/checks}}
-result: null
----
-
-# {{title}}
-
-{{body}}
-
-## Notes
-```
-
-`{{body}}` is the task document body, copied verbatim: Goal, Scope, Acceptance Criteria, Verification Criteria, Notes. Neither it nor `{{title}}` is rewritten for the agent, which means a badly written task reads badly to the agent too — the right place for that pressure.
-
-An empty list is emitted as `todos: []`, not as a bare `todos:` with nothing under it — the second parses as null and every reader downstream has to guess.
-
-### `templates/AGENT_REVIEWING.md`
-
-```markdown
----
-assignment: "{{id}}"
-todos: []
-checks:
-  {{#checks}}
-  - "{{command}}"
-  {{/checks}}
-result: null
----
-
-# {{title}}
-
-{{body}}
-
-## What you are reviewing (given)
-
-The work is the commit range `{{range}}` in the worktree you are running in,
-`{{worktree}}`. Read it however you like — `git log`, `git show`, the files
-themselves — and read the tree around it, not only the lines that changed.
-
-Every check above was run against this range and passed.
-
-You do not fix anything and you do not commit.
-
-## Notes
-```
-
-`{{range}}` is `<merge-base>..<head>`, both resolved to commit ids at dispatch. Two properties come out of that: the reviewer is pinned to exactly the commits the checks ran against even if something moves underneath it, and it can read the whole tree rather than a diff someone chose for it. Handing over a pre-computed diff would answer "what changed" while hiding "what it changed against", and the second question is most of a review.
-
-### `templates/PLANNING.md`
-
-```markdown
----
-assignment: "{{id}}"
-todos:
-  {{#todos}}
-  - message: "{{message}}"
-    done: false
-  {{/todos}}
-checks:
-  {{#checks}}
-  - "{{command}}"
-  {{/checks}}
-result: null
----
-
-# {{title}}
-
-{{body}}
-
-## Plan
-
-Write the executable plan as `result: type: submit` with an `addTodos` list.
-The todos in the frontmatter above are already decided — keep every one, or
-name one in `removeTodos` by the index it appears at here (removals apply
-before additions). Each todo you add must be specific, ordered and verifiable:
-a piece of work an implementer can execute without you present. No
-pseudo-todos.
-
-{{#plan_feedback_head}}
-The previous plan was rejected with these findings — address every one:
-{{/plan_feedback_head}}
-
-{{#plan_feedback}}
-{{finding}}
-{{/plan_feedback}}
-
-## Notes
-```
-
-The `todos` in the frontmatter are the graph's, the ones that survived an earlier plan or a manager's direct edit; the planner's own todos live in the `result` as `addTodos` — with `removeTodos` naming the frontmatter indices it is replacing — and both are applied to the graph only when the plan is accepted. `{{plan_feedback}}` is the last review's findings, verbatim, one plain line each, and the first planning dispatch of a task renders no feedback at all — the section is driven by a separate `{{plan_feedback_head}}` list so the lead-in sentence is not repeated once per finding. The two-section split is the renderer's only way to say "render a lead-in only when there are items", both lists are always passed, and the lines are kept bullet-free because the markdown formatter would otherwise rewrap the section markers.
-
-### `templates/PLAN_REVIEWING.md`
-
-```markdown
----
-assignment: "{{id}}"
-todos:
-  {{#todos}}
-  - message: "{{message}}"
-    done: false
-  {{/todos}}
-checks:
-  {{#checks}}
-  - "{{command}}"
-  {{/checks}}
-result: null
----
-
-# {{title}}
-
-{{body}}
-
-## What you are reviewing (the plan)
-
-The `todos` above are the plan an implementer will work through. Evaluate each
-against the acceptance criteria in the body: is it specific enough to execute
-without the planner present, and do the todos together cover every criterion?
-You change nothing in this worktree and you do not commit.
-
-## Notes
-```
-
-There is no commit range here — the plan review reads the todos in the frontmatter against the acceptance criteria in the body, both of which are in the file in front of it, and there are no checks to have passed because the plan runs no code.
-
-### Fragments
-
-Sent as `prompt` payloads into a live or reopened session. They regenerate nothing.
-
-`prompts/check-failed.md` is rendered from the task's `failures`, so an agent that broke three commands is told about three:
-
-````markdown
-The checks were run against the work you just submitted, and these failed:
-
-{{#failures}}
-`{{command}}` (exit {{exit_code}}):
-
-```
-{{output}}
-```
-
-{{/failures}}
-Fix them in this worktree and commit. Record what you did under `## Notes`.
-Your `result` was reset to null — set it back to `type: submit` once every
-check passes, or to `type: blocked` with a message if you cannot get there.
-````
-
-## Running it
-
-The orchestrator lives outside the repo it drives; only `tasks/` is copied into that repo. From the project root, with the template checked out beside it:
-
-```bash
-cp ../task-graph-template/agents.example.json agents.json   # the pool, read from the cwd
-bun ../task-graph-template/orchestrator/mcp.ts [repo]       # stdio; repo defaults to the cwd
-```
-
-Prompts and templates are read from beside the server's own source unless the driven repo overrides them under its own `orchestrator/`, which is what lets the checkout be shared. Register it with the manager as an MCP server — `claude mcp add task-graph -- bun ../task-graph-template/orchestrator/mcp.ts`, run from the project root, since Claude Code spawns the server there. It owns the graph from that moment: the manager creates tasks, writes bodies and applies judgement transitions through the tools, and reads `inbox`, `agents`, `checks` and `tasks` as resources or by watching the files under `workspace_path`.
-
-Files are laid out by feature, not by kind. There is no `views.ts` holding every view and no `types.ts` holding every interface: the agent pool's row and the pool's config are both in `agents.ts`, the inbox's row and its ranking are both in `inbox.ts`, and what the four views share — an `{at, seq, rows}` envelope written atomically — is three lines in `runtime.ts`.
-
-| File                             | What it is                                                            |
-| -------------------------------- | --------------------------------------------------------------------- |
-| `agents.json` in the cwd         | the pool; rejected on load, not at spawn time                         |
-| `agents.example.json`            | the pool config to copy into a launch directory                       |
-| `orchestrator/prompts/`          | every word an agent is given, system prompts and fragments alike      |
-| `<repo>/orchestrator/`           | the driven project's overrides for either directory, file by file     |
-| `orchestrator/templates/`        | `WORKING.md` and `AGENT_REVIEWING.md`, the two state templates        |
-| `orchestrator/mcp.ts`            | the stdio server, its tools and its tick loop                         |
-| `orchestrator/server.ts`         | the scheduler, the check runner and the settle logic                  |
-| `orchestrator/agents.ts`         | the pool config and `agents.json`                                     |
-| `orchestrator/task.ts`           | the task document: schema, YAML, the lock and `createTask()`          |
-| `orchestrator/transition.ts`     | the state machine every graph mutation goes through                   |
-| `orchestrator/graph.ts`          | reading `tasks/`, blocking counts and `tasks.json`                    |
-| `orchestrator/inbox.ts`          | the inbox ranking and `inbox.json`                                    |
-| `orchestrator/checks.ts`         | the check runner and `checks.json`                                    |
-| `orchestrator/scheduler.ts`      | the dispatch ranking                                                  |
-| `orchestrator/assignment.ts`     | parsing, repairing, serializing and rotating `ASSIGNMENT.md`          |
-| `orchestrator/prompts.ts`        | the issue registry, the override lookup and rendering the fragments   |
-| `orchestrator/template.ts`       | the `{{…}}` renderer the templates and fragments share                |
-| `orchestrator/schema.ts`         | one zod-to-issue-list error shape for everything that parses          |
-| `orchestrator/rpc.ts`            | the `pi --mode rpc` client                                            |
-| `orchestrator/runtime.ts`        | the runtime directory, atomic writes and the view envelope            |
-| `orchestrator/transition-log.ts` | the capped transition log                                             |
-| `orchestrator/command.ts`        | the console command file: written by the console, eaten by the server |
-| `orchestrator/console.ts`        | the terminal view of the queue and the pool, one pane per slot        |
-| `orchestrator/monitor.ts`        | an entry point: the console in read-only mode                         |
-
-`orchestrator/console.ts` is the human's window onto the same views, run against a repository from a second terminal:
-
-```
-bun orchestrator/console.ts [repo]     # switches you can click
-bun orchestrator/monitor.ts [repo]     # the same screen, read-only
-```
-
-One line across the top is the queue: the scheduler's switch, then the tasks waiting on a slot in the order the dispatcher will take them, each under the state it is queued in — `READY_WORK`, `READY_AGENT_REVIEW`, or `resume` for a failed task with a session to pick back up — left to right until the row runs out, and how many there are in total at the right end. A rule under that row separates the queue from the panes below it. Under it, one pane per slot, four header lines each — the agent's switch and identity, its state, the task and its pid, the current activity or running check, tokens and context against the usage tailed out of the agent's session file.
-
-It opens nothing but the runtime directory: the views for everything structural and the `session` path each row carries for the transcript. `j`/`k`, page keys and the wheel scroll all panes together, `g`/`G` jump to the ends, `q` quits. A scrolled pane is anchored to the line it was left on, so output arriving underneath does not shift what is being read; `G` goes back to following the tail.
-
-### The switches
-
-Clicking a switch writes one file — `console-command`, in the runtime directory — and does nothing else. The server is watching that directory with `fs.watch`, not polling it: an event takes the file, deletes it, and applies it exactly as if the manager had called the matching tool. `scheduler` is `enable_scheduler`/`disable_scheduler`, `agent` is `enable_agent`/`disable_agent`, and an agent switch moves every slot of that agent, because `enabled` is a property of the agent and not of one slot. A command left behind by a server that died is taken at startup, which is also what keeps a stale file from wedging the console forever.
-
-There is one command file, not a queue of them, and the console will not write while it exists — a click landing on an unapplied command is dropped rather than overwriting it. The file is written to a temp name and renamed, so the server never reads half of one, and the watcher fires on any change to the directory rather than on a filename, because a rename surfaces under the name it moved _from_.
-
-The console holds no state of its own. A flipped switch does not move until the server has applied the command and the next view says so, which is the only honest thing it can render: the server is the one that decides, and a switch that lied for a second would be a switch you could not trust. The command is parsed with zod like everything else; one that does not parse, or that names an agent the pool does not have, is logged and dropped, and the file is deleted either way.
-
-`monitor.ts` is the console with `readOnly` true: the switches render as `enabled`/`disabled` labels, no click has a target, and nothing it does can touch the graph, so it is safe to leave running in a window you do not watch.
-
-The server ticks twice a second: it applies finished checks, reaps dead claims, starts new checks, converts reviews into graph state, dispatches if the scheduler is enabled, and rewrites the five views. Everything it does to the graph goes through `transition.ts` under the same lock the manager uses, and every applied transition is one line in `transitions.jsonl`.
-
-Two details worth knowing before reading the code:
-
-- **The agent's notes are the last `## Notes` in the file.** The task body copied into an assignment has a `## Notes` section of its own, and the assignment appends the agent's. The generator always puts the agent's last.
-- **A resumed submit is trusted no further than the next check run.** The agent's claim is that the failures are fixed; `submit` clears them and `CHECKING` immediately re-runs every command and files a fresh list if it lied.
-
-### What "the process is gone" means
-
-Three things independently decide a claim is dead, and all three have to agree with reality or a task sits in `WORKING` forever with nobody working on it.
-
-A **task file that does not parse** is skipped, not fatal. A tick reads every task in `tasks/`, so a single bad frontmatter block used to throw before the reaper ran — the whole server stopped reaping, checking and dispatching, twice a second, over one hand-edited file. Each unreadable file is now logged once when it breaks and once when it parses again, and the rest of the graph proceeds without it. The manager sees the task disappear from the views, which is the honest report: the server cannot read it.
-
-A **slot only shields its task while its process is alive.** The reaper skips tasks a worker is holding, and a worker holds a `PiProcess` object, not a live process. When `pi` dies the object stays until the flow that owns it finishes, so the test has to be liveness, not existence.
-
-A **child that has exited but not yet been waited on is dead.** `kill(pid, 0)` succeeds against a zombie, which is precisely the state a `pi` child is in for the moment between its stdout closing and the runtime reaping it — the moment the server notices and tries to release. `isProcessAlive` reads `/proc/<pid>/stat` and treats state `Z` as dead. Without that, `release` refuses its own precondition (`release is only for dead claims`) against a process that has certainly died.
-
-The rpc layer has the matching rule: once a stream has failed, every later request rejects instead of registering a waiter nobody will answer. A dead `pi` cannot respond to `get_last_assistant_text`, and a promise that neither resolves nor rejects strands the worker holding it — the slot is never released, and the task it holds is never reaped.

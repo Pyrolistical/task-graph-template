@@ -8,10 +8,7 @@ claimed_by:
 claimed_pid:
 held_reason:
 workspace:
-todos: []
 checks: []
-plan_feedback: []
-failures: []
 task_graph_updates: []
 ---
 

@@ -5,7 +5,6 @@ import path from "node:path";
 import { SchemaError } from "./schema.ts";
 import {
   CLAIMED_STATES,
-  FAILURE_STATES,
   FIELD_ORDER,
   LOCK_FILENAME,
   type TaskMeta,
@@ -63,10 +62,7 @@ function baseMeta(overrides: Partial<TaskMeta> = {}): TaskMeta {
     claimed_pid: null,
     held_reason: null,
     workspace: null,
-    todos: [],
     checks: [],
-    plan_feedback: [],
-    failures: [],
     task_graph_updates: [],
     ...overrides,
   };
@@ -92,13 +88,53 @@ function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
   return meta.id;
 }
 
+function editTask(
+  dir: string,
+  id: string,
+  edit: (meta: TaskMeta) => void,
+): void {
+  const filePath = path.join(dir, `${id}.md`);
+  const { meta, body } = readTaskFile(filePath);
+  edit(meta);
+  fs.writeFileSync(filePath, rebuildDocument(meta, body));
+}
+
+function addDeps(dir: string, id: string, ...deps: string[]): void {
+  editTask(dir, id, (meta) => {
+    for (const dep of deps) {
+      if (!meta.depends_on.includes(dep)) {
+        meta.depends_on.push(dep);
+      }
+    }
+  });
+}
+
+function addUpdate(
+  dir: string,
+  id: string,
+  op: UpdateOp,
+  taskId: string | null,
+  message: string,
+): void {
+  editTask(dir, id, (meta) => {
+    meta.task_graph_updates.push(
+      op === "add"
+        ? { op, message, done: false }
+        : { op, task_id: taskId!, message, done: false },
+    );
+  });
+}
+
+function markDone(dir: string, id: string, index: number): void {
+  editTask(dir, id, (meta) => {
+    meta.task_graph_updates[index]!.done = true;
+  });
+}
+
 function shape(name: TransitionName, extra: string[]): TransitionArgs {
   const rest = (from: number) => extra.slice(from).join(" ");
 
   switch (name) {
-    case "addDependencies":
-    case "removeDependencies":
-      return { taskIds: extra };
     case "claim":
       return extra.length <= 2
         ? { agentName: extra[0], pid: Number(extra[1]) }
@@ -109,35 +145,12 @@ function shape(name: TransitionName, extra: string[]): TransitionArgs {
             worktree: extra[3],
             session: extra[4],
           };
-    case "fail":
-      return extra[0] === "result"
-        ? { failures: [{ type: "result", message: rest(1) }] }
-        : {
-            failures: [
-              {
-                type: "check",
-                command: rest(2),
-                exit_code: Number(extra[1]),
-                output: "",
-              },
-            ],
-          };
     case "hold":
       return { reason: rest(0) };
-    case "addTodo":
-      return { message: rest(0) };
-    case "addCheck":
-      return { command: rest(0) };
-    case "doneTodo":
-    case "doneTaskGraph":
-    case "removeTodo":
-      return { index: Number(extra[0]) };
-    case "addTaskGraph":
-      return extra[0] === "add"
-        ? { op: "add", message: rest(1) }
-        : { op: extra[0] as UpdateOp, taskId: extra[1], message: rest(2) };
     case "addFeedback":
       return { findings: extra };
+    case "submit":
+      return { body: extra.length === 0 ? "\n\n# Goal\n" : rest(0) };
     default:
       return {};
   }
@@ -172,7 +185,7 @@ function newTasks(count: number): { dir: string; ids: string[] } {
 
 function toPlan(): { dir: string; id: string } {
   const { dir, id } = newTask();
-  run(dir, id, "noDependencies");
+  run(dir, id, "submit");
   return { dir, id };
 }
 
@@ -219,7 +232,7 @@ function toHeld(): { dir: string; id: string } {
 }
 
 function closeTask(dir: string, id: string) {
-  run(dir, id, "noDependencies");
+  run(dir, id, "submit");
   run(dir, id, "claim", "p", String(process.pid));
   run(dir, id, "submit");
   run(dir, id, "claim", "pr", String(process.pid));
@@ -231,7 +244,7 @@ function closeTask(dir: string, id: string) {
   run(dir, id, "claim", "r", String(process.pid));
   run(dir, id, "submit");
   run(dir, id, "claim", "m", String(process.pid));
-  return run(dir, id, "merged");
+  return run(dir, id, "submit");
 }
 
 describe("id helpers", () => {
@@ -299,18 +312,7 @@ describe("schema", () => {
       depends_on: ["000007", "000008"],
       claimed_by: "reviewer-1",
       claimed_pid: 4242,
-      todos: [
-        {
-          at: "2026-07-27T12:30:00Z",
-          message: "fix null",
-          done: true,
-        },
-      ],
       checks: ["bun test"],
-      failures: [
-        { type: "check", command: "bun test", exit_code: 1, output: "boom" },
-        { type: "result", message: "the review did not parse" },
-      ],
       task_graph_updates: [
         { op: "add", message: "split parser", done: false },
         { op: "update", task_id: "000007", message: "retarget", done: true },
@@ -366,7 +368,7 @@ describe("schema", () => {
       true,
     );
     expect(issues.some((i) => i.startsWith("state:"))).toBe(true);
-    expect(issues.some((i) => i.startsWith("todos:"))).toBe(true);
+    expect(issues.some((i) => i.startsWith("checks:"))).toBe(true);
   });
 
   test("every violation is reported at once, not just the first", () => {
@@ -428,25 +430,7 @@ describe("schema", () => {
     });
   });
 
-  test("todo and check entries reject malformed shapes", () => {
-    expect(() =>
-      parseTaskMeta({
-        ...baseMeta(),
-        todos: [{ at: "nope", message: "m", done: false }],
-      }),
-    ).toThrow(/todos\[0\]\.at/);
-    expect(() =>
-      parseTaskMeta({
-        ...baseMeta(),
-        todos: [
-          {
-            at: "2026-07-27T12:00:00Z",
-            message: "m",
-            done: "yes",
-          },
-        ],
-      }),
-    ).toThrow(/todos\[0\]\.done/);
+  test("check entries reject malformed shapes", () => {
     expect(() => parseTaskMeta({ ...baseMeta(), checks: [""] })).toThrow(
       /checks\[0\]: Too small/,
     );
@@ -458,19 +442,9 @@ describe("schema", () => {
   test("empty lists serialize as [] and parse back as empty", () => {
     const doc = rebuildDocument(baseMeta(), "\n");
     expect(doc).toContain("depends_on: []");
-    expect(doc).toContain("todos: []");
     expect(doc).toContain("checks: []");
-    expect(doc).toContain("failures: []");
     expect(doc).toContain("task_graph_updates: []");
-    expect(parseTaskMeta(parseDocument(doc).raw).todos).toEqual([]);
-  });
-
-  test("a document without plan_feedback parses, defaulting to empty", () => {
-    const meta = raw(baseMeta());
-    delete meta.plan_feedback;
-    expect(parseTaskMeta(meta).plan_feedback).toEqual([]);
-    const doc = `---\nid: "000042"\ntitle: t\nstate: NEW\nstate_entered: null\ndepends_on: []\nclaimed_by: null\nclaimed_pid: null\nheld_reason: null\nworkspace: null\ntodos: []\nchecks: []\nfailures: []\ntask_graph_updates: []\n---\n`;
-    expect(parseTaskMeta(parseDocument(doc).raw).plan_feedback).toEqual([]);
+    expect(parseTaskMeta(parseDocument(doc).raw).checks).toEqual([]);
   });
 
   test("fields are serialized in schema order with state_entered under state", () => {
@@ -488,10 +462,7 @@ describe("schema", () => {
       "claimed_pid",
       "held_reason",
       "workspace",
-      "todos",
       "checks",
-      "plan_feedback",
-      "failures",
       "task_graph_updates",
     ]);
   });
@@ -660,69 +631,58 @@ describe("createTask", () => {
 });
 
 describe("transitions: dependencies", () => {
-  test("addDependencies moves NEW to BLOCKED then self-loops", () => {
-    const { dir, ids } = newTasks(3);
-    const [main, first, second] = ids as [string, string, string];
-
-    expect(run(dir, main, "addDependencies", first).to).toBe("BLOCKED");
-    expect(run(dir, main, "addDependencies", second).to).toBeNull();
-    expect(metaOf(dir, main).depends_on).toEqual([first, second]);
+  test("submit moves NEW to READY_PLAN when nothing was edited in", () => {
+    const { dir, id } = newTask();
+    expect(run(dir, id, "submit").to).toBe("READY_PLAN");
   });
 
-  test("duplicate dependencies are not added twice", () => {
+  test("submit moves NEW to BLOCKED when dependencies were edited in", () => {
     const { dir, ids } = newTasks(2);
     const [main, dep] = ids as [string, string];
 
-    run(dir, main, "addDependencies", dep);
-    run(dir, main, "addDependencies", dep);
+    addDeps(dir, main, dep);
+    expect(run(dir, main, "submit").to).toBe("BLOCKED");
     expect(metaOf(dir, main).depends_on).toEqual([dep]);
   });
 
-  test("a task cannot depend on itself", () => {
-    const { dir, id } = newTask();
-    expect(() => run(dir, id, "addDependencies", id)).toThrow(
-      /cannot depend on itself/,
-    );
-  });
-
-  test("a dependency on a task that does not exist is refused", () => {
-    const { dir, id } = newTask();
-    expect(() => run(dir, id, "addDependencies", "000999")).toThrow(
-      /Task "000999" does not exist/,
-    );
-    expect(metaOf(dir, id).depends_on).toEqual([]);
-    expect(metaOf(dir, id).state).toBe("NEW");
-  });
-
-  test("a dependency on a closed task is refused", () => {
+  test("submit from NEW never reaches READY_PLAN while dependencies remain", () => {
     const { dir, ids } = newTasks(2);
     const [main, dep] = ids as [string, string];
 
-    closeTask(dir, dep);
-    expect(() => run(dir, main, "addDependencies", dep)).toThrow(/is CLOSED/);
+    addDeps(dir, main, dep);
+    expect(run(dir, main, "submit").to).toBe("BLOCKED");
+    expect(metaOf(dir, main).state).toBe("BLOCKED");
   });
 
-  test("a rejected dependency in a batch leaves none of the batch applied", () => {
+  test("submit self-loops on BLOCKED while dependencies remain", () => {
     const { dir, ids } = newTasks(2);
     const [main, dep] = ids as [string, string];
 
-    expect(() => run(dir, main, "addDependencies", dep, "000999")).toThrow(
-      /does not exist/,
-    );
-    expect(metaOf(dir, main).depends_on).toEqual([]);
-    expect(metaOf(dir, main).state).toBe("NEW");
+    addDeps(dir, main, dep);
+    run(dir, main, "submit");
+    expect(run(dir, main, "submit").to).toBeNull();
+    expect(metaOf(dir, main).state).toBe("BLOCKED");
   });
 
-  test("removeDependencies self-loops until the last dependency goes", () => {
+  test("submit from BLOCKED reaches READY_PLAN once the last dependency is edited out", () => {
     const { dir, ids } = newTasks(3);
     const [main, first, second] = ids as [string, string, string];
 
-    run(dir, main, "addDependencies", first, second);
-    expect(run(dir, main, "removeDependencies", first).to).toBeNull();
-    expect(run(dir, main, "removeDependencies", second).to).toBe("READY_PLAN");
+    addDeps(dir, main, first, second);
+    run(dir, main, "submit");
+
+    editTask(dir, main, (meta) => {
+      meta.depends_on = [first];
+    });
+    expect(run(dir, main, "submit").to).toBeNull();
+
+    editTask(dir, main, (meta) => {
+      meta.depends_on = [];
+    });
+    expect(run(dir, main, "submit").to).toBe("READY_PLAN");
   });
 
-  test("removeDependencies can clear a reference to a task that is gone", () => {
+  test("submit can clear a reference to a task that is gone", () => {
     const dir = makeTasksDir();
     const main = writeTask(dir, {
       id: "000001",
@@ -730,20 +690,11 @@ describe("transitions: dependencies", () => {
       depends_on: ["000999"],
     });
 
-    expect(run(dir, main, "removeDependencies", "000999").to).toBe(
-      "READY_PLAN",
-    );
+    editTask(dir, main, (meta) => {
+      meta.depends_on = [];
+    });
+    expect(run(dir, main, "submit").to).toBe("READY_PLAN");
     expect(metaOf(dir, main).depends_on).toEqual([]);
-  });
-
-  test("noDependencies refuses while dependencies remain", () => {
-    const { dir, ids } = newTasks(2);
-    const [main, dep] = ids as [string, string];
-
-    run(dir, main, "addDependencies", dep);
-    expect(() => run(dir, main, "noDependencies")).toThrow(
-      /not valid from state "BLOCKED"/,
-    );
   });
 });
 
@@ -773,7 +724,7 @@ describe("transitions: claim and release", () => {
 
   test("release recovers a dead claim and clears it", async () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     run(dir, id, "claim", "dead-agent", String(await deadPid()));
 
     expect(run(dir, id, "release").to).toBe("READY_PLAN");
@@ -796,239 +747,180 @@ describe("transitions: claim and release", () => {
   });
 });
 
-describe("transitions: todos", () => {
-  test("addFeedback from AGENT_REVIEWING sends the task back with findings as todos", () => {
+describe("transitions: the task body", () => {
+  test("addFeedback from WORK_REVIEWING sends the task back and appends the findings to the body", () => {
     const { dir, id } = toAgentReview();
     expect(run(dir, id, "addFeedback", "fix null handling").to).toBe(
       "READY_WORK",
     );
 
-    const todo = metaOf(dir, id).todos[0]!;
-    expect(todo.message).toBe("fix null handling");
-    expect(todo.done).toBe(false);
+    const body = bodyOf(path.join(dir, `${id}.md`));
+    expect(body).toContain("# Review findings");
+    expect(body).toContain("- fix null handling");
+    expect(body).toContain("## Implementation Notes");
   });
 
-  test("every finding in an addFeedback from AGENT_REVIEWING becomes a todo", () => {
+  test("every finding in an addFeedback from WORK_REVIEWING lands in the body", () => {
     const { dir, id } = toAgentReview();
     run(dir, id, "addFeedback", "first", "second");
-    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
-      "first",
-      "second",
-    ]);
+    const body = bodyOf(path.join(dir, `${id}.md`));
+    expect(body).toContain("- first");
+    expect(body).toContain("- second");
   });
 
-  test("addTodo from MANAGER_REVIEWING sends the task back to READY_WORK", () => {
+  test("addFeedback from MANAGER_REVIEWING appends the same sections", () => {
     const { dir, id } = toManagerReview();
-    expect(run(dir, id, "addTodo", "restructure the parser").to).toBe(
+    expect(run(dir, id, "addFeedback", "restructure the parser").to).toBe(
       "READY_WORK",
     );
-    expect(metaOf(dir, id).todos[0]!.message).toBe("restructure the parser");
+    const body = bodyOf(path.join(dir, `${id}.md`));
+    expect(body).toContain("# Review findings");
+    expect(body).toContain("- restructure the parser");
+    expect(body).toContain("## Implementation Notes");
   });
 
-  test("addTodo self-loops in READY_WORK and WORKING so more can be filed", () => {
+  test("a second rejection appends another review findings section", () => {
     const { dir, id } = toAgentReview();
     run(dir, id, "addFeedback", "first");
-    expect(run(dir, id, "addTodo", "second").to).toBeNull();
     run(dir, id, "claim", "agent-1", String(process.pid));
-    expect(run(dir, id, "addTodo", "third").to).toBeNull();
-    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
-      "first",
-      "second",
-      "third",
-    ]);
+    run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+    run(dir, id, "claim", "checker", String(process.pid));
+    run(dir, id, "pass");
+    run(dir, id, "claim", "reviewer", String(process.pid));
+    run(dir, id, "addFeedback", "second");
+    const body = bodyOf(path.join(dir, `${id}.md`));
+    expect(body.match(/# Review findings/g)).toHaveLength(2);
+    expect(body).toContain("- second");
   });
 
-  test("addTodo self-loops in NEW while the task is still being filled in", () => {
-    const { dir, id } = newTask();
-    expect(run(dir, id, "addTodo", "written up front").to).toBeNull();
-    expect(metaOf(dir, id).state).toBe("NEW");
-
-    run(dir, id, "noDependencies");
-    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
-      "written up front",
-    ]);
+  test("addFeedback from PLAN_REVIEWING leaves the body untouched", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    const before = bodyOf(path.join(dir, `${id}.md`));
+    expect(run(dir, id, "addFeedback", "the list is missing").to).toBe(
+      "READY_PLAN",
+    );
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(before);
   });
 
-  test("submit is refused while a todo is open", () => {
+  test("addFeedback refuses an empty findings list and writes nothing", () => {
+    const { dir, id } = toAgentReview();
+    const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
+    expect(() =>
+      applyTransition(dir, id, "addFeedback", { findings: [] }),
+    ).toThrow(/non-empty/);
+    expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+  });
+
+  test("submit from PLAN_REVIEWING writes the accepted assignment into the body", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    run(dir, id, "claim", "plan-reviewer", String(process.pid));
+    run(dir, id, "submit", "\n# accepted plan");
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe("\n# accepted plan");
+  });
+
+  test("submit from WORKING writes the notes into the body", () => {
     const { dir, id } = toWorking();
-    run(dir, id, "addTodo", "unfinished");
-    expect(() => run(dir, id, "submit")).toThrow(/1 open todo/);
+    const accepted =
+      "\n# Goal\n\n## Todos\n\n1. x\n\n## Implementation Notes\n\nI did x";
+    expect(run(dir, id, "submit", accepted).to).toBe("READY_CHECK");
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(accepted);
   });
 
-  test("doneTodo marks by index and unblocks submit", () => {
+  test("submit from WORKING or PLAN_REVIEWING requires the accepted assignment", () => {
     const { dir, id } = toWorking();
-    run(dir, id, "addTodo", "a");
-    run(dir, id, "addTodo", "b");
-    run(dir, id, "doneTodo", "0");
-    expect(() => run(dir, id, "submit")).toThrow(/1 open todo/);
-    run(dir, id, "doneTodo", "1");
-    expect(run(dir, id, "submit").to).toBe("READY_CHECK");
-    expect(metaOf(dir, id).todos.every((t) => t.done)).toBe(true);
+    expect(() => applyTransition(dir, id, "submit", {})).toThrow(/body/);
+
+    const plan = toPlan();
+    run(plan.dir, plan.id, "claim", "p", String(process.pid));
+    run(plan.dir, plan.id, "submit");
+    run(plan.dir, plan.id, "claim", "pr", String(process.pid));
+    expect(() => applyTransition(plan.dir, plan.id, "submit", {})).toThrow(
+      /body/,
+    );
   });
 
-  test("doneTodo rejects an out-of-range or already-done index", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addTodo", "a");
-    expect(() => run(dir, id, "doneTodo", "1")).toThrow(/out of range/);
-    run(dir, id, "doneTodo", "0");
-    expect(() => run(dir, id, "doneTodo", "0")).toThrow(/already done/);
-  });
-
-  test("doneTodo on an empty list says there is nothing to mark", () => {
-    const { dir, id } = toWorking();
-    expect(() => run(dir, id, "doneTodo", "0")).toThrow(/no todo entries/);
-  });
-
-  test("todos are never cleared, so the record survives to close", () => {
+  test("the review findings survive to close, in the body", () => {
     const { dir, id } = toAgentReview();
     run(dir, id, "addFeedback", "keep me");
     run(dir, id, "claim", "agent-1", String(process.pid));
-    run(dir, id, "doneTodo", "0");
-    run(dir, id, "submit");
+    const current = bodyOf(path.join(dir, `${id}.md`));
+    run(
+      dir,
+      id,
+      "submit",
+      current + "\n\n## Implementation Notes\n\nI fixed it",
+    );
     run(dir, id, "claim", "checker", String(process.pid));
     run(dir, id, "pass");
     run(dir, id, "claim", "reviewer", String(process.pid));
     run(dir, id, "submit");
     run(dir, id, "claim", "manager", String(process.pid));
-    const { closedPath } = run(dir, id, "merged");
+    const { closedPath } = run(dir, id, "submit");
 
-    expect(readTaskFile(closedPath!).meta.todos[0]!.message).toBe("keep me");
+    expect(bodyOf(closedPath!)).toContain("- keep me");
   });
 });
 
 describe("transitions: checks", () => {
-  test("addCheck self-loops and rejects duplicates", () => {
-    const { dir, id } = toWorking();
-    expect(run(dir, id, "addCheck", "bun test").to).toBeNull();
-    expect(() => run(dir, id, "addCheck", "bun test")).toThrow(
-      /already has check/,
-    );
-    expect(metaOf(dir, id).checks).toEqual(["bun test"]);
-  });
-
-  test("addCheck self-loops in NEW and the checks survive into READY_PLAN", () => {
+  test("checks edited into the document survive into READY_PLAN", () => {
     const { dir, id } = newTask();
-    expect(run(dir, id, "addCheck", "bun test").to).toBeNull();
-    expect(metaOf(dir, id).state).toBe("NEW");
-
-    expect(run(dir, id, "noDependencies").to).toBe("READY_PLAN");
+    editTask(dir, id, (meta) => {
+      meta.checks = ["bun test"];
+    });
+    expect(run(dir, id, "submit").to).toBe("READY_PLAN");
     expect(metaOf(dir, id).checks).toEqual(["bun test"]);
   });
 
   test("a check is a command and nothing else, so nothing records a stale pass", () => {
     const { dir, id } = toChecking();
-    run(dir, id, "addCheck", "bun test");
-    expect(run(dir, id, "pass").to).toBe("READY_AGENT_REVIEW");
+    editTask(dir, id, (meta) => {
+      meta.checks.push("bun test");
+    });
+    expect(run(dir, id, "pass").to).toBe("READY_WORK_REVIEW");
     expect(metaOf(dir, id).checks).toEqual(["bun test"]);
   });
 });
 
-describe("transitions: failures", () => {
-  test("fail from CHECKING sends the task back to READY_WORK with what failed", () => {
+describe("transitions: check failures", () => {
+  test("fail from CHECKING sends the task back to READY_WORK", () => {
     const { dir, id } = toChecking();
-    const result = applyTransition(dir, id, "fail", {
-      failures: [
-        { type: "check", command: "bun test", exit_code: 1, output: "1 fail" },
-      ],
-    });
-
-    expect(result.to).toBe("READY_WORK");
-    expect(metaOf(dir, id).failures).toEqual([
-      { type: "check", command: "bun test", exit_code: 1, output: "1 fail" },
-    ]);
+    expect(run(dir, id, "fail").to).toBe("READY_WORK");
   });
 
-  test("every failing check is recorded, not just the first", () => {
+  test("fail records nothing in the graph", () => {
     const { dir, id } = toChecking();
-    applyTransition(dir, id, "fail", {
-      failures: [
-        { type: "check", command: "bun test", exit_code: 1, output: "a" },
-        { type: "check", command: "tsc", exit_code: 2, output: "b" },
-      ],
-    });
-    expect(metaOf(dir, id).failures.length).toBe(2);
+    const before = metaOf(dir, id);
+    run(dir, id, "fail");
+    const after = metaOf(dir, id);
+    expect(after.state).toBe("READY_WORK");
+    expect(after.depends_on).toEqual(before.depends_on);
+    expect(after.checks).toEqual(before.checks);
+    expect(after.task_graph_updates).toEqual(before.task_graph_updates);
+    expect(after.workspace).toEqual(before.workspace);
+    expect(after.held_reason).toBeNull();
   });
 
   test("fail is only for the checks; a review cannot fail its own task", () => {
     const { dir, id } = toAgentReview();
-    expect(() =>
-      applyTransition(dir, id, "fail", {
-        failures: [{ type: "result", message: "result.type was missing" }],
-      }),
-    ).toThrow(/not valid from state/);
-  });
-
-  test("a submit clears the failures it was sent back to fix", () => {
-    const { dir, id } = toChecking();
-    applyTransition(dir, id, "fail", {
-      failures: [
-        { type: "check", command: "bun test", exit_code: 1, output: "x" },
-      ],
-    });
-    run(dir, id, "claim", "agent-1", String(process.pid));
-    expect(metaOf(dir, id).failures.length).toBe(1);
-
-    run(dir, id, "submit");
-    expect(metaOf(dir, id).failures).toEqual([]);
-  });
-
-  test("a hold clears them too, because held_reason is the record then", () => {
-    const { dir, id } = toChecking();
-    applyTransition(dir, id, "fail", {
-      failures: [
-        { type: "check", command: "bun test", exit_code: 1, output: "x" },
-      ],
-    });
-    run(dir, id, "claim", "agent-1", String(process.pid));
-    run(dir, id, "hold", "the fix needs a decision");
-
-    expect(metaOf(dir, id).failures).toEqual([]);
-  });
-
-  test("fail refuses an empty or malformed list and writes nothing", () => {
-    const { dir, id } = toChecking();
-    const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
-
-    expect(() => applyTransition(dir, id, "fail", {})).toThrow(/non-empty/);
-    expect(() => applyTransition(dir, id, "fail", { failures: [] })).toThrow(
-      /non-empty/,
-    );
-    expect(() =>
-      applyTransition(dir, id, "fail", {
-        failures: [{ type: "nonsense" } as never],
-      }),
-    ).toThrow(/type of check, result/);
-    expect(() =>
-      applyTransition(dir, id, "fail", {
-        failures: [
-          { type: "check", command: "x", exit_code: 1.5, output: "" } as never,
-        ],
-      }),
-    ).toThrow(/exit_code/);
-
-    expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+    expect(() => run(dir, id, "fail")).toThrow(/not valid from state/);
   });
 });
 
 describe("transitions: task graph updates", () => {
-  test("addTaskGraph self-loops in MANAGER_REVIEWING, so a review can queue several", () => {
+  test("updates edited into a MANAGER_REVIEWING document are queued and submit sends it to the update state", () => {
     const { dir, id } = toManagerReview();
     const target = createTask(dir, "a task to retarget").id;
     const doomed = createTask(dir, "a task to supersede").id;
 
-    expect(
-      run(dir, id, "addTaskGraph", "add", "split the parser").to,
-    ).toBeNull();
-    expect(
-      run(dir, id, "addTaskGraph", "update", target, "retarget").to,
-    ).toBeNull();
-    expect(metaOf(dir, id).state).toBe("MANAGER_REVIEWING");
-
-    run(dir, id, "abort");
-    run(dir, id, "claim", "graph-agent", String(process.pid));
-    expect(
-      run(dir, id, "addTaskGraph", "delete", doomed, "superseded").to,
-    ).toBeNull();
+    addUpdate(dir, id, "add", null, "split the parser");
+    addUpdate(dir, id, "update", target, "retarget");
+    addUpdate(dir, id, "delete", doomed, "superseded");
+    expect(run(dir, id, "submit").to).toBe("READY_TASK_GRAPH_UPDATE");
     expect(metaOf(dir, id).task_graph_updates.map((u) => u.op)).toEqual([
       "add",
       "update",
@@ -1036,59 +928,44 @@ describe("transitions: task graph updates", () => {
     ]);
   });
 
-  test("an update or delete op naming a task that does not exist is refused", () => {
+  test("submit closes the task once every queued update is marked done", () => {
     const { dir, id } = toManagerReview();
-    expect(() =>
-      run(dir, id, "addTaskGraph", "update", "000999", "retarget"),
-    ).toThrow(/Task "000999" does not exist/);
-    expect(metaOf(dir, id).task_graph_updates).toEqual([]);
-    expect(metaOf(dir, id).state).toBe("MANAGER_REVIEWING");
-  });
-
-  test("update and delete require a task id, add takes a bare message", () => {
-    const { dir, id } = toManagerReview();
-
-    for (const op of ["update", "delete"] as const) {
-      expect(() =>
-        applyTransition(dir, id, "addTaskGraph", { op, message: "no target" }),
-      ).toThrow(/must be a six-digit task ID/);
-    }
-    expect(metaOf(dir, id).task_graph_updates).toEqual([]);
-
-    expect(run(dir, id, "addTaskGraph", "add", "just a message").to).toBeNull();
-    expect(metaOf(dir, id).task_graph_updates).toEqual([
-      { op: "add", message: "just a message", done: false },
-    ]);
-  });
-
-  test("doneTaskGraph marks by index and closes only on the last one", () => {
-    const { dir, id } = toManagerReview();
-    run(dir, id, "addTaskGraph", "add", "first");
-    run(dir, id, "addTaskGraph", "add", "second");
-    run(dir, id, "merged");
+    addUpdate(dir, id, "add", null, "first");
+    addUpdate(dir, id, "add", null, "second");
+    run(dir, id, "submit");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
-    expect(run(dir, id, "doneTaskGraph", "1").to).toBeNull();
-    const result = run(dir, id, "doneTaskGraph", "0");
+    markDone(dir, id, 1);
+    expect(() => run(dir, id, "submit")).toThrow(
+      /still has 1 open task graph update/,
+    );
+    expect(metaOf(dir, id).state).toBe("TASK_GRAPH_UPDATING");
+
+    markDone(dir, id, 0);
+    const result = run(dir, id, "submit");
     expect(result.to).toBe("CLOSED");
     expect(fs.existsSync(result.closedPath!)).toBe(true);
   });
 
-  test("doneTaskGraph rejects an unknown or negative index", () => {
+  test("submit from TASK_GRAPH_UPDATING refuses while any update remains open", () => {
     const { dir, id } = toManagerReview();
-    run(dir, id, "addTaskGraph", "add", "only one");
-    run(dir, id, "merged");
+    addUpdate(dir, id, "add", null, "only one");
+    run(dir, id, "submit");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
-    expect(() => run(dir, id, "doneTaskGraph", "7")).toThrow(/out of range/);
-    expect(() => run(dir, id, "doneTaskGraph", "-1")).toThrow(/non-negative/);
+    expect(() => run(dir, id, "submit")).toThrow(
+      /still has 1 open task graph update/,
+    );
+    expect(metaOf(dir, id).task_graph_updates).toEqual([
+      { op: "add", message: "only one", done: false },
+    ]);
   });
 });
 
 describe("transitions: closing", () => {
-  test("merged from MANAGER_REVIEWING closes the task and moves the file", () => {
+  test("submit from MANAGER_REVIEWING closes the task and moves the file", () => {
     const { dir, id } = toManagerReview();
-    const result = run(dir, id, "merged");
+    const result = run(dir, id, "submit");
 
     expect(result.to).toBe("CLOSED");
     expect(fs.existsSync(path.join(dir, `${id}.md`))).toBe(false);
@@ -1096,54 +973,68 @@ describe("transitions: closing", () => {
     expect(readTaskFile(result.closedPath!).meta.state).toBe("CLOSED");
   });
 
-  test("merged with queued graph updates goes to the update state, not to CLOSED", () => {
+  test("submit with queued graph updates goes to the update state, not to CLOSED", () => {
     const { dir, id } = toManagerReview();
-    run(dir, id, "addTaskGraph", "add", "the follow-up this uncovered");
+    addUpdate(dir, id, "add", null, "the follow-up this uncovered");
 
-    expect(run(dir, id, "merged").to).toBe("READY_TASK_GRAPH_UPDATE");
+    expect(run(dir, id, "submit").to).toBe("READY_TASK_GRAPH_UPDATE");
     expect(fs.existsSync(path.join(dir, `${id}.md`))).toBe(true);
   });
 
-  test("abort always goes to the update state and refuses an empty queue", () => {
+  test("abort closes a task whose graph needs no changes", () => {
     const { dir, id } = toManagerReview();
-    expect(() => run(dir, id, "abort")).toThrow(/no task graph updates/);
+    expect(run(dir, id, "abort").to).toBe("CLOSED");
+  });
 
-    run(dir, id, "addTaskGraph", "add", "this task was the wrong shape");
+  test("abort with queued updates goes to the update state", () => {
+    const { dir, id } = toManagerReview();
+    addUpdate(dir, id, "add", null, "this task was the wrong shape");
     expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
   });
 
-  test("abort throws away a task still queued in READY_PLAN", () => {
+  test("abort throws away a task still queued in READY_PLAN, via HELD_PLAN", () => {
     const { dir, id } = newTask("the wrong shape");
-    run(dir, id, "noDependencies");
-    expect(() => run(dir, id, "abort")).toThrow(/no task graph updates/);
-
-    expect(
-      run(dir, id, "addTaskGraph", "add", "two tasks instead of this one").to,
-    ).toBeNull();
+    run(dir, id, "submit");
     expect(metaOf(dir, id).state).toBe("READY_PLAN");
+    expect(() => run(dir, id, "abort")).toThrow(
+      /not valid from state "READY_PLAN"/,
+    );
 
+    run(dir, id, "hold", "abandoning");
+    expect(metaOf(dir, id).state).toBe("HELD_PLAN");
+    addUpdate(dir, id, "add", null, "two tasks instead of this one");
     expect(run(dir, id, "abort").to).toBe("READY_TASK_GRAPH_UPDATE");
   });
 
-  test("a task sent back by a failed check can be aborted from READY_WORK", () => {
+  test("abort closes a held task when nothing should replace it", () => {
+    const { dir, id } = newTask("the wrong shape");
+    run(dir, id, "submit");
+    run(dir, id, "hold", "abandoning");
+    expect(run(dir, id, "abort").to).toBe("CLOSED");
+  });
+
+  test("a task sent back by a failed check can be aborted from HELD_WORK", () => {
     const { dir, id } = toChecking();
-    run(dir, id, "fail", "check", "1", "bun test");
+    run(dir, id, "fail");
     expect(metaOf(dir, id).state).toBe("READY_WORK");
 
-    run(dir, id, "addTaskGraph", "add", "the task this should have been");
+    run(dir, id, "hold", "abandoning");
+    addUpdate(dir, id, "add", null, "the task this should have been");
     run(dir, id, "abort");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
-    expect(run(dir, id, "doneTaskGraph", "0").to).toBe("CLOSED");
+    markDone(dir, id, 0);
+    expect(run(dir, id, "submit").to).toBe("CLOSED");
   });
 
   test("an aborted task still closes once the graph has been rewritten", () => {
     const { dir, id } = toManagerReview();
-    run(dir, id, "addTaskGraph", "add", "split this in two");
+    addUpdate(dir, id, "add", null, "split this in two");
     run(dir, id, "abort");
     run(dir, id, "claim", "graph-agent", String(process.pid));
 
-    expect(run(dir, id, "doneTaskGraph", "0").to).toBe("CLOSED");
+    markDone(dir, id, 0);
+    expect(run(dir, id, "submit").to).toBe("CLOSED");
   });
 
   test("closing removes the id from dependents and unblocks them", () => {
@@ -1151,8 +1042,8 @@ describe("transitions: closing", () => {
     const dep = createTask(dir, "dependency").id;
     const main = createTask(dir, "main").id;
 
-    run(dir, main, "addDependencies", dep);
-    expect(metaOf(dir, main).state).toBe("BLOCKED");
+    addDeps(dir, main, dep);
+    expect(run(dir, main, "submit").to).toBe("BLOCKED");
 
     const result = closeTask(dir, dep);
 
@@ -1168,7 +1059,8 @@ describe("transitions: closing", () => {
     const other = createTask(dir, "other dependency").id;
     const main = createTask(dir, "main").id;
 
-    run(dir, main, "addDependencies", dep, other);
+    addDeps(dir, main, dep, other);
+    run(dir, main, "submit");
     const result = closeTask(dir, dep);
 
     expect(result.unblocked).toEqual([]);
@@ -1178,7 +1070,7 @@ describe("transitions: closing", () => {
 
   test("a closed task has no further transitions", () => {
     const { dir, id } = toManagerReview();
-    run(dir, id, "merged");
+    run(dir, id, "submit");
 
     for (const name of TRANSITION_NAMES) {
       expect(() => applyTransition(dir, id, name, {})).toThrow(/is CLOSED/);
@@ -1198,7 +1090,7 @@ describe("transitions: argument validation", () => {
 
   test("claim rejects a blank agent name and a non-positive pid", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
 
     expect(() => apply(dir, id, "claim", { agentName: "  ", pid: 42 })).toThrow(
       /"agentName" must be a non-empty string/,
@@ -1216,65 +1108,12 @@ describe("transitions: argument validation", () => {
     expect(meta.claimed_pid).toBeNull();
   });
 
-  test("addTodo and addCheck reject a blank message and command", () => {
+  test("hold rejects a blank reason", () => {
     const { dir, id } = toWorking();
-
-    expect(() => apply(dir, id, "addTodo", { message: "   " })).toThrow(
-      /"message" must be a non-empty string/,
+    expect(() => apply(dir, id, "hold", { reason: "  " })).toThrow(
+      /"reason" must be a non-empty string/,
     );
-    expect(() => apply(dir, id, "addTodo", {})).toThrow(
-      /"message" must be a non-empty string/,
-    );
-    expect(() => apply(dir, id, "addCheck", { command: "" })).toThrow(
-      /"command" must be a non-empty string/,
-    );
-
-    expect(metaOf(dir, id).todos).toEqual([]);
-    expect(metaOf(dir, id).checks).toEqual([]);
-  });
-
-  test("doneTodo rejects a negative or fractional index", () => {
-    const { dir, id } = toWorking();
-    run(dir, id, "addTodo", "a todo");
-
-    expect(() => apply(dir, id, "doneTodo", { index: -1 })).toThrow(
-      /"index" must be a non-negative integer/,
-    );
-    expect(() => apply(dir, id, "doneTodo", { index: 0.5 })).toThrow(
-      /"index" must be a non-negative integer/,
-    );
-    expect(() => apply(dir, id, "doneTodo", {})).toThrow(
-      /"index" must be a non-negative integer/,
-    );
-
-    expect(metaOf(dir, id).todos[0]!.done).toBe(false);
-  });
-
-  test("addDependencies rejects a missing, empty or malformed id list", () => {
-    const { dir, id } = newTask();
-
-    expect(() => apply(dir, id, "addDependencies", {})).toThrow(
-      /"taskIds" must be a non-empty list/,
-    );
-    expect(() => apply(dir, id, "addDependencies", { taskIds: [] })).toThrow(
-      /"taskIds" must be a non-empty list/,
-    );
-    expect(() =>
-      apply(dir, id, "addDependencies", { taskIds: ["42"] }),
-    ).toThrow(/is not a six-digit task ID/);
-
-    const meta = metaOf(dir, id);
-    expect(meta.depends_on).toEqual([]);
-    expect(meta.state).toBe("NEW");
-  });
-
-  test("addTaskGraph rejects an unknown op", () => {
-    const { dir, id } = toManagerReview();
-
-    expect(() =>
-      apply(dir, id, "addTaskGraph", { op: "rename", message: "m" }),
-    ).toThrow(/"op" must be one of add, update, delete/);
-    expect(metaOf(dir, id).task_graph_updates).toEqual([]);
+    expect(metaOf(dir, id).state).toBe("WORKING");
   });
 
   test("every rejected argument leaves the document byte-identical", () => {
@@ -1283,9 +1122,9 @@ describe("transitions: argument validation", () => {
     const before = fs.readFileSync(filePath, "utf-8");
 
     const rejected: [TransitionName, unknown][] = [
-      ["addTodo", { message: "" }],
-      ["addCheck", { command: "  " }],
-      ["doneTodo", { index: -3 }],
+      ["addFeedback", { findings: [] }],
+      ["hold", {}],
+      ["submit", {}],
     ];
     for (const [name, args] of rejected) {
       expect(() => apply(dir, id, name, args)).toThrow();
@@ -1296,60 +1135,75 @@ describe("transitions: argument validation", () => {
 });
 
 describe("transitions: document integrity", () => {
-  test("the body is byte-identical after every transition in a full lifecycle", () => {
+  test("the body changes only at the accepts and feedback appends", () => {
     const { dir, id } = newTask();
     const filePath = path.join(dir, `${id}.md`);
     const original = bodyOf(filePath);
     expect(original).toContain("# Implementation History");
 
-    const steps: [TransitionName, string[]][] = [
-      ["noDependencies", []],
-      ["claim", ["planner", String(process.pid)]],
-      ["submit", []],
-      ["claim", ["plan-reviewer", String(process.pid)]],
-      ["submit", []],
-      ["addCheck", ["bun test"]],
-      ["addTodo", ["something to do"]],
-      ["claim", ["agent-1", String(process.pid)]],
-      ["doneTodo", ["0"]],
-      ["submit", []],
-      ["claim", ["checker", String(process.pid)]],
-      ["pass", []],
-      ["claim", ["reviewer", String(process.pid)]],
-      ["submit", []],
-      ["claim", ["manager", String(process.pid)]],
-      ["addTaskGraph", ["add", "follow-up work"]],
-      ["merged", []],
-      ["claim", ["graph-agent", String(process.pid)]],
+    const steps: [TransitionName, string[], string][] = [
+      ["submit", [], original],
+      ["claim", ["planner", String(process.pid)], original],
+      ["submit", [], original],
+      ["claim", ["plan-reviewer", String(process.pid)], original],
+      ["submit", ["\n# accepted"], "\n# accepted"],
+      ["claim", ["agent-1", String(process.pid)], "\n# accepted"],
+      ["submit", ["\n# accepted"], "\n# accepted"],
+      ["claim", ["checker", String(process.pid)], "\n# accepted"],
+      ["pass", [], "\n# accepted"],
+      ["claim", ["reviewer", String(process.pid)], "\n# accepted"],
+      ["submit", [], "\n# accepted"],
+      ["claim", ["manager", String(process.pid)], "\n# accepted"],
     ];
 
-    for (const [name, args] of steps) {
+    for (const [name, args, expected] of steps) {
       run(dir, id, name, ...args);
-      expect(bodyOf(filePath)).toBe(original);
+      expect(bodyOf(filePath)).toBe(expected);
     }
 
-    const closed = run(dir, id, "doneTaskGraph", "0");
-    expect(bodyOf(closed.closedPath!)).toBe(original);
+    const closed = run(dir, id, "submit");
+    expect(bodyOf(closed.closedPath!)).toBe("\n# accepted");
+  });
+
+  test("a close with queued graph updates keeps the body through the update state", () => {
+    const { dir, id } = toManagerReview();
+    const filePath = path.join(dir, `${id}.md`);
+    const body = bodyOf(filePath);
+
+    addUpdate(dir, id, "add", null, "follow-up work");
+    expect(run(dir, id, "submit").to).toBe("READY_TASK_GRAPH_UPDATE");
+    expect(bodyOf(filePath)).toBe(body);
+
+    run(dir, id, "claim", "graph-agent", String(process.pid));
+    markDone(dir, id, 0);
+    const closed = run(dir, id, "submit");
+    expect(closed.to).toBe("CLOSED");
+    expect(bodyOf(closed.closedPath!)).toBe(body);
   });
 
   test("state_entered advances on self-loops as well as real transitions", async () => {
-    const { dir, id } = toWorking();
+    const { dir, ids } = newTasks(2);
+    const [main, dep] = ids as [string, string];
+    addDeps(dir, main, dep);
+    run(dir, main, "submit");
 
-    const beforeSelfLoop = metaOf(dir, id).state_entered;
+    const beforeSelfLoop = metaOf(dir, main).state_entered;
     await Bun.sleep(5);
-    expect(run(dir, id, "addTodo", "self loop").to).toBeNull();
+    expect(run(dir, main, "submit").to).toBeNull();
 
-    const afterSelfLoop = metaOf(dir, id).state_entered;
+    const afterSelfLoop = metaOf(dir, main).state_entered;
     expect(Date.parse(afterSelfLoop!)).toBeGreaterThan(
       Date.parse(beforeSelfLoop!),
     );
 
-    run(dir, id, "doneTodo", "0");
-    const beforeMove = metaOf(dir, id).state_entered;
+    const beforeMove = metaOf(dir, main).state_entered;
     await Bun.sleep(5);
-    expect(run(dir, id, "submit").to).toBe("READY_CHECK");
+    editTask(dir, main, (meta) => {
+      meta.depends_on = [];
+    });
+    expect(run(dir, main, "submit").to).toBe("READY_PLAN");
 
-    expect(Date.parse(metaOf(dir, id).state_entered!)).toBeGreaterThan(
+    expect(Date.parse(metaOf(dir, main).state_entered!)).toBeGreaterThan(
       Date.parse(beforeMove!),
     );
   });
@@ -1358,7 +1212,7 @@ describe("transitions: document integrity", () => {
 describe("transitions: table", () => {
   test("an unknown task id is reported", () => {
     const dir = makeTasksDir();
-    expect(() => run(dir, "000999", "noDependencies")).toThrow(/not found/);
+    expect(() => run(dir, "000999", "submit")).toThrow(/not found/);
   });
 
   test("release and claim are inverses across every claimed state", async () => {
@@ -1398,42 +1252,36 @@ describe("transitions: table", () => {
 describe("transitions: the whole state machine", () => {
   interface Case {
     to: string;
-    prepare?: string[][];
+    prepare?: (dir: string, id: string) => void;
     args?: (dep: string) => string[];
   }
 
   const MACHINE: Record<ValidState, Partial<Record<TransitionName, Case>>> = {
     NEW: {
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      noDependencies: { to: "READY_PLAN" },
-      addTodo: { to: "NEW", args: () => ["a todo"] },
-      addCheck: { to: "NEW", args: () => ["bun test"] },
+      submit: { to: "READY_PLAN" },
     },
     BLOCKED: {
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      removeDependencies: { to: "READY_PLAN", args: (dep) => [dep] },
+      submit: {
+        to: "READY_PLAN",
+        prepare: (dir, id) =>
+          editTask(dir, id, (meta) => {
+            meta.depends_on = [];
+          }),
+      },
+    },
+    HELD_PLAN: {
+      resume: { to: "READY_PLAN" },
+      abort: { to: "CLOSED" },
+    },
+    HELD_WORK: {
+      resume: { to: "READY_WORK" },
+      abort: { to: "CLOSED" },
     },
     READY_PLAN: {
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      addTodo: { to: "READY_PLAN", args: () => ["a todo"] },
-      addCheck: { to: "READY_PLAN", args: () => ["bun test"] },
-      addTaskGraph: {
-        to: "READY_PLAN",
-        args: () => ["add", "a follow-up"],
-      },
-      abort: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
-      },
+      hold: { to: "HELD_PLAN", args: () => ["a reason"] },
       claim: { to: "PLANNING", args: () => ["planner", String(process.pid)] },
     },
     PLANNING: {
-      addTodo: { to: "PLANNING", args: () => ["a todo"] },
-      removeTodo: {
-        to: "PLANNING",
-        prepare: [["addTodo", "something"]],
-        args: () => ["0"],
-      },
       submit: { to: "READY_PLAN_REVIEW" },
       hold: { to: "HELD_PLAN", args: () => ["waiting on a person"] },
       release: { to: "READY_PLAN" },
@@ -1443,6 +1291,7 @@ describe("transitions: the whole state machine", () => {
         to: "PLAN_REVIEWING",
         args: () => ["plan-reviewer", String(process.pid)],
       },
+      hold: { to: "HELD_PLAN", args: () => ["a reason"] },
     },
     PLAN_REVIEWING: {
       submit: { to: "READY_WORK" },
@@ -1453,72 +1302,37 @@ describe("transitions: the whole state machine", () => {
       hold: { to: "HELD_PLAN", args: () => ["waiting on a person"] },
       release: { to: "READY_PLAN_REVIEW" },
     },
-    HELD_PLAN: {
-      resume: { to: "READY_PLAN" },
-      addTodo: { to: "READY_PLAN", args: () => ["the missing piece"] },
-      addCheck: { to: "HELD_PLAN", args: () => ["bun test"] },
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      addTaskGraph: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        args: () => ["add", "the graph was wrong"],
-      },
-    },
-    HELD_WORK: {
-      resume: { to: "READY_WORK" },
-      addTodo: { to: "READY_WORK", args: () => ["the missing piece"] },
-      addCheck: { to: "HELD_WORK", args: () => ["bun test"] },
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      addTaskGraph: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        args: () => ["add", "the graph was wrong"],
-      },
-    },
     READY_WORK: {
-      addDependencies: { to: "BLOCKED", args: (dep) => [dep] },
-      addTodo: { to: "READY_WORK", args: () => ["a todo"] },
-      addCheck: { to: "READY_WORK", args: () => ["bun test"] },
-      addTaskGraph: {
-        to: "READY_WORK",
-        args: () => ["add", "a follow-up"],
-      },
-      abort: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
-      },
+      hold: { to: "HELD_WORK", args: () => ["a reason"] },
       claim: { to: "WORKING", args: () => ["agent-1", String(process.pid)] },
     },
     WORKING: {
-      addTodo: { to: "WORKING", args: () => ["a todo"] },
-      doneTodo: {
-        to: "WORKING",
-        prepare: [["addTodo", "something"]],
-        args: () => ["0"],
-      },
-      addCheck: { to: "WORKING", args: () => ["bun test"] },
       submit: { to: "READY_CHECK" },
       hold: { to: "HELD_WORK", args: () => ["waiting on a person"] },
       release: { to: "READY_WORK" },
     },
     READY_CHECK: {
       claim: { to: "CHECKING", args: () => ["server", String(process.pid)] },
+      hold: { to: "HELD_WORK", args: () => ["a reason"] },
     },
     CHECKING: {
-      addCheck: { to: "CHECKING", args: () => ["tsc --noEmit"] },
-      pass: { to: "READY_AGENT_REVIEW" },
-      fail: { to: "READY_WORK", args: () => ["check", "1", "bun test"] },
+      pass: { to: "READY_WORK_REVIEW" },
+      fail: { to: "READY_WORK" },
+      hold: { to: "HELD_WORK", args: () => ["a reason"] },
       release: { to: "READY_CHECK" },
     },
-    READY_AGENT_REVIEW: {
+    READY_WORK_REVIEW: {
       claim: {
-        to: "AGENT_REVIEWING",
+        to: "WORK_REVIEWING",
         args: () => ["reviewer", String(process.pid)],
       },
+      hold: { to: "HELD_WORK", args: () => ["a reason"] },
     },
-    AGENT_REVIEWING: {
+    WORK_REVIEWING: {
       addFeedback: { to: "READY_WORK", args: () => ["a finding"] },
       submit: { to: "READY_MANAGER_REVIEW" },
       hold: { to: "HELD_WORK", args: () => ["the range does not exist"] },
-      release: { to: "READY_AGENT_REVIEW" },
+      release: { to: "READY_WORK_REVIEW" },
     },
     READY_MANAGER_REVIEW: {
       claim: {
@@ -1527,35 +1341,27 @@ describe("transitions: the whole state machine", () => {
       },
     },
     MANAGER_REVIEWING: {
-      addTodo: { to: "READY_WORK", args: () => ["not acceptable yet"] },
-      addCheck: { to: "MANAGER_REVIEWING", args: () => ["tsc --noEmit"] },
-      addTaskGraph: {
-        to: "MANAGER_REVIEWING",
-        args: () => ["add", "a follow-up"],
-      },
-      merged: { to: "CLOSED" },
-      abort: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        prepare: [["addTaskGraph", "add", "this was the wrong shape"]],
-      },
+      addFeedback: { to: "READY_WORK", args: () => ["not acceptable yet"] },
+      submit: { to: "CLOSED" },
+      abort: { to: "CLOSED" },
       release: { to: "READY_MANAGER_REVIEW" },
     },
     READY_TASK_GRAPH_UPDATE: {
-      addTaskGraph: {
-        to: "READY_TASK_GRAPH_UPDATE",
-        args: () => ["add", "one more"],
-      },
       claim: {
         to: "TASK_GRAPH_UPDATING",
         args: () => ["graph-agent", String(process.pid)],
       },
     },
     TASK_GRAPH_UPDATING: {
-      addTaskGraph: {
-        to: "TASK_GRAPH_UPDATING",
-        args: () => ["add", "one more"],
+      submit: {
+        to: "CLOSED",
+        prepare: (dir, id) =>
+          editTask(dir, id, (meta) => {
+            for (const update of meta.task_graph_updates) {
+              update.done = true;
+            }
+          }),
       },
-      doneTaskGraph: { to: "CLOSED", args: () => ["0"] },
       release: { to: "READY_TASK_GRAPH_UPDATE" },
     },
   };
@@ -1568,66 +1374,63 @@ describe("transitions: the whole state machine", () => {
     const dir = makeTasksDir();
     const dep = createTask(dir, "a dependency").id;
     const id = createTask(dir, "the task under test").id;
-    const walk = (steps: string[][]) => {
-      for (const [name, ...args] of steps) {
-        run(dir, id, name as TransitionName, ...args);
-      }
-    };
 
     if (state === "NEW") return { dir, id, dep };
     if (state === "BLOCKED") {
-      walk([["addDependencies", dep]]);
+      addDeps(dir, id, dep);
+      run(dir, id, "submit");
       return { dir, id, dep };
     }
 
-    walk([["noDependencies"]]);
+    run(dir, id, "submit");
     if (state === "READY_PLAN") return { dir, id, dep };
 
-    walk([["claim", "planner", pid]]);
+    run(dir, id, "claim", "planner", pid);
     if (state === "PLANNING") return { dir, id, dep };
     if (state === "HELD_PLAN") {
-      walk([["hold", "waiting on a person"]]);
+      run(dir, id, "hold", "waiting on a person");
       return { dir, id, dep };
     }
 
-    walk([["submit"]]);
+    run(dir, id, "submit");
     if (state === "READY_PLAN_REVIEW") return { dir, id, dep };
 
-    walk([["claim", "plan-reviewer", pid]]);
+    run(dir, id, "claim", "plan-reviewer", pid);
     if (state === "PLAN_REVIEWING") return { dir, id, dep };
 
-    walk([["submit"]]);
+    run(dir, id, "submit");
     if (state === "READY_WORK") return { dir, id, dep };
 
-    walk([["claim", "agent-1", pid]]);
+    run(dir, id, "claim", "agent-1", pid);
     if (state === "WORKING") return { dir, id, dep };
     if (state === "HELD_WORK") {
-      walk([["hold", "waiting on a person"]]);
+      run(dir, id, "hold", "waiting on a person");
       return { dir, id, dep };
     }
 
-    walk([["submit"]]);
+    run(dir, id, "submit");
     if (state === "READY_CHECK") return { dir, id, dep };
 
-    walk([["claim", "server", pid]]);
+    run(dir, id, "claim", "server", pid);
     if (state === "CHECKING") return { dir, id, dep };
 
-    walk([["pass"]]);
-    if (state === "READY_AGENT_REVIEW") return { dir, id, dep };
+    run(dir, id, "pass");
+    if (state === "READY_WORK_REVIEW") return { dir, id, dep };
 
-    walk([["claim", "reviewer", pid]]);
-    if (state === "AGENT_REVIEWING") return { dir, id, dep };
+    run(dir, id, "claim", "reviewer", pid);
+    if (state === "WORK_REVIEWING") return { dir, id, dep };
 
-    walk([["submit"]]);
+    run(dir, id, "submit");
     if (state === "READY_MANAGER_REVIEW") return { dir, id, dep };
 
-    walk([["claim", "manager", pid]]);
+    run(dir, id, "claim", "manager", pid);
     if (state === "MANAGER_REVIEWING") return { dir, id, dep };
 
-    walk([["addTaskGraph", "add", "the follow-up this uncovered"], ["merged"]]);
+    addUpdate(dir, id, "add", null, "the follow-up this uncovered");
+    run(dir, id, "submit");
     if (state === "READY_TASK_GRAPH_UPDATE") return { dir, id, dep };
 
-    walk([["claim", "graph-agent", pid]]);
+    run(dir, id, "claim", "graph-agent", pid);
     return { dir, id, dep };
   }
 
@@ -1655,9 +1458,7 @@ describe("transitions: the whole state machine", () => {
         const { dir, id, dep } = await build(state, name !== "release");
         expect(metaOf(dir, id).state).toBe(state);
 
-        for (const [step, ...args] of expected.prepare ?? []) {
-          run(dir, id, step as TransitionName, ...args);
-        }
+        expected.prepare?.(dir, id);
 
         const result = run(dir, id, name, ...(expected.args?.(dep) ?? []));
         const landed = result.to ?? state;
@@ -1696,27 +1497,12 @@ describe("transitions: the whole state machine", () => {
 
   function cliArgs(name: TransitionName, dep: string): string[] {
     switch (name) {
-      case "addDependencies":
-      case "removeDependencies":
-        return [dep];
       case "claim":
         return ["agent-1", String(process.pid)];
       case "hold":
         return ["a reason"];
-      case "addTodo":
-        return ["a todo"];
-      case "addCheck":
-        return ["bun test"];
-      case "doneTodo":
-      case "doneTaskGraph":
-      case "removeTodo":
-        return ["0"];
-      case "addTaskGraph":
-        return ["add", "a message"];
       case "addFeedback":
         return ["a finding"];
-      case "fail":
-        return ["check", "1", "bun test"];
       default:
         return [];
     }
@@ -1724,26 +1510,25 @@ describe("transitions: the whole state machine", () => {
 });
 
 describe("transitions: the planning phase", () => {
-  test("plan_feedback is set by a rejection and gone by the time the task reaches READY_WORK", () => {
+  test("a rejected plan leaves the body untouched, an accepted one is written in", () => {
     const { dir, id } = toPlan();
     run(dir, id, "claim", "planner", String(process.pid));
     run(dir, id, "submit");
     run(dir, id, "claim", "plan-reviewer", String(process.pid));
-    run(dir, id, "addFeedback", "the plan misses the empty case");
-    expect(metaOf(dir, id).plan_feedback).toEqual([
-      "the plan misses the empty case",
-    ]);
+    const before = bodyOf(path.join(dir, `${id}.md`));
+    expect(
+      run(dir, id, "addFeedback", "the plan misses the empty case").to,
+    ).toBe("READY_PLAN");
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(before);
 
     run(dir, id, "claim", "planner", String(process.pid));
     run(dir, id, "submit");
     run(dir, id, "claim", "plan-reviewer", String(process.pid));
-    run(dir, id, "submit");
-
-    expect(metaOf(dir, id).state).toBe("READY_WORK");
-    expect(metaOf(dir, id).plan_feedback).toEqual([]);
+    expect(run(dir, id, "submit", "\n# accepted").to).toBe("READY_WORK");
+    expect(bodyOf(path.join(dir, `${id}.md`))).toBe("\n# accepted");
   });
 
-  test("a second rejection replaces the first plan_feedback", () => {
+  test("a second rejection leaves the body untouched again", () => {
     const { dir, id } = toPlan();
     run(dir, id, "claim", "planner", String(process.pid));
     run(dir, id, "submit");
@@ -1755,7 +1540,10 @@ describe("transitions: the planning phase", () => {
     run(dir, id, "claim", "plan-reviewer", String(process.pid));
     run(dir, id, "addFeedback", "finding two");
 
-    expect(metaOf(dir, id).plan_feedback).toEqual(["finding two"]);
+    expect(metaOf(dir, id).state).toBe("READY_PLAN");
+    const body = bodyOf(path.join(dir, `${id}.md`));
+    expect(body).not.toContain("finding one");
+    expect(body).not.toContain("finding two");
   });
 });
 
@@ -1763,59 +1551,57 @@ describe("transitions: the split review", () => {
   test("a task walks CHECKING to CLOSED through both reviews", () => {
     const { dir, id } = toChecking();
 
-    expect(run(dir, id, "pass").to).toBe("READY_AGENT_REVIEW");
+    expect(run(dir, id, "pass").to).toBe("READY_WORK_REVIEW");
     expect(run(dir, id, "claim", "reviewer", String(process.pid)).to).toBe(
-      "AGENT_REVIEWING",
+      "WORK_REVIEWING",
     );
     expect(run(dir, id, "submit").to).toBe("READY_MANAGER_REVIEW");
     expect(run(dir, id, "claim", "manager", String(process.pid)).to).toBe(
       "MANAGER_REVIEWING",
     );
-    expect(run(dir, id, "merged").to).toBe("CLOSED");
+    expect(run(dir, id, "submit").to).toBe("CLOSED");
   });
 
-  test("submit from AGENT_REVIEWING hands the task straight to the manager", () => {
+  test("submit from WORK_REVIEWING hands the task straight to the manager", () => {
     const { dir, id } = toAgentReview();
     expect(run(dir, id, "submit").to).toBe("READY_MANAGER_REVIEW");
     expect(metaOf(dir, id).claimed_by).toBeNull();
   });
 
-  test("a finding applied in AGENT_REVIEWING lands the task in READY_WORK", () => {
+  test("a finding applied in WORK_REVIEWING lands the task in READY_WORK with the finding in the body", () => {
     const { dir, id } = toAgentReview();
 
     expect(run(dir, id, "addFeedback", "the null case is untested").to).toBe(
       "READY_WORK",
     );
-    expect(run(dir, id, "addTodo", "the error message is wrong").to).toBeNull();
-    expect(metaOf(dir, id).todos.map((t) => t.message)).toEqual([
-      "the null case is untested",
-      "the error message is wrong",
-    ]);
+    expect(bodyOf(path.join(dir, `${id}.md`))).toContain(
+      "- the null case is untested",
+    );
     expect(metaOf(dir, id).claimed_by).toBeNull();
   });
 
   test("an agent reviewer cannot close the task or fail it", () => {
     const { dir, id } = toAgentReview();
-    expect(ALLOWED_TRANSITIONS.AGENT_REVIEWING).toEqual([
+    expect(ALLOWED_TRANSITIONS.WORK_REVIEWING).toEqual([
       "addFeedback",
       "submit",
       "hold",
       "release",
     ]);
     expect(() => run(dir, id, "pass")).toThrow(/not valid from state/);
-    expect(() => run(dir, id, "merged")).toThrow(/not valid from state/);
+    expect(() => run(dir, id, "abort")).toThrow(/not valid from state/);
   });
 
   test("a review release returns the task to its own ready state", async () => {
     const dir = makeTasksDir();
     const id = writeTask(dir, {
       id: "000001",
-      state: "AGENT_REVIEWING",
+      state: "WORK_REVIEWING",
       claimed_by: "dead-reviewer",
       claimed_pid: await deadPid(),
     });
 
-    expect(run(dir, id, "release").to).toBe("READY_AGENT_REVIEW");
+    expect(run(dir, id, "release").to).toBe("READY_WORK_REVIEW");
   });
 });
 
@@ -1833,7 +1619,7 @@ describe("transitions: hold and resume", () => {
     expect(meta.claimed_pid).toBeNull();
   });
 
-  test("hold from AGENT_REVIEWING works the same way", () => {
+  test("hold from WORK_REVIEWING works the same way", () => {
     const { dir, id } = toAgentReview();
     expect(run(dir, id, "hold", "the diff does not apply").to).toBe(
       "HELD_WORK",
@@ -1857,43 +1643,72 @@ describe("transitions: hold and resume", () => {
   });
 
   test("every exit from HELD clears held_reason", () => {
-    for (const exit of ["resume", "addTodo", "addTaskGraph"] as const) {
+    for (const exit of ["resume", "abort"] as const) {
       const { dir, id } = toHeld();
-      const extra =
-        exit === "addTodo"
-          ? ["here is the missing piece"]
-          : exit === "addTaskGraph"
-            ? ["add", "the graph was wrong"]
-            : [];
-
-      run(dir, id, exit, ...extra);
-      expect(metaOf(dir, id).held_reason).toBeNull();
+      const result = run(dir, id, exit);
+      const filePath = result.closedPath ?? path.join(dir, `${id}.md`);
+      expect(readTaskFile(filePath).meta.held_reason).toBeNull();
     }
   });
 
-  test("addDependencies moves a held task to BLOCKED and clears the reason", () => {
+  test("resume moves a held task to BLOCKED when dependencies were edited in while held", () => {
     const { dir, id } = toHeld();
     const dep = createTask(dir, "the thing it was waiting on").id;
 
-    expect(run(dir, id, "addDependencies", dep).to).toBe("BLOCKED");
+    addDeps(dir, id, dep);
+    expect(run(dir, id, "resume").to).toBe("BLOCKED");
     expect(metaOf(dir, id).held_reason).toBeNull();
     expect(metaOf(dir, id).depends_on).toEqual([dep]);
   });
 
-  test("addTaskGraph moves a held task to READY_TASK_GRAPH_UPDATE", () => {
+  test("abort from HELD_WORK closes a held task", () => {
     const { dir, id } = toHeld();
-    expect(run(dir, id, "addTaskGraph", "add", "split this task").to).toBe(
-      "READY_TASK_GRAPH_UPDATE",
+    expect(run(dir, id, "abort").to).toBe("CLOSED");
+  });
+
+  test("hold from READY_PLAN parks the task in HELD_PLAN and resume re-plans it", () => {
+    const { dir, id } = toPlan();
+    expect(run(dir, id, "hold", "the criteria are empty").to).toBe("HELD_PLAN");
+    expect(run(dir, id, "resume").to).toBe("READY_PLAN");
+  });
+
+  test("hold from READY_WORK parks the task in HELD_WORK", () => {
+    const { dir, id } = toChecking();
+    run(dir, id, "fail");
+    expect(metaOf(dir, id).state).toBe("READY_WORK");
+    expect(run(dir, id, "hold", "reconsidering").to).toBe("HELD_WORK");
+  });
+
+  test("hold from READY_PLAN_REVIEW parks the task in HELD_PLAN", () => {
+    const { dir, id } = toPlan();
+    run(dir, id, "claim", "planner", String(process.pid));
+    run(dir, id, "submit");
+    expect(metaOf(dir, id).state).toBe("READY_PLAN_REVIEW");
+    expect(run(dir, id, "hold", "the criteria are still in flux").to).toBe(
+      "HELD_PLAN",
     );
   });
 
-  test("a held task keeps its open todos", () => {
+  test("hold from READY_CHECK parks the task in HELD_WORK", () => {
     const { dir, id } = toWorking();
-    run(dir, id, "addTodo", "half of the work");
-    run(dir, id, "hold", "blocked on a decision");
+    run(dir, id, "submit");
+    expect(metaOf(dir, id).state).toBe("READY_CHECK");
+    expect(run(dir, id, "hold", "the check needs a key").to).toBe("HELD_WORK");
+  });
 
-    expect(metaOf(dir, id).todos).toHaveLength(1);
-    expect(metaOf(dir, id).state).toBe("HELD_WORK");
+  test("hold from CHECKING parks the task in HELD_WORK", () => {
+    const { dir, id } = toChecking();
+    expect(run(dir, id, "hold", "the check needs a key").to).toBe("HELD_WORK");
+    expect(metaOf(dir, id).held_reason).toBe("the check needs a key");
+  });
+
+  test("hold from READY_WORK_REVIEW parks the task in HELD_WORK", () => {
+    const { dir, id } = toChecking();
+    run(dir, id, "pass");
+    expect(metaOf(dir, id).state).toBe("READY_WORK_REVIEW");
+    expect(run(dir, id, "hold", "the range does not apply").to).toBe(
+      "HELD_WORK",
+    );
   });
 
   test("hold from PLANNING parks the task in HELD_PLAN and resume re-plans it", () => {
@@ -1913,13 +1728,6 @@ describe("transitions: hold and resume", () => {
     );
   });
 
-  test("addTodo from HELD_PLAN sends the task back to READY_PLAN", () => {
-    const { dir, id } = toPlan();
-    run(dir, id, "claim", "planner", String(process.pid));
-    run(dir, id, "hold", "waiting on a person");
-    expect(run(dir, id, "addTodo", "the missing piece").to).toBe("READY_PLAN");
-  });
-
   test("the dispatcher queue never contains a held task", () => {
     const { dir, id } = toHeld();
     expect(metaOf(dir, id).state).toBe("HELD_WORK");
@@ -1931,13 +1739,13 @@ describe("transitions: hold and resume", () => {
 describe("transitions: the workspace block", () => {
   test("a task has no workspace before its first claim", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     expect(metaOf(dir, id).workspace).toBeNull();
   });
 
   test("claim records branch, worktree, agent and session", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     run(
       dir,
       id,
@@ -1959,7 +1767,7 @@ describe("transitions: the workspace block", () => {
 
   test("a claim with no workspace args leaves the recorded one alone", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     run(
       dir,
       id,
@@ -1980,7 +1788,7 @@ describe("transitions: the workspace block", () => {
 
   test("the session is null when the claim does not carry one", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     run(
       dir,
       id,
@@ -1996,7 +1804,7 @@ describe("transitions: the workspace block", () => {
 
   test("a branch without a worktree is refused and writes nothing", () => {
     const { dir, id } = newTask();
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
 
     expect(() =>
       run(dir, id, "claim", "pi-1", String(process.pid), "work/000001"),
@@ -2029,7 +1837,7 @@ describe("transitions: the workspace block", () => {
   test("closing clears the workspace", () => {
     const dir = makeTasksDir();
     const id = createTask(dir, "a task").id;
-    run(dir, id, "noDependencies");
+    run(dir, id, "submit");
     run(dir, id, "claim", "p", String(process.pid));
     run(dir, id, "submit");
     run(dir, id, "claim", "pr", String(process.pid));
@@ -2049,7 +1857,7 @@ describe("transitions: the workspace block", () => {
     run(dir, id, "claim", "r", String(process.pid));
     run(dir, id, "submit");
     run(dir, id, "claim", "m", String(process.pid));
-    const { closedPath } = run(dir, id, "merged");
+    const { closedPath } = run(dir, id, "submit");
 
     expect(readTaskFile(closedPath!).meta.workspace).toBeNull();
   });
@@ -2107,13 +1915,12 @@ describe("writeTaskBody", () => {
   test("a body written under the lock is not lost to a concurrent transition", () => {
     const { dir, id } = toWorking();
 
-    run(dir, id, "addTodo", "a todo filed by the server");
     writeTaskBody(dir, id, "# Goal\n\nprose the manager wrote");
-    run(dir, id, "addTodo", "another todo filed by the server");
+    run(dir, id, "hold", "waiting on the manager");
 
     expect(bodyOf(path.join(dir, `${id}.md`))).toBe(
       "\n\n# Goal\n\nprose the manager wrote\n",
     );
-    expect(metaOf(dir, id).todos).toHaveLength(2);
+    expect(metaOf(dir, id).held_reason).toBe("waiting on the manager");
   });
 });

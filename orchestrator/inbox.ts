@@ -1,4 +1,4 @@
-import { type TaskId, type TaskMeta, openCount } from "./task.ts";
+import { type TaskId, type TaskMeta } from "./task.ts";
 import { blockingCounts } from "./graph.ts";
 
 export const INBOX_RANKS = [
@@ -16,7 +16,6 @@ export interface InboxRow {
   title: string;
   rank: InboxRank;
   blocking: number;
-  open_todos: number;
   held_reason: string | null;
   branch: string | null;
   waiting_since: string | null;
@@ -35,7 +34,6 @@ export function inbox(tasks: Map<TaskId, TaskMeta>): InboxRow[] {
       title: task.title,
       rank: task.state as InboxRank,
       blocking: blocking.get(id) ?? 0,
-      open_todos: openCount(task.todos),
       held_reason: task.held_reason,
       branch: task.workspace?.branch ?? null,
       waiting_since: task.state_entered,
@@ -46,7 +44,6 @@ export function inbox(tasks: Map<TaskId, TaskMeta>): InboxRow[] {
     (a, b) =>
       INBOX_RANKS.indexOf(a.rank) - INBOX_RANKS.indexOf(b.rank) ||
       b.blocking - a.blocking ||
-      a.open_todos - b.open_todos ||
       a.task_id.localeCompare(b.task_id),
   );
 }

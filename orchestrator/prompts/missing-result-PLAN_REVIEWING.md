@@ -1,24 +1,10 @@
-Edit `../ASSIGNMENT.md` and replace the `result: null` line in its frontmatter —
-everything between the first two `---` lines — with one of these two blocks:
+You stopped without calling a result tool.
 
-```yaml
-result:
-  type: submit
-  findings:
-    - "the gap between the plan and the acceptance criteria"
-```
+Finish by calling one of these tools as your last action, with nothing after
+it:
 
-(an empty `findings: []` approves the plan)
+- `submit` — with `findings` naming the gaps between the plan and the
+  acceptance criteria; an empty list approves the plan, and no `delegations`.
+- `blocked` — with `message` naming the one thing that stands in the way.
 
-```yaml
-result:
-  type: blocked
-  message: "the one thing that stands in the way, on one line"
-```
-
-Write `submit` with the findings from your review of the plan. Write `blocked`
-when you cannot review it.
-
-Make the edit in the file with your edit tool. The file is the only thing read;
-what you write in your reply is discarded. Change nothing else in the
-frontmatter and start no new work.
+Submit again. Nothing you did in this session is lost.

@@ -77,8 +77,6 @@ export interface TaskRow {
   title: string;
   state: string;
   state_entered: string | null;
-  open_todos: number;
-  failures: number;
   open_task_graph_updates: number;
   depends_on: TaskId[];
   blocking: number;
@@ -93,8 +91,6 @@ export function taskRow(task: TaskMeta, blocking: number): TaskRow {
     title: task.title,
     state: task.state,
     state_entered: task.state_entered,
-    open_todos: openCount(task.todos),
-    failures: task.failures.length,
     open_task_graph_updates: openCount(task.task_graph_updates),
     depends_on: task.depends_on,
     blocking,

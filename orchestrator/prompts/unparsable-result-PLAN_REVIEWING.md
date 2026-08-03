@@ -1,4 +1,4 @@
-The frontmatter of `../ASSIGNMENT.md` could not be read:
+Your last action was not a valid result for this step:
 
 ```
 {{#issues}}
@@ -6,28 +6,12 @@ The frontmatter of `../ASSIGNMENT.md` could not be read:
 {{/issues}}
 ```
 
-Rewrite everything between the first two `---` lines of that file so it reads
-exactly like this, with the `assignment`, `todos` and `checks` values you were
-given:
+The result must be a call to one of these tools, as your last action, with
+nothing after it:
 
-```yaml
----
-assignment: "000042"
-todos:
-  - message: "parse the frontmatter with Bun.YAML"
-    done: false
-checks:
-  - "bun test"
-result:
-  type: submit
-  findings: []
----
-```
+- `submit` — with `findings` naming the gaps between the plan and the
+  acceptance criteria; an empty list approves the plan, and no `delegations`.
+- `blocked` — with `message` naming the one thing that stands in the way.
 
-Two spaces per level of indentation, no tabs, every string double-quoted,
-`todos: []` and `checks: []` when a list has no entries. `result` is either the
-block above — with your findings in place of `[]` — or `type: blocked` with a
-`message`.
-
-Read the file back afterwards and compare it to that shape. Nothing you recorded
-there has been applied yet, so this is the only copy.
+Submit again by calling the right tool. Nothing you did in this session is
+lost.

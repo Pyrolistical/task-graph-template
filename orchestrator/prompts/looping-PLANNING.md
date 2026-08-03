@@ -19,16 +19,9 @@ Then do one of two things:
 - If there is something else to try — a different command, a different reading
   of the error, a way around it — try that instead. Do not run the repeated
   command again to confirm it still fails.
-- If you have no way past it, say so in `../ASSIGNMENT.md` and stop:
-
-  ```yaml
-  result:
-    type: blocked
-    message: "the one thing that stands in the way, on one line"
-  ```
+- If you have no way past it, call the `blocked` tool with a `message` naming
+  the one thing that stands in the way.
 
   Make that message the thing you learned, not the thing you attempted: name the
   command, the error it gives and what you think it needs. The manager reads
   this and can change the environment; it cannot see your terminal.
-
-Leave the todos, the checks and everything else in the frontmatter as they are.

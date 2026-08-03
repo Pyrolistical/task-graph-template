@@ -1,11 +1,11 @@
-import { type TaskId, type TaskMeta, openCount } from "./task.ts";
+import { type TaskId, type TaskMeta } from "./task.ts";
 import { type AgentSlot, agentModelKey } from "./agents.ts";
 import { blockingCounts } from "./graph.ts";
 import type { Role } from "./runtime.ts";
 
 export const RANKS = [
   "resume",
-  "READY_AGENT_REVIEW",
+  "READY_WORK_REVIEW",
   "READY_WORK_STARTED",
   "READY_WORK_FRESH",
   "READY_PLAN_REVIEW",
@@ -20,14 +20,13 @@ export interface Candidate {
   rank: Rank;
   role: Role;
   blocking: number;
-  open_todos: number;
   prefer_agent: string | null;
   session: string | null;
 }
 
 const RANK_ROLE: Record<Rank, Role> = {
   resume: "worker",
-  READY_AGENT_REVIEW: "reviewer",
+  READY_WORK_REVIEW: "reviewer",
   READY_WORK_STARTED: "worker",
   READY_WORK_FRESH: "worker",
   READY_PLAN_REVIEW: "reviewer",
@@ -39,8 +38,8 @@ function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
   if (resumable.has(task.id)) {
     return "resume";
   }
-  if (task.state === "READY_AGENT_REVIEW") {
-    return "READY_AGENT_REVIEW";
+  if (task.state === "READY_WORK_REVIEW") {
+    return "READY_WORK_REVIEW";
   }
   if (task.state === "READY_WORK") {
     return task.workspace === null ? "READY_WORK_FRESH" : "READY_WORK_STARTED";
@@ -71,7 +70,6 @@ export function candidates(
       rank,
       role: RANK_ROLE[rank],
       blocking: blocking.get(id) ?? 0,
-      open_todos: openCount(task.todos),
       prefer_agent: task.workspace?.agent ?? null,
       session: rank === "resume" ? (task.workspace?.session ?? null) : null,
     });
@@ -81,7 +79,6 @@ export function candidates(
     (a, b) =>
       RANKS.indexOf(a.rank) - RANKS.indexOf(b.rank) ||
       b.blocking - a.blocking ||
-      a.open_todos - b.open_todos ||
       a.task_id.localeCompare(b.task_id),
   );
 }

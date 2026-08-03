@@ -101,8 +101,6 @@ function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
     title: "port the console",
     state: "WORKING",
     state_entered: new Date(1000).toISOString(),
-    open_todos: 2,
-    failures: 0,
     open_task_graph_updates: 0,
     depends_on: [],
     blocking: 0,
@@ -130,7 +128,6 @@ function candidateOf(overrides: Partial<Candidate> = {}): Candidate {
     rank: "READY_WORK_FRESH",
     role: "worker",
     blocking: 0,
-    open_todos: 0,
     prefer_agent: null,
     session: null,
     ...overrides,
@@ -1007,7 +1004,7 @@ describe("the queue header", () => {
     const { line } = queueHeader(
       viewOf({
         queue: [
-          candidateOf({ task_id: "000001", rank: "READY_AGENT_REVIEW" }),
+          candidateOf({ task_id: "000001", rank: "READY_WORK_REVIEW" }),
           candidateOf({ task_id: "000002", rank: "READY_WORK_STARTED" }),
           candidateOf({ task_id: "000003", rank: "resume" }),
         ],
@@ -1017,7 +1014,7 @@ describe("the queue header", () => {
     );
     const text = plain(line);
 
-    expect(text).toContain("000001 READY_AGENT_REVIEW");
+    expect(text).toContain("000001 READY_WORK_REVIEW");
     expect(text.indexOf("000001")).toBeLessThan(text.indexOf("000002"));
     expect(text).toContain("000002 READY_WORK");
     expect(text).toContain("000003 resume");
