@@ -4,6 +4,14 @@ export type Activity =
   | { kind: "compacting"; reason: string; started_at: number }
   | { kind: "none" };
 
+export type ToolCall = Extract<Activity, { kind: "tool-call" }>;
+
+export const ABORTABLE_TOOL = "bash";
+
+export function abortable(activity: Activity): activity is ToolCall {
+  return activity.kind === "tool-call" && activity.tool === ABORTABLE_TOOL;
+}
+
 export function toolTarget(
   toolName: string,
   args: Record<string, unknown>,
@@ -32,8 +40,8 @@ export function toolCall(
   };
 }
 
-function elapsed(started_at: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - started_at) / 1000));
+export function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) {
     return `${seconds}s`;
   }
@@ -67,7 +75,7 @@ export function elapsedSuffix(activity: Activity): string {
   if (activity.kind === "none") {
     return "";
   }
-  return ` (${elapsed(activity.started_at)})`;
+  return ` (${elapsed(Date.now() - activity.started_at)})`;
 }
 
 export function describeActivity(activity: Activity): string {

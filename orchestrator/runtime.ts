@@ -2,30 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { TaskId } from "./task.ts";
+import { ALL_ROLES, type Role } from "./states.ts";
 
 export const SERVER_ROOT = "/tmp/task-graph-server";
 
 export const SERVER_LOG_CAP_BYTES = 100 * 1024 * 1024;
-
-export const ALL_ROLES = ["worker", "reviewer", "planner"] as const;
-
-export type Role = (typeof ALL_ROLES)[number];
-
-export const AGENT_STATES = [
-  "PLANNING",
-  "PLAN_REVIEWING",
-  "WORKING",
-  "WORK_REVIEWING",
-] as const;
-
-export type ClaimState = (typeof AGENT_STATES)[number];
-
-export const STATE_ROLE: Record<ClaimState, Role> = {
-  PLANNING: "planner",
-  PLAN_REVIEWING: "reviewer",
-  WORKING: "worker",
-  WORK_REVIEWING: "reviewer",
-};
 
 export function repoKey(repoPath: string): string {
   return path.resolve(repoPath).replaceAll("/", "-");
@@ -45,7 +26,9 @@ export function graphKey(repoPath: string, home = os.homedir()): string {
 }
 
 export function taskGraphRoot(): string {
-  return process.env.TASK_GRAPH_TASKS_ROOT ?? path.join(os.homedir(), "task-graph");
+  return (
+    process.env.TASK_GRAPH_TASKS_ROOT ?? path.join(os.homedir(), "task-graph")
+  );
 }
 
 export function defaultTasksDir(repoPath: string): string {
@@ -137,6 +120,10 @@ export class Runtime {
     return path.join(this.taskDir(id), "history");
   }
 
+  findings(id: TaskId): string {
+    return path.join(this.taskDir(id), "findings.json");
+  }
+
   worktree(id: TaskId): string {
     return path.join(this.taskDir(id), "worktree");
   }
@@ -159,9 +146,9 @@ export class Runtime {
 
   prepare(id: TaskId): void {
     fs.mkdirSync(this.history(id), { recursive: true });
-    fs.mkdirSync(this.sessionDir(id, "worker"), { recursive: true });
-    fs.mkdirSync(this.sessionDir(id, "reviewer"), { recursive: true });
-    fs.mkdirSync(this.sessionDir(id, "planner"), { recursive: true });
+    for (const role of ALL_ROLES) {
+      fs.mkdirSync(this.sessionDir(id, role), { recursive: true });
+    }
     fs.mkdirSync(this.queueDir(id), { recursive: true });
   }
 

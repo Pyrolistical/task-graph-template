@@ -8,27 +8,31 @@ import {
   writeTaskFile,
 } from "./task.ts";
 import { applyTransition } from "./transition.ts";
+import { takeClaim } from "./claim.ts";
 import { git, gitOrThrow } from "./git.ts";
 import { tempDir } from "./temp.ts";
-import type { ClaimState } from "./runtime.ts";
+import type { ClaimState } from "./states.ts";
 
 const REPO_ROOT = path.join(import.meta.dir, "..");
 
 export interface Step {
   todos?: string[];
+  design?: string;
   notes?: string;
   submit?: boolean;
   findings?: string[];
   delegations?: string[];
   blocked?: string;
-  result_tool?: { name: string; args: Record<string, unknown> };
   raw_final_message?: string;
   tamper?: { from: string; to: string };
   commit?: { path: string; contents: string };
   write?: { path: string; contents: string };
   clean?: string[];
   stop_reason?: string;
+  output_tokens?: number;
   loop?: number;
+  compact?: string;
+  compact_after_result?: string;
   busy_ms?: number;
   start_delay_ms?: number;
   new_session_delay_ms?: number;
@@ -51,18 +55,23 @@ const flag = (name) => {
 const sessionDir = flag("--session-dir");
 const [taskId, state] = (flag("--name") ?? "").split(" ");
 const role = {
-  PLANNING: "planner",
-  PLAN_REVIEWING: "reviewer",
-  WORKING: "worker",
-  WORK_REVIEWING: "reviewer",
+  DESIGN: "designer",
+  DESIGN_REVIEW: "reviewer",
+  PLAN: "planner",
+  PLAN_REVIEW: "reviewer",
+  WORK: "worker",
+  WORK_REVIEW: "reviewer",
 }[state] ?? "worker";
 const plan = JSON.parse(fs.readFileSync(process.env.FAKE_PI_PLAN, "utf-8"));
 const steps = (plan[taskId] ?? {})[state] ?? [];
-const counter = path.join(sessionDir, "prompt-count");
+const counter = path.join(sessionDir, "prompt-count-" + state);
 
 let sessionFile = null;
 let busy = false;
 let busyTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingFinish: (() => void) | null = null;
+let acted = false;
+let toolEnded = false;
 let lastText = "done";
 let prompts = fs.existsSync(counter)
   ? Number(fs.readFileSync(counter, "utf-8"))
@@ -75,15 +84,14 @@ function assignmentPath() {
 }
 
 function resultCall(step) {
-  if (step.result_tool) return step.result_tool;
   if (step.blocked) {
     return { name: "blocked", args: { message: step.blocked } };
   }
   if (step.submit) {
-    if (state === "PLAN_REVIEWING") {
+    if (state === "DESIGN_REVIEW" || state === "PLAN_REVIEW") {
       return { name: "submit", args: { findings: step.findings ?? [] } };
     }
-    if (state === "WORK_REVIEWING") {
+    if (state === "WORK_REVIEW") {
       return {
         name: "submit",
         args: {
@@ -97,8 +105,8 @@ function resultCall(step) {
   return null;
 }
 
-function appendSection(text, heading, content) {
-  return text + "\\n\\n" + heading + "\\n\\n" + content + "\\n";
+function appendSection(text, content) {
+  return text + "\\n" + content + "\\n";
 }
 
 function act(step) {
@@ -107,10 +115,13 @@ function act(step) {
 
   if (step.todos) {
     const lines = step.todos.map((todo, i) => (i + 1) + ". " + todo);
-    text = appendSection(text, "## Todos", lines.join("\\n"));
+    text = appendSection(text, lines.join("\\n"));
+  }
+  if (step.design) {
+    text = appendSection(text, step.design);
   }
   if (step.notes) {
-    text = appendSection(text, "## Implementation Notes", step.notes);
+    text = appendSection(text, step.notes);
   }
   if (step.tamper) {
     text = text.split(step.tamper.from).join(step.tamper.to);
@@ -141,8 +152,21 @@ function act(step) {
   }
 }
 
+function endTool(isError) {
+  if (toolEnded) return;
+  toolEnded = true;
+  emit({
+    type: "tool_execution_end",
+    toolCallId: "c1",
+    toolName: "bash",
+    isError,
+  });
+}
+
 function turn(step) {
   busy = true;
+  acted = false;
+  toolEnded = false;
   emit({ type: "agent_start" });
 
   if (step.loop) {
@@ -169,15 +193,17 @@ function turn(step) {
     return;
   }
 
-  emit({
-    type: "tool_execution_end",
-    toolCallId: "c1",
-    toolName: "bash",
-    isError: false,
-  });
+  if (step.compact) {
+    endTool(false);
+    if (steps.length > 0) act(step);
+    acted = true;
+    emit({ type: "compaction_start", reason: step.compact });
+  }
 
   const finish = () => {
-    if (steps.length > 0) act(step);
+    pendingFinish = null;
+    endTool(false);
+    if (steps.length > 0 && !acted) act(step);
     const result = resultCall(step);
     if (result !== null) {
       emit({
@@ -193,13 +219,20 @@ function turn(step) {
         isError: false,
       });
     }
+    if (step.compact_after_result) {
+      emit({ type: "compaction_start", reason: step.compact_after_result });
+      emit({ type: "agent_start" });
+    }
     lastText = step.raw_final_message ?? (result === null ? "done" : "submitted");
     emit({
       type: "message_end",
       message: {
         role: "assistant",
         stopReason: step.stop_reason ?? (result === null ? "stop" : "toolUse"),
-        usage: { cost: { total: 0.45 } },
+        usage:
+          step.output_tokens === undefined
+            ? { cost: { total: 0.45 } }
+            : { output: step.output_tokens, cost: { total: 0.45 } },
       },
     });
     emit({ type: "agent_end", messages: [], willRetry: false });
@@ -208,6 +241,7 @@ function turn(step) {
   };
 
   if (step.busy_ms) {
+    pendingFinish = finish;
     busyTimer = setTimeout(finish, step.busy_ms);
   } else {
     finish();
@@ -229,10 +263,6 @@ async function handle(command) {
       sessionFile = path.join(sessionDir, taskId + "-" + role + ".jsonl");
       fs.mkdirSync(sessionDir, { recursive: true });
       fs.writeFileSync(sessionFile, "");
-      fs.writeFileSync(
-        path.join(sessionDir, "system-prompt"),
-        fs.readFileSync((flag("--append-system-prompt") ?? "@").slice(1), "utf-8"),
-      );
       respond("new_session", command.id, { cancelled: false });
       break;
     }
@@ -273,6 +303,28 @@ async function handle(command) {
         },
       });
       emit({ type: "agent_settled" });
+      break;
+    }
+    case "abort_bash": {
+      respond("abort_bash", command.id);
+      endTool(true);
+      if (busyTimer !== null) {
+        clearTimeout(busyTimer);
+        busyTimer = null;
+      }
+      if (pendingFinish !== null) {
+        const finish = pendingFinish;
+        finish();
+      }
+      break;
+    }
+    case "steer": {
+      respond("steer", command.id);
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(sessionDir, "steers.jsonl"),
+        JSON.stringify(command.message) + "\\n",
+      );
       break;
     }
     case "prompt": {
@@ -333,12 +385,12 @@ export function promptsTo(sessionDir: string): string[] {
   return messagesIn(sessionDir, "prompts.jsonl");
 }
 
-export function systemPromptTo(sessionDir: string): string {
-  return fs.readFileSync(path.join(sessionDir, "system-prompt"), "utf-8");
-}
-
 export function promptsOverlapping(sessionDir: string): string[] {
   return messagesIn(sessionDir, "overlaps.jsonl");
+}
+
+export function steersTo(sessionDir: string): string[] {
+  return messagesIn(sessionDir, "steers.jsonl");
 }
 
 export interface Fixture {
@@ -359,16 +411,16 @@ export function makeFixture(slots = 1): Fixture {
   const overridesDir = path.join(repo, "orchestrator");
 
   fs.mkdirSync(tasksDir);
-  fs.copyFileSync(
-    path.join(REPO_ROOT, "tasks", "template.md"),
-    path.join(tasksDir, "template.md"),
-  );
   fs.writeFileSync(path.join(tasksDir, "next-task-id"), "1\n");
 
   fs.cpSync(
     path.join(REPO_ROOT, "orchestrator", "prompts"),
     path.join(orchestratorDir, "prompts"),
     { recursive: true },
+  );
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "orchestrator", "template.md"),
+    path.join(orchestratorDir, "template.md"),
   );
   const agentsPath = path.join(repo, "agents.json");
   fs.writeFileSync(
@@ -423,7 +475,7 @@ export function unplannedTask(
   title: string,
   checks: string[] = [],
 ): string {
-  const { id } = createTask(fixture.tasksDir, title);
+  const { id } = createTask(fixture.tasksDir, fixture.orchestratorDir, title);
   if (checks.length > 0) {
     withLock(fixture.tasksDir, () => {
       const filePath = findTaskFile(id, fixture.tasksDir)!;
@@ -444,18 +496,31 @@ export function readyTask(
   checks: string[] = [],
 ): string {
   const id = unplannedTask(fixture, title, checks);
-  applyTransition(fixture.tasksDir, id, "claim", {
-    agentName: "planner",
+  takeClaim(fixture.tasksDir, id, { agentName: "designer", pid: process.pid });
+  applyTransition(fixture.tasksDir, id, "submit", {});
+  takeClaim(fixture.tasksDir, id, {
+    agentName: "design-reviewer",
     pid: process.pid,
   });
+  const designed = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
+  applyTransition(fixture.tasksDir, id, "submit", { body: designed });
+  takeClaim(fixture.tasksDir, id, { agentName: "planner", pid: process.pid });
   applyTransition(fixture.tasksDir, id, "submit", {});
-  applyTransition(fixture.tasksDir, id, "claim", {
+  takeClaim(fixture.tasksDir, id, {
     agentName: "plan-reviewer",
     pid: process.pid,
   });
   const body = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
   applyTransition(fixture.tasksDir, id, "submit", { body });
   return id;
+}
+
+export function setBody(fixture: Fixture, id: string, body: string): void {
+  withLock(fixture.tasksDir, () => {
+    const filePath = findTaskFile(id, fixture.tasksDir)!;
+    const { meta } = readTaskFile(filePath);
+    writeTaskFile(filePath, meta, body);
+  });
 }
 
 export function commitGraph(fixture: Fixture, message: string): void {

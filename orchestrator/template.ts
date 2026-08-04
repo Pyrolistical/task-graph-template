@@ -1,7 +1,5 @@
 export type TemplateValue =
-  | string
-  | number
-  | Record<string, string | number | boolean>[];
+  string | number | Record<string, string | number | boolean>[];
 
 export type TemplateVars = Record<string, TemplateValue>;
 

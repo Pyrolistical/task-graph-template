@@ -1,8 +1,9 @@
-You submitted without appending a `## Todos` section to
-`../ASSIGNMENT.md`.
+You submitted with nothing written under `## Todos` in `../ASSIGNMENT.md`.
 
-Append `## Todos` at the very end of the file — a numbered list, `1.` to `n.`
-consecutively, one concrete verifiable step per line, in the order you would
-take them. Do not change a single character above it. Then submit again by
-calling the `submit` tool — or `blocked` with a `message` naming the wall if
-you genuinely cannot plan this task.
+- The plan should be written under a `## Todos` heading at the end of
+  `../ASSIGNMENT.md`, a numbered list `1.` to `n.`.
+- Each todo is specific and verifiable, carrying everything needed to act on
+  it, and together they cover the design and every acceptance criterion.
+- Write no code and commit nothing.
+
+Finish by calling `submit`, or `blocked`.

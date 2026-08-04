@@ -3,26 +3,34 @@ import path from "node:path";
 import {
   type TaskId,
   type TaskMeta,
-  type TaskState,
-  type ValidState,
   closeTaskFile,
   findTaskFile,
-  isProcessAlive,
-  openCount,
   readTaskFile,
   withLock,
   writeTaskFile,
 } from "./task.ts";
+import {
+  type AdvancingState,
+  type HeldState,
+  type TaskState,
+  type ValidState,
+  ENTRY_STATE,
+  HELD_OF,
+  NEXT_STATE,
+  PHASE_OF,
+  RESUME_TARGETS,
+  isAgentState,
+  isHeld,
+  isStage,
+} from "./states.ts";
 
 export const TRANSITION_NAMES = [
-  "claim",
-  "release",
   "submit",
   "pass",
   "fail",
   "hold",
   "resume",
-  "addFeedback",
+  "feedback",
   "abort",
 ] as const;
 
@@ -31,80 +39,26 @@ export type TransitionName = (typeof TRANSITION_NAMES)[number];
 export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
   NEW: ["submit"],
   BLOCKED: ["submit"],
+  HELD_DESIGN: ["resume", "abort"],
   HELD_PLAN: ["resume", "abort"],
   HELD_WORK: ["resume", "abort"],
-  READY_PLAN: ["hold", "claim"],
-  PLANNING: ["submit", "hold", "release"],
-  READY_PLAN_REVIEW: ["claim", "hold"],
-  PLAN_REVIEWING: ["submit", "addFeedback", "hold", "release"],
-  READY_WORK: ["hold", "claim"],
-  WORKING: ["submit", "hold", "release"],
-  READY_CHECK: ["claim", "hold"],
-  CHECKING: ["pass", "fail", "hold", "release"],
-  READY_WORK_REVIEW: ["claim", "hold"],
-  WORK_REVIEWING: ["addFeedback", "submit", "hold", "release"],
-  READY_MANAGER_REVIEW: ["claim"],
-  MANAGER_REVIEWING: ["addFeedback", "submit", "abort", "release"],
-  READY_TASK_GRAPH_UPDATE: ["claim"],
-  TASK_GRAPH_UPDATING: ["submit", "release"],
-};
-
-export const CLAIM_TARGETS: Partial<Record<ValidState, ValidState>> = {
-  READY_PLAN: "PLANNING",
-  READY_PLAN_REVIEW: "PLAN_REVIEWING",
-  READY_WORK: "WORKING",
-  READY_CHECK: "CHECKING",
-  READY_WORK_REVIEW: "WORK_REVIEWING",
-  READY_MANAGER_REVIEW: "MANAGER_REVIEWING",
-  READY_TASK_GRAPH_UPDATE: "TASK_GRAPH_UPDATING",
-};
-
-const RELEASE_TARGETS: Partial<Record<ValidState, ValidState>> = {
-  PLANNING: "READY_PLAN",
-  PLAN_REVIEWING: "READY_PLAN_REVIEW",
-  WORKING: "READY_WORK",
-  CHECKING: "READY_CHECK",
-  WORK_REVIEWING: "READY_WORK_REVIEW",
-  MANAGER_REVIEWING: "READY_MANAGER_REVIEW",
-  TASK_GRAPH_UPDATING: "READY_TASK_GRAPH_UPDATE",
-};
-
-const SUBMIT_TARGETS: Partial<Record<ValidState, ValidState>> = {
-  PLANNING: "READY_PLAN_REVIEW",
-  PLAN_REVIEWING: "READY_WORK",
-  WORKING: "READY_CHECK",
-  WORK_REVIEWING: "READY_MANAGER_REVIEW",
-};
-
-const PASS_TARGETS: Partial<Record<ValidState, TaskState>> = {
-  CHECKING: "READY_WORK_REVIEW",
+  DESIGN: ["submit", "hold"],
+  DESIGN_REVIEW: ["submit", "feedback", "hold"],
+  PLAN: ["submit", "hold"],
+  PLAN_REVIEW: ["submit", "feedback", "hold"],
+  WORK: ["submit", "hold"],
+  CHECK: ["pass", "fail", "hold"],
+  WORK_REVIEW: ["submit", "feedback", "hold"],
+  MANAGER_REVIEW: ["feedback", "submit", "abort"],
 };
 
 const FAIL_TARGETS: Partial<Record<ValidState, ValidState>> = {
-  CHECKING: "READY_WORK",
+  CHECK: "WORK",
 };
 
-const UNCLAIMED_STATES: TaskState[] = [
-  "NEW",
-  "BLOCKED",
-  "HELD_PLAN",
-  "HELD_WORK",
-  "READY_PLAN",
-  "READY_PLAN_REVIEW",
-  "READY_WORK",
-  "READY_CHECK",
-  "READY_WORK_REVIEW",
-  "READY_MANAGER_REVIEW",
-  "READY_TASK_GRAPH_UPDATE",
-  "CLOSED",
-];
+const AGENT_SPEECH: TransitionName[] = ["submit", "feedback"];
 
 export interface TransitionArgs {
-  agentName?: string;
-  pid?: number;
-  branch?: string;
-  worktree?: string;
-  session?: string;
   reason?: string;
   body?: string;
   findings?: string[];
@@ -128,15 +82,6 @@ function requireText(value: unknown, label: string): string {
   return value;
 }
 
-function requirePid(value: unknown): number {
-  if (!Number.isInteger(value) || (value as number) <= 0) {
-    throw new Error(
-      `"pid" must be a positive integer, got ${JSON.stringify(value)}`,
-    );
-  }
-  return value as number;
-}
-
 function requireFindings(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`"findings" must be a non-empty list`);
@@ -155,76 +100,29 @@ function mutate(
   body: string,
 ): { target: TaskState | null; body?: string } {
   switch (name) {
-    case "claim": {
-      if (meta.claimed_by !== null) {
-        throw new Error(
-          `Task "${meta.id}" is already claimed by "${meta.claimed_by}" (PID ${meta.claimed_pid})`,
-        );
-      }
-      meta.claimed_by = requireText(args.agentName, "agentName");
-      meta.claimed_pid = requirePid(args.pid);
-      if (args.branch !== undefined || args.worktree !== undefined) {
-        meta.workspace = {
-          branch: requireText(args.branch, "branch"),
-          worktree: requireText(args.worktree, "worktree"),
-          agent: meta.claimed_by,
-          session: args.session === undefined ? null : args.session,
-        };
-      }
-      return { target: CLAIM_TARGETS[state]! };
-    }
-
-    case "release": {
-      if (meta.claimed_pid === null) {
-        throw new Error(
-          `Task "${meta.id}" is in ${state} with no claim to release`,
-        );
-      }
-      if (isProcessAlive(meta.claimed_pid)) {
-        throw new Error(
-          `Task "${meta.id}" is still claimed by a live process (PID ${meta.claimed_pid}); release is only for dead claims`,
-        );
-      }
-      return { target: RELEASE_TARGETS[state]! };
-    }
-
     case "submit": {
       if (state === "NEW") {
         return {
-          target: meta.depends_on.length > 0 ? "BLOCKED" : "READY_PLAN",
+          target: meta.depends_on.length > 0 ? "BLOCKED" : "DESIGN",
         };
       }
       if (state === "BLOCKED") {
         return {
-          target: meta.depends_on.length > 0 ? null : "READY_PLAN",
+          target: meta.depends_on.length > 0 ? null : ENTRY_STATE,
         };
       }
-      if (state === "MANAGER_REVIEWING") {
-        return {
-          target:
-            meta.task_graph_updates.length === 0
-              ? "CLOSED"
-              : "READY_TASK_GRAPH_UPDATE",
-        };
-      }
-      if (state === "TASK_GRAPH_UPDATING") {
-        const remaining = openCount(meta.task_graph_updates);
-        if (remaining > 0) {
-          throw new Error(
-            `Task "${meta.id}" still has ${remaining} open task graph update${remaining === 1 ? "" : "s"}`,
-          );
-        }
+      if (state === "MANAGER_REVIEW") {
         return { target: "CLOSED" };
       }
-      const body =
-        state === "PLAN_REVIEWING" || state === "WORKING"
+      const submitted =
+        state === "DESIGN_REVIEW" || state === "PLAN_REVIEW" || state === "WORK"
           ? requireText(args.body, "body")
           : undefined;
-      return { target: SUBMIT_TARGETS[state]!, body };
+      return { target: NEXT_STATE[state as AdvancingState], body: submitted };
     }
 
     case "pass": {
-      return { target: PASS_TARGETS[state]! };
+      return { target: NEXT_STATE[state as AdvancingState] };
     }
 
     case "fail": {
@@ -232,45 +130,39 @@ function mutate(
     }
 
     case "hold": {
+      if (!isStage(state)) {
+        throw new Error(`Task "${meta.id}" has no phase to be held from`);
+      }
       meta.held_reason = requireText(args.reason, "reason");
-      return {
-        target:
-          state === "PLANNING" ||
-          state === "PLAN_REVIEWING" ||
-          state === "READY_PLAN" ||
-          state === "READY_PLAN_REVIEW"
-            ? "HELD_PLAN"
-            : "HELD_WORK",
-      };
+      return { target: HELD_OF[PHASE_OF[state]] };
     }
 
     case "resume": {
+      if (!isHeld(state)) {
+        throw new Error(`Task "${meta.id}" is not held`);
+      }
       if (meta.depends_on.length > 0) {
         return { target: "BLOCKED" };
       }
-      return {
-        target: state === "HELD_PLAN" ? "READY_PLAN" : "READY_WORK",
-      };
+      return { target: RESUME_TARGETS[state] };
     }
 
-    case "addFeedback": {
+    case "feedback": {
       const findings = requireFindings(args.findings);
-      if (state === "PLAN_REVIEWING") {
-        return { target: "READY_PLAN" };
+      if (state === "DESIGN_REVIEW") {
+        return { target: "DESIGN" };
+      }
+      if (state === "PLAN_REVIEW") {
+        return { target: "PLAN" };
       }
       const findingsSection = `\n\n# Review findings\n\n${findings
         .map((finding) => `- ${finding}`)
-        .join("\n")}\n\n## Implementation Notes\n\n`;
-      return { target: "READY_WORK", body: body + findingsSection };
+        .join("\n")}\n`;
+      return { target: "WORK", body: body + findingsSection };
     }
 
     case "abort": {
-      return {
-        target:
-          meta.task_graph_updates.length > 0
-            ? "READY_TASK_GRAPH_UPDATE"
-            : "CLOSED",
-      };
+      return { target: "CLOSED" };
     }
   }
 }
@@ -298,7 +190,7 @@ function propagateClose(
     dependentsUpdated.push(meta.id);
 
     if (meta.state === "BLOCKED" && meta.depends_on.length === 0) {
-      meta.state = "READY_PLAN";
+      meta.state = ENTRY_STATE;
       unblocked.push(meta.id);
     }
     meta.state_entered = now;
@@ -339,6 +231,15 @@ export function applyTransition(
         `Transition "${name}" is not valid from state "${from}". Valid transitions: ${allowed.join(", ")}`,
       );
     }
+    if (
+      isAgentState(from) &&
+      AGENT_SPEECH.includes(name) &&
+      meta.claimed_by === null
+    ) {
+      throw new Error(
+        `Transition "${name}" is the agent holding "${taskId}" speaking, but nothing is claiming it`,
+      );
+    }
 
     const now = new Date().toISOString();
     const { target, body: newBody } = mutate(meta, from, name, args, body);
@@ -348,13 +249,10 @@ export function applyTransition(
       meta.state = target;
     }
     meta.state_entered = now;
+    meta.claimed_by = null;
+    meta.claimed_pid = null;
 
-    if (target !== null && UNCLAIMED_STATES.includes(target)) {
-      meta.claimed_by = null;
-      meta.claimed_pid = null;
-    }
-
-    if (target !== null && target !== "HELD_PLAN" && target !== "HELD_WORK") {
+    if (target !== null && !isHeld(target)) {
       meta.held_reason = null;
     }
 

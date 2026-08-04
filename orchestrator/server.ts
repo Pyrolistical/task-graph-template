@@ -4,17 +4,19 @@ import {
   normalizeBody,
   type TaskId,
   type TaskMeta,
-  type TaskState,
-  type ValidState,
+  type Workspace,
+  detectCycles,
+  findTaskFile,
   isProcessAlive,
+  readTaskFile,
 } from "./task.ts";
 import {
-  CLAIM_TARGETS,
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
   applyTransition,
 } from "./transition.ts";
+import { type ClaimArgs, clearClaim, takeClaim } from "./claim.ts";
 import {
   type AgentRow,
   type AgentSlot,
@@ -24,12 +26,13 @@ import {
   idleRow,
   loadAgents,
 } from "./agents.ts";
-import { rotate } from "./assignment.ts";
+import { restored, rotate } from "./assignment.ts";
 import { append, drain, queueFile } from "./queue.ts";
+import { clearFindings, readFindings, writeFindings } from "./findings.ts";
 import {
-  ResultError,
   type AgentResult,
   type PlanReviewResults,
+  type ResultCall,
   type WorkReviewResults,
   resultFromCall,
 } from "./results.ts";
@@ -47,7 +50,8 @@ import {
 import { inbox } from "./inbox.ts";
 import { type IssueName, ISSUES, Prompts } from "./prompts.ts";
 import { LOOP_LIMIT, PiProcess, type StopReason } from "./rpc.ts";
-import type { Activity } from "./activity.ts";
+import { Rates } from "./rates.ts";
+import { type Activity, abortable } from "./activity.ts";
 import { type Candidate, candidates, plan } from "./scheduler.ts";
 import { type Command, takeCommand, watchCommands } from "./command.ts";
 import {
@@ -60,26 +64,95 @@ import {
 } from "./sandbox.ts";
 import {
   Runtime,
-  STATE_ROLE,
-  type ClaimState,
-  type Role,
   branchName,
   defaultTasksDir,
   snapshot,
   writeAtomic,
 } from "./runtime.ts";
+import {
+  type ClaimState,
+  type Role,
+  type TaskState,
+  HELD_STATES,
+  STATE_TOOLS,
+} from "./states.ts";
 import type { TemplateVars } from "./template.ts";
 import { TransitionLog } from "./transition-log.ts";
 
-const ABORTABLE_STATES: TaskState[] = [
-  "MANAGER_REVIEWING",
-  "HELD_PLAN",
-  "HELD_WORK",
-];
+const ABORTABLE_STATES: TaskState[] = ["MANAGER_REVIEW", ...HELD_STATES];
 
 export const BACKOFF_START_MS = 1000;
 export const BACKOFF_CAP_MS = 64000;
 export const MODEL_LOADING_MS = 5000;
+
+interface Snapshot {
+  tasks: Map<TaskId, TaskMeta>;
+  blocking: Map<TaskId, number>;
+}
+
+type Guard = "none" | "untouched" | "committed";
+
+interface WorktreeIssue {
+  name: IssueName;
+  detail: string;
+  vars: TemplateVars;
+}
+
+interface Authoring {
+  missing: IssueName;
+  section: string;
+  guard: Guard;
+  body: boolean;
+}
+
+interface Review {
+  back: ClaimState;
+  findings: string | null;
+  guard: Guard;
+  body: boolean;
+}
+
+const AUTHORING: Record<string, Authoring> = {
+  DESIGN: {
+    missing: "missing-design",
+    section: "## Design",
+    guard: "untouched",
+    body: false,
+  },
+  PLAN: {
+    missing: "missing-todos",
+    section: "## Todos",
+    guard: "untouched",
+    body: false,
+  },
+  WORK: {
+    missing: "missing-notes",
+    section: "## Implementation Notes",
+    guard: "committed",
+    body: true,
+  },
+};
+
+const REVIEWS: Record<string, Review> = {
+  DESIGN_REVIEW: {
+    back: "DESIGN",
+    findings: null,
+    guard: "untouched",
+    body: true,
+  },
+  PLAN_REVIEW: {
+    back: "PLAN",
+    findings: null,
+    guard: "untouched",
+    body: true,
+  },
+  WORK_REVIEW: {
+    back: "WORK",
+    findings: "work-findings",
+    guard: "none",
+    body: false,
+  },
+};
 
 export interface ServerOptions {
   repo: string;
@@ -97,7 +170,11 @@ interface Worker {
   slot: AgentSlot;
   state: AgentState;
   task_id: TaskId | null;
+  stage: ClaimState | null;
   role: Role | null;
+  branch: string | null;
+  worktree: string | null;
+  head: string | null;
   process: PiProcess | null;
   started_at: string | null;
   dispatched: string | null;
@@ -105,6 +182,8 @@ interface Worker {
   session: string | null;
   tokens: number | null;
   contextPercent: number | null;
+  compactions: number;
+  results: ResultCall[];
   issues: Map<IssueName, number>;
   backoff: number;
   retry_at: string | null;
@@ -116,7 +195,11 @@ function freshWorker(slot: AgentSlot): Worker {
     slot,
     state: "IDLE",
     task_id: null,
+    stage: null,
     role: null,
+    branch: null,
+    worktree: null,
+    head: null,
     process: null,
     started_at: null,
     dispatched: null,
@@ -124,6 +207,8 @@ function freshWorker(slot: AgentSlot): Worker {
     session: null,
     tokens: null,
     contextPercent: null,
+    compactions: 0,
+    results: [],
     issues: new Map(),
     backoff: BACKOFF_START_MS,
     retry_at: null,
@@ -142,6 +227,7 @@ export class Server {
   readonly checks = new CheckRunner();
   readonly prompts: Prompts;
   readonly base: string;
+  readonly rates = new Rates();
 
   private readonly piCommand: string;
   private readonly sandboxCommand: string;
@@ -153,6 +239,7 @@ export class Server {
   private readonly closed = new Map<TaskId, TaskRow>();
   private readonly disabled = new Set<string>();
   private problems = new Map<string, string>();
+  private cycling = new Set<TaskId>();
   private watcher: fs.FSWatcher | null = null;
   private scheduling = false;
   private dispatching = false;
@@ -191,18 +278,10 @@ export class Server {
   }
 
   private seedTasksDir(): void {
-    fs.mkdirSync(this.tasksDir, { recursive: true });
-    const templatePath = path.join(this.tasksDir, "template.md");
-    if (!fs.existsSync(templatePath)) {
-      fs.copyFileSync(
-        path.join(import.meta.dir, "..", "tasks", "template.md"),
-        templatePath,
-      );
-    }
-    const nextIdPath = path.join(this.tasksDir, "next-task-id");
-    if (!fs.existsSync(nextIdPath)) {
-      fs.writeFileSync(nextIdPath, "1\n");
-    }
+    fs.cpSync(path.join(import.meta.dir, "..", "tasks"), this.tasksDir, {
+      recursive: true,
+      force: false,
+    });
   }
 
   static async start(options: ServerOptions): Promise<Server> {
@@ -311,8 +390,27 @@ export class Server {
       }
     }
     this.problems = problems;
+    this.reportCycles(tasks);
 
     return tasks;
+  }
+
+  private reportCycles(tasks: Map<TaskId, TaskMeta>): void {
+    const cycling = new Set(detectCycles(tasks));
+
+    for (const id of cycling) {
+      if (!this.cycling.has(id)) {
+        this.runtime.log(
+          `task ${id} depends on itself through ${tasks.get(id)?.depends_on.join(", ")}; it can never unblock`,
+        );
+      }
+    }
+    this.cycling = cycling;
+  }
+
+  private snapshot(): Snapshot {
+    const tasks = this.tasks();
+    return { tasks, blocking: blockingCounts(tasks) };
   }
 
   reloadPrompts(): string[] {
@@ -375,14 +473,20 @@ export class Server {
       throw new Error(`${name} is not running`);
     }
 
-    if (worker.process.stream.state.activity.kind === "none") {
-      throw new Error(`${name} is not doing anything to abort`);
+    const activity = worker.process.stream.state.activity;
+    if (!abortable(activity)) {
+      throw new Error(`${name} is not running a bash tool call to abort`);
     }
 
-    worker.process.abort();
-    this.runtime.log(`${name} aborted`);
+    worker.process.abortBash();
+    this.runtime.log(`${name} aborted bash: ${activity.target}`);
 
     return this.agentRows().find((row) => row.name === name)!;
+  }
+
+  claim(taskId: TaskId, args: ClaimArgs): void {
+    takeClaim(this.tasksDir, taskId, args);
+    this.remember(taskId, this.tasks());
   }
 
   transition(
@@ -415,7 +519,7 @@ export class Server {
       to,
       by,
     });
-    this.remember(taskId);
+    this.remember(taskId, tasks);
     return result;
   }
 
@@ -431,7 +535,7 @@ export class Server {
     }
   }
 
-  private remember(taskId: TaskId): void {
+  private remember(taskId: TaskId, tasks: Map<TaskId, TaskMeta>): void {
     const at = this.recent.indexOf(taskId);
     if (at !== -1) {
       this.recent.splice(at, 1);
@@ -440,7 +544,7 @@ export class Server {
 
     while (this.recent.length > RECENT_TASKS) {
       const dropped = this.recent.pop()!;
-      if (!this.tasks().has(dropped)) {
+      if (!tasks.has(dropped)) {
         this.closed.delete(dropped);
         this.runtime.discard(dropped);
       }
@@ -480,10 +584,11 @@ export class Server {
     const ids = new Set<TaskId>();
     for (const [id, task] of tasks) {
       if (
-        task.state === "READY_WORK" &&
+        task.state === "WORK" &&
+        task.claimed_by === null &&
         task.workspace?.session != null &&
         fs.existsSync(task.workspace.session) &&
-        fs.existsSync(queueFile(this.runtime.taskDir(id), "WORKING"))
+        fs.existsSync(queueFile(this.runtime.taskDir(id), "WORK"))
       ) {
         ids.add(id);
       }
@@ -493,12 +598,13 @@ export class Server {
 
   async tick(): Promise<void> {
     await Promise.all([...this.pendingChecks.values()]);
-    this.reap();
-    this.startChecks();
+    const graph = this.snapshot();
+    this.reap(graph.tasks);
+    this.startChecks(graph.tasks);
     if (this.scheduling && !this.dispatching) {
       this.dispatching = true;
       try {
-        await this.dispatch();
+        await this.dispatch(graph);
       } finally {
         this.dispatching = false;
       }
@@ -535,18 +641,17 @@ export class Server {
     });
   }
 
-  private reap(): void {
+  private reap(tasks: Map<TaskId, TaskMeta>): void {
     const held = new Set(
       [...this.workers.values()]
         .filter((worker) => worker.process?.alive === true)
         .map((worker) => worker.task_id),
     );
 
-    for (const [id, task] of this.tasks()) {
+    for (const [id, task] of tasks) {
       if (
         task.claimed_pid === null ||
         held.has(id) ||
-        this.checks.isRunning(id) ||
         isProcessAlive(task.claimed_pid)
       ) {
         continue;
@@ -555,8 +660,9 @@ export class Server {
       this.runtime.log(
         `reaping ${id}: "${task.claimed_by}" (pid ${task.claimed_pid}) is gone`,
       );
-      this.harvest(id);
-      this.transition(id, "release", {}, "server");
+      this.harvestWorkspace(task.workspace);
+      clearClaim(this.tasksDir, id);
+      this.remember(id, this.tasks());
 
       for (const worker of this.workers.values()) {
         if (worker.task_id === id && worker.process?.alive !== true) {
@@ -567,8 +673,7 @@ export class Server {
     }
   }
 
-  private async dispatch(): Promise<void> {
-    const tasks = this.tasks();
+  private async dispatch({ tasks, blocking }: Snapshot): Promise<void> {
     const free = [...this.workers.values()]
       .filter(
         (worker) =>
@@ -579,7 +684,9 @@ export class Server {
     for (const { candidate, slot } of plan(
       tasks,
       this.resumable(tasks),
+      blocking,
       free,
+      this.rates.rateOf,
     )) {
       const task = tasks.get(candidate.task_id);
       if (task === undefined) {
@@ -603,10 +710,11 @@ export class Server {
         `${task.id} left ${task.state} before ${slot.name} could claim it`,
       );
     }
-  }
-
-  private roleOf(state: TaskState): Role {
-    return STATE_ROLE[CLAIM_TARGETS[state as ValidState] as ClaimState]!;
+    if (current.claimed_by !== null) {
+      throw new Error(
+        `${task.id} was claimed by "${current.claimed_by}" before ${slot.name} could claim it`,
+      );
+    }
   }
 
   private launch(taskId: TaskId, slot: AgentSlot, cwd: string): string[] {
@@ -628,6 +736,7 @@ export class Server {
     state: ClaimState,
     slot: AgentSlot,
     cwd: string,
+    worker: Worker,
   ) {
     return new PiProcess(
       {
@@ -636,13 +745,30 @@ export class Server {
         sessionDir: this.runtime.sessionDir(taskId, role),
         name: `${taskId} ${state}`,
         cwd,
-        systemPrompt: this.prompts.systemPrompt(state),
-        extension: path.join(this.orchestratorDir, `result-tools-${role}.ts`),
+        extension: path.join(
+          this.orchestratorDir,
+          `result-tools-${STATE_TOOLS[state]}.ts`,
+        ),
         log: this.runtime.rpcLog(taskId),
       },
       this.piCommand,
       this.launch(taskId, slot, cwd),
+      (sample) => {
+        this.rates.record(slot.agent, sample);
+      },
+      () => {
+        worker.compactions += 1;
+        this.track(worker, this.compacted(worker));
+      },
+      (call) => {
+        worker.results.push(call);
+      },
     );
+  }
+
+  private async prompt(worker: Worker, message: string): Promise<void> {
+    worker.results = [];
+    await worker.process!.prompt(message);
   }
 
   private async assign(
@@ -654,7 +780,8 @@ export class Server {
     worker.state = "SPAWNING";
     worker.task_id = task.id;
     worker.started_at = new Date().toISOString();
-    worker.role = this.roleOf(task.state);
+    worker.stage = candidate.stage;
+    worker.role = candidate.role;
     worker.issues.clear();
 
     if (candidate.rank === "resume") {
@@ -663,52 +790,63 @@ export class Server {
     }
 
     const role = worker.role;
-    const claimed = CLAIM_TARGETS[task.state as ValidState] as ClaimState;
+    const stage = candidate.stage;
     this.runtime.prepare(task.id);
     const worktree = this.runtime.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
+    worker.worktree = worktree;
+    worker.branch = branch;
 
     if (!fs.existsSync(worktree)) {
       git.addWorkspace(this.repo, branch, worktree, this.base);
     }
+    worker.head = git.head(worktree);
 
-    if (claimed === "PLAN_REVIEWING" || claimed === "WORK_REVIEWING") {
+    if (
+      stage === "DESIGN_REVIEW" ||
+      stage === "PLAN_REVIEW" ||
+      stage === "WORK_REVIEW"
+    ) {
       const assignmentPath = this.runtime.assignment(task.id);
       worker.dispatched = fs.existsSync(assignmentPath)
         ? fs.readFileSync(assignmentPath, "utf-8")
-        : this.writeAssignment(task);
+        : this.writeAssignment(task, null);
     } else {
-      worker.dispatched = this.writeAssignment(task);
+      worker.dispatched = this.writeAssignment(task, AUTHORING[stage]!.section);
     }
 
-    const process = this.spawn(task.id, role, claimed, slot, worktree);
+    const process = this.spawn(task.id, role, stage, slot, worktree, worker);
     worker.process = process;
 
     const session = await process.newSession();
     worker.session = session;
     this.requireStill(task, slot);
-    this.transition(
-      task.id,
-      "claim",
-      { agentName: slot.name, pid: process.pid, branch, worktree, session },
-      slot.name,
-    );
+    this.claim(task.id, {
+      agentName: slot.name,
+      pid: process.pid,
+      branch,
+      worktree,
+      session,
+    });
 
     worker.state = "BUSY";
-    const queued = drain(this.runtime.taskDir(task.id), claimed);
-    const nudge = this.prompts.fragment("dispatch");
-    await process.prompt(queued === "" ? nudge : `${queued}\n\n${nudge}`);
+    const queued = drain(this.runtime.taskDir(task.id), stage);
+    const message = this.nudge(task.id, stage);
+    await this.prompt(
+      worker,
+      queued === "" ? message : `${queued}\n\n${message}`,
+    );
     this.track(worker, this.awaitSettle(worker));
   }
 
   private async promptQueued(
-    process: PiProcess,
+    worker: Worker,
     taskId: TaskId,
     state: ClaimState,
   ): Promise<void> {
     const queued = drain(this.runtime.taskDir(taskId), state);
     if (queued !== "") {
-      await process.prompt(queued);
+      await this.prompt(worker, queued);
     }
   }
 
@@ -717,46 +855,46 @@ export class Server {
     const workspace = task.workspace!;
     const role = worker.role!;
     const live = this.runtime.assignment(task.id);
+    worker.worktree = workspace.worktree;
+    worker.branch = workspace.branch;
+    worker.head = git.head(workspace.worktree);
 
     const process = this.spawn(
       task.id,
       role,
-      "WORKING",
+      "WORK",
       slot,
       workspace.worktree,
+      worker,
     );
     worker.process = process;
 
     await process.switchSession(workspace.session!);
     worker.session = workspace.session;
     this.requireStill(task, slot);
-    this.transition(
-      task.id,
-      "claim",
-      {
-        agentName: slot.name,
-        pid: process.pid,
-        branch: workspace.branch,
-        worktree: workspace.worktree,
-        session: workspace.session!,
-      },
-      slot.name,
-    );
+    this.claim(task.id, {
+      agentName: slot.name,
+      pid: process.pid,
+      branch: workspace.branch,
+      worktree: workspace.worktree,
+      session: workspace.session!,
+    });
 
     worker.dispatched = fs.readFileSync(live, "utf-8");
     worker.state = "BUSY";
 
-    await this.promptQueued(process, task.id, "WORKING");
+    await this.promptQueued(worker, task.id, "WORK");
     this.track(worker, this.awaitSettle(worker));
   }
 
-  private writeAssignment(task: TaskMeta): string {
+  private writeAssignment(task: TaskMeta, section: string | null): string {
     const live = this.runtime.assignment(task.id);
     rotate(live, this.runtime.history(task.id));
 
     const body = normalizeBody(readTaskBody(this.tasksDir, task.id));
-    fs.writeFileSync(live, body, "utf-8");
-    return body;
+    const dispatched = section === null ? body : `${body}\n${section}\n`;
+    fs.writeFileSync(live, dispatched, "utf-8");
+    return dispatched;
   }
 
   private async awaitSettle(worker: Worker): Promise<void> {
@@ -809,6 +947,35 @@ export class Server {
     await this.settle(worker, stopReason);
   }
 
+  private async compacted(worker: Worker): Promise<void> {
+    const process = worker.process;
+    if (process === null || !process.alive) {
+      return;
+    }
+
+    if (worker.results.length > 0) {
+      this.runtime.log(
+        `${worker.slot.name} on ${worker.task_id} compacted after its result: left alone to settle`,
+      );
+      return;
+    }
+
+    const resetting =
+      worker.role !== "worker" &&
+      worker.worktree !== null &&
+      worker.head !== null;
+
+    if (resetting) {
+      git.resetTo(worker.worktree!, worker.head!);
+    }
+
+    this.runtime.log(
+      `${worker.slot.name} on ${worker.task_id} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
+    );
+
+    await process.steer(this.nudge(worker.task_id!, worker.stage!));
+  }
+
   private async backOff(worker: Worker): Promise<void> {
     const message = worker.process?.stream.state.errorMessage ?? "";
     const loading = /503/.test(message) && /load/i.test(message);
@@ -835,7 +1002,7 @@ export class Server {
 
     worker.state = "BUSY";
     worker.retry_at = null;
-    await worker.process.prompt(this.prompts.fragment("dispatch"));
+    await this.prompt(worker, this.nudge(worker.task_id!, worker.stage!));
     this.track(worker, this.awaitSettle(worker));
   }
 
@@ -843,60 +1010,35 @@ export class Server {
     worker: Worker,
     stopReason: StopReason | null,
   ): Promise<void> {
-    const taskId = worker.task_id!;
-    const state = this.tasks().get(taskId)!.state as ClaimState;
-    const live = this.runtime.assignment(taskId);
-
-    const calls = worker.process!.stream.state.resultCalls;
+    const state = worker.stage!;
+    const calls = worker.results;
 
     if (stopReason === "length" || calls.length === 0) {
       await this.raise(worker, "missing-result", "");
       return;
     }
 
-    let result: AgentResult;
-    try {
-      result = resultFromCall(state, calls[calls.length - 1]!);
-    } catch (err) {
-      const issues =
-        err instanceof ResultError ? err.issues : [(err as Error).message];
-      await this.raise(worker, "unparsable-result", issues.join("; "), {
-        issues: issues.map((message) => ({ message })),
-      });
-      return;
-    }
+    const result: AgentResult = resultFromCall(state, calls[calls.length - 1]!);
 
     if (result.type === "blocked") {
       await this.raise(worker, "blocked", result.message);
       return;
     }
 
-    if (state === "PLANNING") {
-      await this.settlePlan(worker);
-      return;
-    }
-
-    if (state === "PLAN_REVIEWING") {
-      this.settlePlanReview(
+    const review = REVIEWS[state];
+    if (review !== undefined) {
+      await this.settleReview(
         worker,
-        result as Extract<PlanReviewResults, { type: "submit" }>,
-      );
-      return;
-    }
-
-    if (state === "WORK_REVIEWING") {
-      this.submitReview(
-        worker,
+        review,
         result as Extract<WorkReviewResults, { type: "submit" }>,
       );
       return;
     }
 
-    await this.settleWork(worker);
+    await this.settleAuthoring(worker, AUTHORING[state]!);
   }
 
   private diffAssignment(
-    state: ClaimState,
     dispatched: string,
     live: string,
   ): "ok" | "unchanged" | "modified" {
@@ -909,186 +1051,153 @@ export class Server {
     return "modified";
   }
 
-  private async settlePlan(worker: Worker): Promise<void> {
-    const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const live = this.runtime.assignment(taskId);
-
-    const diff = this.diffAssignment(
-      "PLANNING",
-      worker.dispatched!,
-      fs.readFileSync(live, "utf-8"),
-    );
-    if (diff === "unchanged") {
-      await this.raise(worker, "missing-todos", "");
-      return;
-    }
-    if (diff === "modified") {
-      await this.raise(worker, "modified-assignment", "");
-      return;
-    }
-
-    const issue = this.touchedWorktree(task);
-    if (issue !== null) {
-      await this.raise(worker, "modified-worktree", issue.detail, issue.vars);
-      return;
-    }
-
-    worker.process!.close();
-    this.transition(taskId, "submit", {}, worker.slot.name);
-    this.finish(worker);
-  }
-
-  private settlePlanReview(
-    worker: Worker,
-    result: Extract<PlanReviewResults, { type: "submit" }>,
+  private restoreAssignment(
+    taskId: TaskId,
+    dispatched: string,
+    live: string,
+    section: string | null,
   ): void {
-    const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const live = this.runtime.assignment(taskId);
-
-    const diff = this.diffAssignment(
-      "PLAN_REVIEWING",
-      worker.dispatched!,
-      fs.readFileSync(live, "utf-8"),
+    fs.writeFileSync(
+      this.runtime.assignment(taskId),
+      restored(dispatched, live, section),
+      "utf-8",
     );
-    if (diff !== "unchanged") {
-      this.raise(worker, "modified-assignment", "");
-      return;
-    }
-
-    const issue = this.touchedWorktree(task);
-    if (issue !== null) {
-      this.raise(worker, "modified-worktree", issue.detail, issue.vars);
-      return;
-    }
-
-    worker.process!.close();
-
-    if (result.findings.length === 0) {
-      this.transition(
-        taskId,
-        "submit",
-        { body: fs.readFileSync(live, "utf-8") },
-        worker.slot.name,
-      );
-    } else {
-      append(
-        this.runtime.taskDir(taskId),
-        "PLANNING",
-        this.prompts.fragment("plan-findings", {
-          findings: result.findings.map((finding) => ({ finding })),
-        }),
-      );
-      this.transition(
-        taskId,
-        "addFeedback",
-        { findings: result.findings },
-        "server",
-      );
-    }
-    this.finish(worker);
   }
 
-  private async settleWork(worker: Worker): Promise<void> {
-    const taskId = worker.task_id!;
-    const live = this.runtime.assignment(taskId);
+  private liveAssignment(taskId: TaskId): string {
+    return fs.readFileSync(this.runtime.assignment(taskId), "utf-8");
+  }
 
-    const diff = this.diffAssignment(
-      "WORKING",
-      worker.dispatched!,
-      fs.readFileSync(live, "utf-8"),
-    );
+  private async settleAuthoring(
+    worker: Worker,
+    spec: Authoring,
+  ): Promise<void> {
+    const taskId = worker.task_id!;
+    const live = this.liveAssignment(taskId);
+
+    const diff = this.diffAssignment(worker.dispatched!, live);
     if (diff === "unchanged") {
-      await this.raise(worker, "missing-notes", "");
+      await this.raise(worker, spec.missing, "");
       return;
     }
     if (diff === "modified") {
+      this.restoreAssignment(taskId, worker.dispatched!, live, spec.section);
       await this.raise(worker, "modified-assignment", "");
       return;
     }
 
-    const task = this.tasks().get(taskId)!;
-    const issue = this.uncommitted(task);
-    if (issue !== null) {
-      await this.raise(worker, "uncommitted", issue.detail, issue.vars);
+    if (await this.guarded(worker, spec.guard)) {
       return;
     }
 
     worker.process!.close();
+    clearFindings(this.runtime.findings(taskId));
     this.transition(
       taskId,
       "submit",
-      { body: fs.readFileSync(live, "utf-8") },
+      spec.body ? { body: live } : {},
       worker.slot.name,
     );
     this.finish(worker);
   }
 
-  private submitReview(
+  private async settleReview(
     worker: Worker,
+    spec: Review,
     result: Extract<WorkReviewResults, { type: "submit" }>,
-  ): void {
+  ): Promise<void> {
     const taskId = worker.task_id!;
-    const task = this.tasks().get(taskId)!;
-    const branch = task.workspace!.branch;
-    const live = this.runtime.assignment(taskId);
+    const live = this.liveAssignment(taskId);
 
-    const diff = this.diffAssignment(
-      "WORK_REVIEWING",
-      worker.dispatched!,
-      fs.readFileSync(live, "utf-8"),
-    );
-    if (diff !== "unchanged") {
-      this.raise(worker, "modified-assignment", "");
+    if (this.diffAssignment(worker.dispatched!, live) !== "unchanged") {
+      this.restoreAssignment(taskId, worker.dispatched!, live, null);
+      await this.raise(worker, "modified-assignment", "");
       return;
     }
 
-    const findings = [...result.findings];
-
-    if (
-      git.branchExists(this.repo, branch) &&
-      git.touchesTasks(this.repo, this.base, branch)
-    ) {
-      findings.push(this.prompts.fragment("wrote-to-tasks").trim());
+    if (await this.guarded(worker, spec.guard)) {
+      return;
     }
+
+    const findings = result.findings;
 
     worker.process!.close();
 
     if (findings.length === 0) {
-      this.transition(taskId, "submit", {}, worker.slot.name);
-    } else {
-      append(
-        this.runtime.taskDir(taskId),
-        "WORKING",
-        this.prompts.fragment("work-findings", {
-          findings: findings.map((finding) => ({ finding })),
-        }),
+      this.transition(
+        taskId,
+        "submit",
+        spec.body ? { body: live } : {},
+        worker.slot.name,
       );
-      this.transition(taskId, "addFeedback", { findings }, "server");
+    } else {
+      this.sendBack(taskId, spec.back, spec.findings, findings);
     }
-
     this.finish(worker);
   }
 
-  private uncommitted(
-    task: TaskMeta,
-  ): { detail: string; vars: TemplateVars } | null {
-    const worktree = task.workspace?.worktree ?? this.runtime.worktree(task.id);
+  private sendBack(
+    taskId: TaskId,
+    back: ClaimState,
+    fragment: string | null,
+    findings: string[],
+  ): void {
+    if (fragment === null) {
+      writeFindings(this.runtime.findings(taskId), findings);
+    } else {
+      append(
+        this.runtime.taskDir(taskId),
+        back,
+        this.prompts.fragment(fragment, {
+          findings: findings.map((finding) => ({ finding })),
+        }),
+      );
+    }
+    this.transition(taskId, "feedback", { findings }, "server");
+  }
+
+  private nudge(taskId: TaskId, state: ClaimState): string {
+    const findings = readFindings(this.runtime.findings(taskId));
+    if (findings.length === 0) {
+      return this.prompts.fragment(state);
+    }
+    return this.prompts.fragment(`${state}-with-findings`, {
+      findings: findings.map((finding) => ({ finding })),
+    });
+  }
+
+  private async guarded(worker: Worker, guard: Guard): Promise<boolean> {
+    if (guard === "none") {
+      return false;
+    }
+
+    const worktree = worker.worktree!;
     const dirty = git.uncommitted(worktree);
     const commits = git.commitCount(worktree, this.base);
+    const issue =
+      guard === "untouched"
+        ? this.untouched(dirty, commits)
+        : this.committed(dirty, commits);
 
+    if (issue === null) {
+      return false;
+    }
+
+    await this.raise(worker, issue.name, issue.detail, issue.vars);
+    return true;
+  }
+
+  private committed(dirty: string[], commits: number): WorktreeIssue | null {
     if (dirty.length === 0 && commits > 0) {
       return null;
     }
 
     return {
-      detail: [
+      name: "uncommitted",
+      detail: this.detailOf([
         commits === 0 ? "nothing is committed on the branch" : null,
         dirty.length === 0 ? null : `${dirty.length} uncommitted file(s)`,
-      ]
-        .filter((part) => part !== null)
-        .join("; "),
+      ]),
       vars: {
         empty: commits === 0 ? [{}] : [],
         dirty: dirty.length === 0 ? [] : [{ status: git.statusOf(dirty) }],
@@ -1096,30 +1205,27 @@ export class Server {
     };
   }
 
-  private touchedWorktree(
-    task: TaskMeta,
-  ): { detail: string; vars: TemplateVars } | null {
-    const worktree = task.workspace?.worktree ?? this.runtime.worktree(task.id);
-    const dirty = git.uncommitted(worktree);
-    const commits = git.commitCount(worktree, this.base);
-
+  private untouched(dirty: string[], commits: number): WorktreeIssue | null {
     if (dirty.length === 0 && commits === 0) {
       return null;
     }
 
     return {
-      detail: [
+      name: "modified-worktree",
+      detail: this.detailOf([
         commits === 0 ? null : `${commits} commit(s) on the branch`,
         dirty.length === 0 ? null : `${dirty.length} uncommitted file(s)`,
-      ]
-        .filter((part) => part !== null)
-        .join("; "),
+      ]),
       vars: {
         commits: commits === 0 ? [] : [{}],
         dirty: dirty.length === 0 ? [] : [{ status: git.statusOf(dirty) }],
         base: this.base,
       },
     };
+  }
+
+  private detailOf(parts: (string | null)[]): string {
+    return parts.filter((part) => part !== null).join("; ");
   }
 
   private async raise(
@@ -1137,7 +1243,7 @@ export class Server {
     );
 
     if (used >= issue.attempts) {
-      worker.process!.close();
+      worker.process?.close();
       this.transition(
         taskId,
         "hold",
@@ -1155,17 +1261,24 @@ export class Server {
 
     worker.issues.set(name, used + 1);
     worker.state = "BUSY";
-    const state = this.tasks().get(taskId)!.state as ClaimState;
-    await worker.process.prompt(this.prompts.issue(name, state, vars));
+    await this.prompt(worker, this.prompts.issue(name, worker.stage!, vars));
     this.track(worker, this.awaitSettle(worker));
   }
 
   private harvest(taskId: TaskId): void {
-    const workspace = this.tasks().get(taskId)?.workspace;
-    if (workspace == null || !fs.existsSync(workspace.worktree)) {
+    this.harvestWorkspace(this.taskAt(taskId)?.workspace ?? null);
+  }
+
+  private harvestWorkspace(workspace: Workspace | null): void {
+    if (workspace === null || !fs.existsSync(workspace.worktree)) {
       return;
     }
     git.harvest(this.repo, workspace.worktree, workspace.branch);
+  }
+
+  private taskAt(taskId: TaskId): TaskMeta | null {
+    const filePath = findTaskFile(taskId, this.tasksDir);
+    return filePath === null ? null : readTaskFile(filePath).meta;
   }
 
   private stop(worker: Worker): void {
@@ -1180,10 +1293,13 @@ export class Server {
   }
 
   private finish(worker: Worker): void {
-    const taskId = worker.task_id;
+    const workspace =
+      worker.branch === null || worker.worktree === null
+        ? null
+        : { branch: worker.branch, worktree: worker.worktree };
     this.stop(worker);
-    if (taskId !== null) {
-      this.harvest(taskId);
+    if (workspace !== null) {
+      this.harvestWorkspace({ ...workspace, agent: "", session: null });
     }
   }
 
@@ -1192,9 +1308,9 @@ export class Server {
     Object.assign(worker, freshWorker(worker.slot));
   }
 
-  private startChecks(): void {
-    for (const [id, task] of this.tasks()) {
-      if (task.state !== "READY_CHECK" || this.pendingChecks.has(id)) {
+  private startChecks(tasks: Map<TaskId, TaskMeta>): void {
+    for (const [id, task] of tasks) {
+      if (task.state !== "CHECK" || this.pendingChecks.has(id)) {
         continue;
       }
       this.pendingChecks.set(
@@ -1207,14 +1323,7 @@ export class Server {
   }
 
   private async runChecks(taskId: TaskId): Promise<void> {
-    this.transition(
-      taskId,
-      "claim",
-      { agentName: "server", pid: process.pid },
-      "server",
-    );
-
-    const task = this.tasks().get(taskId)!;
+    const task = this.taskAt(taskId)!;
     const worktree = task.workspace?.worktree ?? this.repo;
     const failures: { command: string; exit_code: string; output: string }[] =
       [];
@@ -1236,7 +1345,7 @@ export class Server {
     }
     append(
       this.runtime.taskDir(taskId),
-      "WORKING",
+      "WORK",
       this.prompts.fragment("check-failed", { failures }),
     );
     this.transition(taskId, "fail", {}, "server");
@@ -1331,8 +1440,8 @@ export class Server {
 
   private requireManagerReview(taskId: TaskId): TaskMeta {
     const task = this.tasks().get(taskId);
-    if (task === undefined || task.state !== "MANAGER_REVIEWING") {
-      throw new Error(`task "${taskId}" is not in MANAGER_REVIEWING`);
+    if (task === undefined || task.state !== "MANAGER_REVIEW") {
+      throw new Error(`task "${taskId}" is not in MANAGER_REVIEW`);
     }
     return task;
   }
@@ -1364,6 +1473,7 @@ export class Server {
         activity: worker.process?.stream.state.activity ?? { kind: "none" },
         tokens: worker.tokens,
         context_percent: worker.contextPercent,
+        compactions: worker.compactions,
         session: worker.session,
         log:
           worker.task_id === null ? null : this.runtime.rpcLog(worker.task_id),
@@ -1393,7 +1503,7 @@ export class Server {
     );
 
     const seq = this.transitions.cursor;
-    const tasks = this.tasks();
+    const { tasks, blocking } = this.snapshot();
 
     writeAtomic(
       this.runtime.agentsView,
@@ -1405,14 +1515,24 @@ export class Server {
     );
     writeAtomic(
       this.runtime.tasksView,
-      snapshot(seq, "tasks", taskRows(tasks, this.recent, this.closed)),
+      snapshot(
+        seq,
+        "tasks",
+        taskRows(tasks, blocking, this.recent, this.closed),
+      ),
     );
-    writeAtomic(this.runtime.inboxView, snapshot(seq, "inbox", inbox(tasks)));
+    writeAtomic(
+      this.runtime.inboxView,
+      snapshot(seq, "inbox", inbox(tasks, blocking)),
+    );
     writeAtomic(
       this.runtime.queueView,
-      snapshot(seq, "queue", candidates(tasks, this.resumable(tasks)), {
-        scheduling: this.scheduling,
-      }),
+      snapshot(
+        seq,
+        "queue",
+        candidates(tasks, this.resumable(tasks), blocking),
+        { scheduling: this.scheduling },
+      ),
     );
   }
 

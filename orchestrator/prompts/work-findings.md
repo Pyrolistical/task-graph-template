@@ -1,10 +1,9 @@
-The previous round was rejected with these findings — address every one:
+The last round was rejected. Address every finding:
 
 {{#findings}}
 - {{finding}}
 {{/findings}}
 
-The findings are also appended to the task body under `# Review findings`,
-with a fresh `## Implementation Notes` section after them. Append your notes
-for this round there — by number, what you did about each finding and each
-todo — then submit again.
+They are also in the task body under `# Review findings`. Write this round's
+notes under `## Implementation Notes` — by number, what you did about each
+finding and each todo — then submit again.

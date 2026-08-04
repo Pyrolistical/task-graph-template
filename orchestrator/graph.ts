@@ -3,7 +3,6 @@ import path from "node:path";
 import {
   type TaskId,
   type TaskMeta,
-  openCount,
   parseDocument,
   parseTaskMeta,
   splitDocument,
@@ -77,7 +76,6 @@ export interface TaskRow {
   title: string;
   state: string;
   state_entered: string | null;
-  open_task_graph_updates: number;
   depends_on: TaskId[];
   blocking: number;
   claimed_by: string | null;
@@ -91,7 +89,6 @@ export function taskRow(task: TaskMeta, blocking: number): TaskRow {
     title: task.title,
     state: task.state,
     state_entered: task.state_entered,
-    open_task_graph_updates: openCount(task.task_graph_updates),
     depends_on: task.depends_on,
     blocking,
     claimed_by: task.claimed_by,
@@ -102,10 +99,10 @@ export function taskRow(task: TaskMeta, blocking: number): TaskRow {
 
 export function taskRows(
   tasks: Map<TaskId, TaskMeta>,
+  blocking: Map<TaskId, number>,
   recent: TaskId[],
   closed: Map<TaskId, TaskRow>,
 ): TaskRow[] {
-  const blocking = blockingCounts(tasks);
   const rows: TaskRow[] = [];
 
   for (const id of recent.slice(0, RECENT_TASKS)) {

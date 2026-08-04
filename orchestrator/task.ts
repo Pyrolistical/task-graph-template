@@ -2,51 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { parse } from "./schema.ts";
+import { ALL_STATES } from "./states.ts";
 
 export type TaskId = string;
-
-export const VALID_STATES = [
-  "NEW",
-  "BLOCKED",
-  "HELD_PLAN",
-  "HELD_WORK",
-  "READY_PLAN",
-  "PLANNING",
-  "READY_PLAN_REVIEW",
-  "PLAN_REVIEWING",
-  "READY_WORK",
-  "WORKING",
-  "READY_CHECK",
-  "CHECKING",
-  "READY_WORK_REVIEW",
-  "WORK_REVIEWING",
-  "READY_MANAGER_REVIEW",
-  "MANAGER_REVIEWING",
-  "READY_TASK_GRAPH_UPDATE",
-  "TASK_GRAPH_UPDATING",
-] as const;
-
-export type ValidState = (typeof VALID_STATES)[number];
-
-export const CLOSED_STATE = "CLOSED";
-
-export const ALL_STATES = [...VALID_STATES, CLOSED_STATE] as const;
-
-export type TaskState = (typeof ALL_STATES)[number];
-
-export const CLAIMED_STATES = [
-  "PLANNING",
-  "PLAN_REVIEWING",
-  "WORKING",
-  "CHECKING",
-  "WORK_REVIEWING",
-  "MANAGER_REVIEWING",
-  "TASK_GRAPH_UPDATING",
-] as const satisfies readonly ValidState[];
-
-export const UPDATE_OPS = ["add", "update", "delete"] as const;
-
-export type UpdateOp = (typeof UPDATE_OPS)[number];
 
 export function formatId(n: number): string {
   return String(n).padStart(6, "0");
@@ -68,28 +26,6 @@ const timestamp = z
   .refine((value) => !Number.isNaN(Date.parse(value)), {
     error: "must be a timestamp",
   });
-
-const TaskGraphUpdate = z.discriminatedUnion("op", [
-  z.strictObject({
-    op: z.literal("add"),
-    message: nonEmpty,
-    done: z.boolean(),
-  }),
-  z.strictObject({
-    op: z.literal("update"),
-    task_id: taskId,
-    message: nonEmpty,
-    done: z.boolean(),
-  }),
-  z.strictObject({
-    op: z.literal("delete"),
-    task_id: taskId,
-    message: nonEmpty,
-    done: z.boolean(),
-  }),
-]);
-
-export type TaskGraphUpdate = z.infer<typeof TaskGraphUpdate>;
 
 const Workspace = z.strictObject({
   branch: nonEmpty,
@@ -118,7 +54,6 @@ const TaskFields = z.strictObject({
   held_reason: nonEmpty.nullable(),
   workspace: Workspace.nullable(),
   checks: z.array(nonEmpty),
-  task_graph_updates: z.array(TaskGraphUpdate),
 });
 
 const Meta = TaskFields.refine(
@@ -130,13 +65,10 @@ export type TaskMeta = z.infer<typeof Meta>;
 
 export const FIELD_ORDER = Object.keys(TaskFields.shape) as (keyof TaskMeta)[];
 
-const ID_FIELDS = new Set(["id", "task_id"]);
+const ID_FIELDS = new Set(["id"]);
 
 const QUOTED_TEXT_FIELDS = new Set([
   "title",
-  "message",
-  "command",
-  "output",
   "held_reason",
   "branch",
   "worktree",
@@ -201,19 +133,6 @@ function scalar(key: string, value: unknown): string {
   return needsQuoting(text) ? JSON.stringify(text) : text;
 }
 
-function serializeMapItem(
-  item: Record<string, unknown>,
-  keys: string[],
-): string[] {
-  const lines: string[] = [];
-  keys.forEach((key, i) => {
-    if (!(key in item)) return;
-    const prefix = i === 0 ? "  - " : "    ";
-    lines.push(`${prefix}${key}: ${scalar(key, item[key])}`);
-  });
-  return lines;
-}
-
 export function serializeMeta(meta: TaskMeta): string {
   const lines: string[] = [];
 
@@ -242,19 +161,6 @@ export function serializeMeta(meta: TaskMeta): string {
       lines.push(`${key}:`);
       for (const field of WORKSPACE_FIELDS) {
         lines.push(`  ${field}: ${scalar(field, workspace[field])}`);
-      }
-      continue;
-    }
-
-    if (key === "task_graph_updates") {
-      const items = value as Record<string, unknown>[];
-      if (items.length === 0) {
-        lines.push(`${key}: []`);
-        continue;
-      }
-      lines.push(`${key}:`);
-      for (const item of items) {
-        lines.push(...serializeMapItem(item, ["op", "task_id", "message", "done"]));
       }
       continue;
     }
@@ -296,10 +202,6 @@ export function writeTaskFile(
   fs.writeFileSync(filePath, rebuildDocument(meta, body), "utf-8");
 }
 
-export function openCount(list: { done: boolean }[]): number {
-  return list.filter((item) => !item.done).length;
-}
-
 export function normalizeBody(body: string): string {
   return `\n\n${body.replace(/^\s+/, "").replace(/\s+$/, "")}\n`;
 }
@@ -329,7 +231,21 @@ export interface CreatedTask {
   filePath: string;
 }
 
-export function createTask(tasksDir: string, title: string): CreatedTask {
+export function templatePath(
+  tasksDir: string,
+  orchestratorDir: string,
+): string {
+  const override = path.join(tasksDir, "template.md");
+  return fs.existsSync(override)
+    ? override
+    : path.join(orchestratorDir, "template.md");
+}
+
+export function createTask(
+  tasksDir: string,
+  orchestratorDir: string,
+  title: string,
+): CreatedTask {
   if (title.trim().length === 0) {
     throw new Error("A task title is required");
   }
@@ -344,14 +260,14 @@ export function createTask(tasksDir: string, title: string): CreatedTask {
     }
 
     const id = formatId(nextId);
-    const templatePath = path.join(tasksDir, "template.md");
-    const { raw, body } = parseDocument(fs.readFileSync(templatePath, "utf-8"));
+    const template = templatePath(tasksDir, orchestratorDir);
+    const { raw, body } = parseDocument(fs.readFileSync(template, "utf-8"));
 
     raw.id = id;
     raw.title = title.trim();
     raw.state_entered = new Date().toISOString();
 
-    const meta = parseTaskMeta(raw, templatePath);
+    const meta = parseTaskMeta(raw, template);
     const filePath = path.join(tasksDir, `${id}.md`);
 
     fs.writeFileSync(filePath, rebuildDocument(meta, body), {

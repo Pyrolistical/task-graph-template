@@ -1,0 +1,231 @@
+import fs from "node:fs";
+import path from "node:path";
+import { tempDir } from "./temp.ts";
+import {
+  type TaskMeta,
+  createTask,
+  parseDocument,
+  readTaskFile,
+  rebuildDocument,
+  splitDocument,
+} from "./task.ts";
+import {
+  type TransitionArgs,
+  type TransitionName,
+  type TransitionResult,
+  applyTransition,
+} from "./transition.ts";
+import { type ClaimArgs, clearClaim, takeClaim } from "./claim.ts";
+import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
+
+export { ORCHESTRATOR_DIR };
+
+export const TEMPLATE_PATH = path.join(ORCHESTRATOR_DIR, "template.md");
+export const TASK_PATH = path.join(ORCHESTRATOR_DIR, "task.ts");
+
+export function makeTasksDir(): string {
+  const dir = tempDir("task-graph-");
+  fs.writeFileSync(path.join(dir, "next-task-id"), "1\n");
+  return dir;
+}
+
+export function bodyOf(filePath: string): string {
+  return splitDocument(fs.readFileSync(filePath, "utf-8")).body;
+}
+
+export async function deadPid(): Promise<number> {
+  const proc = Bun.spawn(["true"]);
+  await proc.exited;
+  return proc.pid;
+}
+
+export function baseMeta(overrides: Partial<TaskMeta> = {}): TaskMeta {
+  return {
+    id: "000042",
+    title: "A task",
+    state: "NEW",
+    state_entered: "2026-07-27T12:00:00Z",
+    depends_on: [],
+    claimed_by: null,
+    claimed_pid: null,
+    held_reason: null,
+    workspace: null,
+    checks: [],
+    ...overrides,
+  };
+}
+
+export function raw(meta: TaskMeta): Record<string, unknown> {
+  return parseDocument(rebuildDocument(meta, "\n\n# Goal\n")).raw;
+}
+
+export function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
+  const meta = baseMeta(overrides);
+  fs.writeFileSync(
+    path.join(dir, `${meta.id}.md`),
+    rebuildDocument(meta, "\n\n# Goal\n"),
+  );
+
+  const highest = fs
+    .readdirSync(dir)
+    .filter((f) => /^\d{6}\.md$/.test(f))
+    .reduce((max, f) => Math.max(max, Number.parseInt(f, 10)), 0);
+  fs.writeFileSync(path.join(dir, "next-task-id"), `${highest + 1}\n`);
+
+  return meta.id;
+}
+
+export function editTask(
+  dir: string,
+  id: string,
+  edit: (meta: TaskMeta) => void,
+): void {
+  const filePath = path.join(dir, `${id}.md`);
+  const { meta, body } = readTaskFile(filePath);
+  edit(meta);
+  fs.writeFileSync(filePath, rebuildDocument(meta, body));
+}
+
+export function addDeps(dir: string, id: string, ...deps: string[]): void {
+  editTask(dir, id, (meta) => {
+    for (const dep of deps) {
+      if (!meta.depends_on.includes(dep)) {
+        meta.depends_on.push(dep);
+      }
+    }
+  });
+}
+
+export function shape(name: TransitionName, extra: string[]): TransitionArgs {
+  const rest = (from: number) => extra.slice(from).join(" ");
+
+  switch (name) {
+    case "hold":
+      return { reason: rest(0) };
+    case "feedback":
+      return { findings: extra };
+    case "submit":
+      return { body: extra.length === 0 ? "\n\n# Goal\n" : rest(0) };
+    default:
+      return {};
+  }
+}
+
+export function run(
+  dir: string,
+  id: string,
+  name: TransitionName,
+  ...extra: string[]
+) {
+  return applyTransition(dir, id, name, shape(name, extra));
+}
+
+export function claim(
+  dir: string,
+  id: string,
+  agentName: string,
+  pid: number = process.pid,
+  workspace: Omit<ClaimArgs, "agentName" | "pid"> = {},
+): void {
+  takeClaim(dir, id, { agentName, pid, ...workspace });
+}
+
+export function unclaim(dir: string, id: string): void {
+  clearClaim(dir, id);
+}
+
+export function metaOf(dir: string, id: string) {
+  return readTaskFile(path.join(dir, `${id}.md`)).meta;
+}
+
+export function newTask(title = "a task"): { dir: string; id: string } {
+  const dir = makeTasksDir();
+  return { dir, id: createTask(dir, ORCHESTRATOR_DIR, title).id };
+}
+
+export function newTasks(count: number): { dir: string; ids: string[] } {
+  const dir = makeTasksDir();
+  const ids = Array.from(
+    { length: count },
+    (_, i) => createTask(dir, ORCHESTRATOR_DIR, `task ${i}`).id,
+  );
+  return { dir, ids };
+}
+
+export function toDesign(): { dir: string; id: string } {
+  const { dir, id } = newTask();
+  run(dir, id, "submit");
+  return { dir, id };
+}
+
+export function designThrough(): { dir: string; id: string } {
+  const { dir, id } = toDesign();
+  claim(dir, id, "designer");
+  run(dir, id, "submit");
+  claim(dir, id, "design-reviewer");
+  run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+  return { dir, id };
+}
+
+export function toPlan(): { dir: string; id: string } {
+  const { dir, id } = designThrough();
+  return { dir, id };
+}
+
+export function planThrough(): { dir: string; id: string } {
+  const { dir, id } = toPlan();
+  claim(dir, id, "planner");
+  run(dir, id, "submit");
+  claim(dir, id, "plan-reviewer");
+  run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+  return { dir, id };
+}
+
+export function toWorking(): { dir: string; id: string } {
+  const { dir, id } = planThrough();
+  claim(dir, id, "agent-1");
+  return { dir, id };
+}
+
+export function toChecking(): { dir: string; id: string } {
+  const { dir, id } = toWorking();
+  run(dir, id, "submit");
+  return { dir, id };
+}
+
+export function toAgentReview(): { dir: string; id: string } {
+  const { dir, id } = toChecking();
+  run(dir, id, "pass");
+  claim(dir, id, "reviewer");
+  return { dir, id };
+}
+
+export function toManagerReview(): { dir: string; id: string } {
+  const { dir, id } = toAgentReview();
+  run(dir, id, "submit");
+  return { dir, id };
+}
+
+export function toHeld(): { dir: string; id: string } {
+  const { dir, id } = toWorking();
+  run(dir, id, "hold", "the API key is missing");
+  return { dir, id };
+}
+
+export function closeTask(dir: string, id: string) {
+  run(dir, id, "submit");
+  claim(dir, id, "d");
+  run(dir, id, "submit");
+  claim(dir, id, "dr");
+  run(dir, id, "submit");
+  claim(dir, id, "p");
+  run(dir, id, "submit");
+  claim(dir, id, "pr");
+  run(dir, id, "submit");
+  claim(dir, id, "a");
+  run(dir, id, "submit");
+  run(dir, id, "pass");
+  claim(dir, id, "r");
+  run(dir, id, "submit");
+  return run(dir, id, "submit");
+}

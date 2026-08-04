@@ -1,12 +1,8 @@
 import fs from "node:fs";
 import { z } from "zod";
-import {
-  type Activity,
-  describeActivity,
-  toolCall,
-  toolTarget,
-} from "./activity.ts";
+import { type Activity, toolCall, toolTarget } from "./activity.ts";
 import { RESULT_TOOLS, type ResultCall } from "./results.ts";
+import type { Sample } from "./rates.ts";
 
 export const STOP_REASONS = [
   "stop",
@@ -46,6 +42,7 @@ const MessageEnd = z.looseObject({
     role: z.string(),
     stopReason: z.enum(STOP_REASONS).optional(),
     errorMessage: z.string().nullish(),
+    usage: z.looseObject({ output: z.number().optional() }).optional(),
   }),
 });
 
@@ -80,13 +77,18 @@ export interface StreamState {
   retrying: boolean;
   failure: string | null;
   looping: string | null;
-  resultCalls: ResultCall[];
 }
 
 function signature(record: PiRecord): string {
   const { toolName, args } = ToolStart.parse(record);
   return `${toolName} ${JSON.stringify(args ?? {})}`;
 }
+
+export type OnUsage = (sample: Sample) => void;
+
+export type OnCompaction = () => void;
+
+export type OnResult = (call: ResultCall) => void;
 
 export class PiStream {
   private readonly splitter = new JsonlSplitter();
@@ -106,8 +108,13 @@ export class PiStream {
     retrying: false,
     failure: null,
     looping: null,
-    resultCalls: [],
   };
+
+  constructor(
+    private readonly onUsage: OnUsage = () => {},
+    private readonly onCompaction: OnCompaction = () => {},
+    private readonly onResult: OnResult = () => {},
+  ) {}
 
   feed(chunk: string): PiRecord[] {
     const records: PiRecord[] = [];
@@ -146,7 +153,7 @@ export class PiStream {
         this.state.activity = toolCall(toolName, args ?? {});
         this.repeat(record);
         if ((RESULT_TOOLS as readonly string[]).includes(toolName)) {
-          this.state.resultCalls.push({ tool: toolName, args: args ?? {} });
+          this.onResult({ tool: toolName, args: args ?? {} });
         }
         break;
       }
@@ -160,6 +167,7 @@ export class PiStream {
           reason: Compaction.parse(record).reason,
           started_at: Date.now(),
         };
+        this.onCompaction();
         break;
       }
       case "auto_retry_start": {
@@ -181,6 +189,10 @@ export class PiStream {
         const { message } = MessageEnd.parse(record);
         if (message.role !== "assistant") {
           break;
+        }
+        const output = message.usage?.output;
+        if (typeof output === "number") {
+          this.onUsage({ timestampMs: Date.now(), tokens: output });
         }
         if (message.stopReason !== undefined) {
           this.state.stopReason = message.stopReason;
@@ -219,7 +231,6 @@ export class PiStream {
     this.state.errorMessage = null;
     this.state.activity = { kind: "thinking", started_at: Date.now() };
     this.state.looping = null;
-    this.state.resultCalls = [];
     this.repeated = { signature: "", count: 0 };
   }
 
@@ -265,7 +276,6 @@ export interface SpawnOptions {
   sessionDir: string;
   name: string;
   cwd: string;
-  systemPrompt: string;
   extension: string;
   log: string;
 }
@@ -285,13 +295,11 @@ export function spawnArgs(options: SpawnOptions): string[] {
     "--approve",
     "--extension",
     options.extension,
-    "--append-system-prompt",
-    `@${options.systemPrompt}`,
   ];
 }
 
 export class PiProcess {
-  readonly stream = new PiStream();
+  readonly stream: PiStream;
   readonly pid: number;
 
   private readonly proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
@@ -301,7 +309,15 @@ export class PiProcess {
   private aborting = false;
   private stderr = "";
 
-  constructor(options: SpawnOptions, command = "pi", launch: string[] = []) {
+  constructor(
+    options: SpawnOptions,
+    command = "pi",
+    launch: string[] = [],
+    onUsage: OnUsage = () => {},
+    onCompaction: OnCompaction = () => {},
+    onResult: OnResult = () => {},
+  ) {
+    this.stream = new PiStream(onUsage, onCompaction, onResult);
     fs.mkdirSync(options.sessionDir, { recursive: true });
     this.log = fs.openSync(options.log, "a");
 
@@ -397,6 +413,14 @@ export class PiProcess {
   abort(): void {
     this.aborting = true;
     this.write({ type: "abort" });
+  }
+
+  abortBash(): void {
+    this.write({ type: "abort_bash" });
+  }
+
+  async steer(message: string): Promise<void> {
+    await this.send({ type: "steer", message });
   }
 
   private interrupt(): void {

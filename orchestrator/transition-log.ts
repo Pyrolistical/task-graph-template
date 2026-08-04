@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import type { TaskId, TaskState } from "./task.ts";
+import type { TaskId } from "./task.ts";
+import type { TaskState } from "./states.ts";
 
 export const TRANSITION_LOG_LINES = 1000;
 

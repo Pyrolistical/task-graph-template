@@ -5,14 +5,17 @@ import type { TaskId } from "./task.ts";
 import type { AgentRow } from "./agents.ts";
 import {
   type Activity,
+  abortable,
   describeActivity,
   describeLabel,
+  elapsed,
   elapsedSuffix,
 } from "./activity.ts";
 import type { RunningCheck } from "./checks.ts";
 import type { TaskRow } from "./graph.ts";
 import type { Candidate, Rank } from "./scheduler.ts";
 import { type Command, writeCommand } from "./command.ts";
+import { type Sample, push, tokensPerSecond } from "./rates.ts";
 import { Runtime } from "./runtime.ts";
 
 export const TICK_MS = 1000;
@@ -28,8 +31,10 @@ export const DIM = "2";
 export const RED = "31";
 export const GREEN = "32";
 export const ELLIPSIS = "…";
+export const REVERSE = "7";
 export const SWITCH_ON = "[─●]";
 export const SWITCH_OFF = "[●─]";
+export const NEWS = " New messages ↓ ";
 
 export interface Span {
   text: string;
@@ -141,6 +146,56 @@ export function clip(spans: Line, width: number): Line {
   return out;
 }
 
+export function take(spans: Line, width: number): Line {
+  const out: Line = [];
+  let used = 0;
+  for (const span of spans) {
+    if (used >= width) {
+      break;
+    }
+    const chars = graphemes(span.text);
+    const spanned = charsWidth(chars);
+    if (used + spanned <= width) {
+      out.push(span);
+      used += spanned;
+      continue;
+    }
+    const kept = chars.slice(0, fit(chars, width - used));
+    const room = width - used - charsWidth(kept);
+    out.push({ text: kept.join("") + " ".repeat(room), sgr: span.sgr });
+    used = width;
+  }
+  return out;
+}
+
+export function drop(spans: Line, width: number): Line {
+  const out: Line = [];
+  let used = 0;
+  for (const span of spans) {
+    if (used >= width) {
+      out.push(span);
+      continue;
+    }
+    const chars = graphemes(span.text);
+    const spanned = charsWidth(chars);
+    if (used + spanned <= width) {
+      used += spanned;
+      continue;
+    }
+    const count = fit(chars, width - used);
+    const head = charsWidth(chars.slice(0, count));
+    let rest = chars.slice(count);
+    let room = "";
+    if (used + head < width && rest.length > 0) {
+      room = " ".repeat(used + head + charWidth(rest[0]!) - width);
+      rest = rest.slice(1);
+    }
+    out.push({ text: room + rest.join(""), sgr: span.sgr });
+    used += spanned;
+  }
+  return out;
+}
+
 export function pad(spans: Line, width: number): Line {
   const clipped = clip(spans, width);
   const room = width - spanWidth(clipped);
@@ -209,34 +264,6 @@ export interface Usage {
   input: number;
   output: number;
   cacheRead: number;
-}
-
-export interface Sample {
-  timestampMs: number;
-  tokens: number;
-}
-
-export function tokensPerSecond(
-  samples: Sample[],
-  nowMs: number,
-): number | null {
-  const first = samples[0];
-  if (first === undefined) {
-    return null;
-  }
-  const last = samples[samples.length - 1]!;
-  let durationMs = last.timestampMs - first.timestampMs;
-  if (durationMs <= 0) {
-    durationMs = nowMs - first.timestampMs;
-  }
-  if (durationMs <= 0) {
-    return null;
-  }
-  let tokens = 0;
-  for (const sample of samples) {
-    tokens += sample.tokens;
-  }
-  return (tokens / durationMs) * 1000;
 }
 
 function entry(
@@ -441,7 +468,7 @@ function append(
       last !== undefined &&
       last.label === "model"
     ) {
-      last.text = `${last.text} · ${next.text}`;
+      last.text = `${last.text} ${next.text}`;
       continue;
     }
     entries.push(next);
@@ -506,13 +533,10 @@ export class SessionTail {
           const result = recordEntries(record);
           append(this.entries, result);
           if (result.usage !== null) {
-            this.samples.push({
+            push(this.samples, {
               timestampMs: stamp(record),
               tokens: result.usage.output,
             });
-            if (this.samples.length > 10) {
-              this.samples.shift();
-            }
           }
         }
       }
@@ -655,18 +679,6 @@ export function panes(view: View): Pane[] {
   }));
 }
 
-export function elapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
-  }
-  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
-}
-
 export function clock(timestampMs: number): string {
   const at = new Date(timestampMs);
   return [at.getHours(), at.getMinutes(), at.getSeconds()]
@@ -681,10 +693,13 @@ export function thousands(n: number): string {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-export interface Hit {
+export interface Region {
   row: number;
   from: number;
   to: number;
+}
+
+export interface Hit extends Region {
   command: Command;
 }
 
@@ -701,7 +716,7 @@ export function toggle(on: boolean, label: string, readOnly: boolean): Line {
 }
 
 export function abortButton(pane: Pane, readOnly: boolean): Line {
-  if (readOnly || pane.agent.activity.kind === "none") {
+  if (readOnly || !abortable(pane.agent.activity)) {
     return [];
   }
   return [{ text: "[abort]", sgr: RED }];
@@ -709,12 +724,15 @@ export function abortButton(pane: Pane, readOnly: boolean): Line {
 
 export const RANK_LABELS: Record<Rank, string> = {
   resume: "resume",
-  READY_WORK_REVIEW: "READY_WORK_REVIEW",
-  READY_WORK_STARTED: "READY_WORK",
-  READY_WORK_FRESH: "READY_WORK",
-  READY_PLAN_REVIEW: "READY_PLAN_REVIEW",
-  READY_PLAN_STARTED: "READY_PLAN",
-  READY_PLAN_FRESH: "READY_PLAN",
+  WORK_REVIEW: "WORK_REVIEW",
+  WORK_STARTED: "WORK",
+  WORK_FRESH: "WORK",
+  PLAN_REVIEW: "PLAN_REVIEW",
+  PLAN_STARTED: "PLAN",
+  PLAN_FRESH: "PLAN",
+  DESIGN_REVIEW: "DESIGN_REVIEW",
+  DESIGN_STARTED: "DESIGN",
+  DESIGN_FRESH: "DESIGN",
 };
 
 export function queueHeader(
@@ -733,7 +751,7 @@ export function queueHeader(
 
   for (const candidate of view.queue) {
     const item: Line = [
-      ...(items.length === 0 ? [] : [{ text: " · ", sgr: DIM }]),
+      ...(items.length === 0 ? [] : [{ text: " ", sgr: DIM }]),
       { text: candidate.task_id },
       { text: ` ${RANK_LABELS[candidate.rank]}`, sgr: DIM },
     ];
@@ -774,7 +792,7 @@ function identity(agent: AgentRow): string {
     agent.type,
     `${agent.provider}/${agent.model}`,
     `slot ${agent.slot}`,
-  ].join(" · ");
+  ].join(" ");
 }
 
 function stateLine(pane: Pane, nowMs: number): string {
@@ -783,7 +801,8 @@ function stateLine(pane: Pane, nowMs: number): string {
   if (pane.sinceMs === null) {
     return state;
   }
-  return `${state} ${elapsed(nowMs - pane.sinceMs)}`;
+  const since = elapsed(nowMs - pane.sinceMs);
+  return state === "busy" ? since : `${state} ${since}`;
 }
 
 export function detailLine(pane: Pane): string {
@@ -807,7 +826,7 @@ export function detailLine(pane: Pane): string {
       `retry ${agent.attempt} at ${clock(Date.parse(agent.retry_at))}`,
     );
   }
-  return parts.join(" · ");
+  return parts.join(" ");
 }
 
 export function activityLine(pane: Pane): string {
@@ -822,10 +841,12 @@ export function statsLine(pane: Pane, rate: number | null): string {
   if (rate !== null) {
     parts.push(`${thousands(Math.round(rate * 10) / 10)} tok/s`);
   }
+  const compactions =
+    pane.agent.compactions > 0 ? ` x${pane.agent.compactions}` : "";
   if (pane.agent.context_percent !== null) {
-    parts.push(`ctx ${Math.round(pane.agent.context_percent)}%`);
+    parts.push(`ctx ${Math.round(pane.agent.context_percent)}%${compactions}`);
   }
-  return parts.join(" · ");
+  return parts.join(" ");
 }
 
 export function header(
@@ -940,8 +961,8 @@ export class PaneLines {
 }
 
 export interface Scroll {
-  anchor: number;
-  follow: boolean;
+  bases: number[] | null;
+  offsets: number[];
 }
 
 export function bodyHeight(rows: number): number {
@@ -952,10 +973,41 @@ export function topOf(total: number, height: number): number {
   return Math.max(0, total - height);
 }
 
-export function body(lines: Line[], height: number, scroll: Scroll): Line[] {
-  const last = topOf(lines.length, height);
-  const start = scroll.follow ? last : Math.min(scroll.anchor, last);
+export function baseOf(
+  lines: number,
+  height: number,
+  frozen: number | undefined,
+): number {
+  const bottom = topOf(lines, height);
+  return frozen === undefined ? bottom : Math.min(frozen, bottom);
+}
+
+export function body(
+  lines: Line[],
+  height: number,
+  base: number,
+  offset: number,
+): Line[] {
+  const start = Math.max(0, base - offset);
   return lines.slice(start, start + height);
+}
+
+export function newsButton(): Line {
+  return [{ text: NEWS, sgr: REVERSE }];
+}
+
+export function newsRegion(columns: number, rows: number): Region {
+  const width = spanWidth(newsButton());
+  const from = Math.max(0, Math.floor((columns - width) / 2));
+  return { row: rows - 2, from, to: Math.min(columns, from + width) };
+}
+
+export function overlay(line: Line, insert: Line, at: Region): Line {
+  return [
+    ...pad(take(line, at.from), at.from),
+    ...insert,
+    ...drop(line, at.to),
+  ];
 }
 
 export function paneWidth(columns: number, count: number): number {
@@ -978,8 +1030,9 @@ export interface Layout {
 
 export interface Frame {
   lines: string[];
-  total: number;
+  bases: number[];
   hits: Hit[];
+  news: Region | null;
 }
 
 export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
@@ -997,11 +1050,14 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
   }
 
   const height = bodyHeight(rows);
-  const totals: number[] = [];
+  const bases: number[] = [];
   const hits: Hit[] = [];
+  let unread = false;
   const rendered = cells.map(({ pane, rate, lines }, index) => {
     const paneLines = lines(width);
-    totals.push(paneLines.length);
+    const base = baseOf(paneLines.length, height, scroll.bases?.[index]);
+    bases.push(base);
+    unread = unread || topOf(paneLines.length, height) > base;
     if (!readOnly) {
       const from = index * (width + 1);
       hits.push({
@@ -1031,7 +1087,7 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
     return [
       ...header(pane, rate, width, nowMs, readOnly),
       [{ text: "─".repeat(width), sgr: DIM }],
-      ...body(paneLines, height, scroll),
+      ...body(paneLines, height, base, scroll.offsets[index] ?? 0),
     ];
   });
 
@@ -1043,6 +1099,7 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
     rule.push({ text: "─".repeat(width), sgr: DIM });
   });
 
+  const news = unread ? newsRegion(columns, rows) : null;
   const out: string[] = [
     renderLine(pad(queue, columns)),
     renderLine(pad(rule, columns)),
@@ -1059,10 +1116,16 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
       }
       line.push(...pad(lines[row] ?? [], width));
     });
-    out.push(renderLine(line));
+    out.push(
+      renderLine(
+        news !== null && row + QUEUE_LINES === news.row
+          ? overlay(line, newsButton(), news)
+          : line,
+      ),
+    );
   }
 
-  return { lines: out, total: Math.max(...totals), hits };
+  return { lines: out, bases, hits, news };
 }
 
 export function frame(
@@ -1092,6 +1155,42 @@ export function frame(
   const queue = queueHeader(view, layout.columns, layout.readOnly);
   const rendered = screen(cells, queue.line, layout);
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
+}
+
+function freeze(scroll: Scroll, bottoms: number[]): number[] {
+  const bases = scroll.bases ?? bottoms;
+  scroll.bases = bases;
+  return bases;
+}
+
+export function scrollBack(
+  scroll: Scroll,
+  bottoms: number[],
+  count: number,
+): void {
+  const bases = freeze(scroll, bottoms);
+  scroll.offsets = bases.map((base, index) =>
+    Math.min((scroll.offsets[index] ?? 0) + count, base),
+  );
+}
+
+export function scrollForward(scroll: Scroll, count: number): void {
+  if (scroll.bases === null) {
+    return;
+  }
+  scroll.offsets = scroll.offsets.map((offset) => Math.max(0, offset - count));
+  if (scroll.offsets.every((offset) => offset === 0)) {
+    scrollBottom(scroll);
+  }
+}
+
+export function scrollTop(scroll: Scroll, bottoms: number[]): void {
+  scroll.offsets = [...freeze(scroll, bottoms)];
+}
+
+export function scrollBottom(scroll: Scroll): void {
+  scroll.bases = null;
+  scroll.offsets = [];
 }
 
 function halfPage(rows: number): number {
@@ -1139,13 +1238,16 @@ export function mouse(key: string): Mouse | null {
   };
 }
 
-export function hitAt(hits: Hit[], event: Mouse): Command | null {
-  const hit = hits.find(
-    (candidate) =>
-      candidate.row === event.row &&
-      event.column >= candidate.from &&
-      event.column < candidate.to,
+export function within(region: Region, event: Mouse): boolean {
+  return (
+    region.row === event.row &&
+    event.column >= region.from &&
+    event.column < region.to
   );
+}
+
+export function hitAt(hits: Hit[], event: Mouse): Command | null {
+  const hit = hits.find((candidate) => within(candidate, event));
   return hit === undefined ? null : hit.command;
 }
 
@@ -1159,9 +1261,10 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
   }
 
   const sessions: Sessions = new Sessions();
-  const scroll: Scroll = { anchor: 0, follow: true };
+  const scroll: Scroll = { bases: null, offsets: [] };
   let hits: Hit[] = [];
-  let total = 0;
+  let bottoms: number[] = [];
+  let news: Region | null = null;
   let scheduled = false;
 
   const restore = () => {
@@ -1188,8 +1291,9 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
       restore();
       throw err;
     }
-    total = result.total;
+    bottoms = result.bases;
     hits = result.hits;
+    news = result.news;
     process.stdout.write(
       `\x1b[H${result.lines.map((line) => `${line}\x1b[K`).join("\r\n")}`,
     );
@@ -1219,27 +1323,9 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", (data) => {
-      const rows = process.stdout.rows ?? 24;
-      const page = halfPage(rows);
-      const top = () => topOf(total, bodyHeight(rows));
-
-      const back = (count: number) => {
-        if (scroll.follow) {
-          scroll.anchor = top();
-          scroll.follow = false;
-        }
-        scroll.anchor = Math.max(0, scroll.anchor - count);
-      };
-
-      const forward = (count: number) => {
-        if (scroll.follow) {
-          return;
-        }
-        scroll.anchor += count;
-        if (scroll.anchor >= top()) {
-          scroll.follow = true;
-        }
-      };
+      const page = halfPage(process.stdout.rows ?? 24);
+      const back = (count: number) => scrollBack(scroll, bottoms, count);
+      const forward = (count: number) => scrollForward(scroll, count);
 
       let moved = false;
       for (const key of keys(data.toString())) {
@@ -1273,13 +1359,12 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
           }
           case "g":
           case "\x1b[H": {
-            scroll.anchor = 0;
-            scroll.follow = false;
+            scrollTop(scroll, bottoms);
             break;
           }
           case "G":
           case "\x1b[F": {
-            scroll.follow = true;
+            scrollBottom(scroll);
             break;
           }
           default: {
@@ -1292,6 +1377,10 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
             } else if (event.button === 65) {
               forward(3);
             } else if (event.button === 0 && event.pressed) {
+              if (news !== null && within(news, event)) {
+                scrollBottom(scroll);
+                break;
+              }
               const command = hitAt(hits, event);
               if (command === null) {
                 continue;

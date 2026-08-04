@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { AGENT_STATES, type ClaimState } from "./runtime.ts";
+import { AGENT_STATES, type ClaimState } from "./states.ts";
 import { type TemplateVars, render } from "./template.ts";
 
 export const ISSUE_NAMES = [
-  "unparsable-result",
   "missing-result",
   "missing-todos",
+  "missing-design",
   "missing-notes",
   "modified-assignment",
   "uncommitted",
@@ -27,13 +27,6 @@ export interface Issue {
 const ALL_AGENT_STATES: ClaimState[] = [...AGENT_STATES];
 
 export const ISSUES: Record<IssueName, Issue> = {
-  "unparsable-result": {
-    attempts: 4,
-    states: ALL_AGENT_STATES,
-    fragment: (state) => `unparsable-result-${state}`,
-    held: (detail) =>
-      `the agent's result tool call was not a valid one for its state: ${detail}`,
-  },
   "missing-result": {
     attempts: 4,
     states: ALL_AGENT_STATES,
@@ -42,14 +35,21 @@ export const ISSUES: Record<IssueName, Issue> = {
   },
   "missing-todos": {
     attempts: 4,
-    states: ["PLANNING"],
+    states: ["PLAN"],
     fragment: () => "missing-todos",
     held: () =>
       "the planner submitted without appending a todo list to the assignment",
   },
+  "missing-design": {
+    attempts: 4,
+    states: ["DESIGN"],
+    fragment: () => "missing-design",
+    held: () =>
+      "the designer submitted without appending a design section to the assignment",
+  },
   "missing-notes": {
     attempts: 4,
-    states: ["WORKING"],
+    states: ["WORK"],
     fragment: () => "missing-notes",
     held: () =>
       "the worker submitted without appending implementation notes to the assignment",
@@ -63,7 +63,7 @@ export const ISSUES: Record<IssueName, Issue> = {
   },
   uncommitted: {
     attempts: 4,
-    states: ["WORKING"],
+    states: ["WORK"],
     fragment: () => "uncommitted",
     held: (detail) => `the agent submitted work it never committed: ${detail}`,
   },
@@ -81,10 +81,10 @@ export const ISSUES: Record<IssueName, Issue> = {
   },
   "modified-worktree": {
     attempts: 4,
-    states: ["PLANNING", "PLAN_REVIEWING"],
+    states: ["DESIGN", "DESIGN_REVIEW", "PLAN", "PLAN_REVIEW"],
     fragment: (state) => `modified-worktree-${state}`,
     held: (detail) =>
-      `the agent wrote to the worktree during planning: ${detail}`,
+      `the agent wrote to the worktree during design or planning: ${detail}`,
   },
 };
 
@@ -117,12 +117,11 @@ export class Prompts {
           continue;
         }
         const name = entry.name.slice(0, -3);
-        const key = `prompts/${name}`;
-        if (this.cached.has(key)) {
+        if (this.cached.has(name)) {
           continue;
         }
         const filePath = path.join(sub, entry.name);
-        this.cached.set(key, {
+        this.cached.set(name, {
           path: filePath,
           contents: fs.readFileSync(filePath, "utf-8"),
         });
@@ -131,12 +130,8 @@ export class Prompts {
     return this.cachedFiles();
   }
 
-  systemPrompt(state: ClaimState): string {
-    return this.file("prompts", state).path;
-  }
-
   fragment(name: string, vars: TemplateVars = {}): string {
-    return render(this.file("prompts", name).contents, vars);
+    return render(this.file(name).contents, vars);
   }
 
   issue(name: IssueName, state: ClaimState, vars: TemplateVars = {}): string {
@@ -147,11 +142,11 @@ export class Prompts {
     return [...this.cached.values()].map((entry) => entry.path);
   }
 
-  private file(kind: string, name: string): CachedFile {
-    const entry = this.cached.get(`${kind}/${name}`);
+  private file(name: string): CachedFile {
+    const entry = this.cached.get(name);
     if (entry === undefined) {
       throw new Error(
-        `no ${kind}/${name}.md in ${this.dirs.map((dir) => path.join(dir, kind)).join(" or ")}`,
+        `no prompts/${name}.md in ${this.dirs.map((dir) => path.join(dir, "prompts")).join(" or ")}`,
       );
     }
     return entry;

@@ -15,6 +15,22 @@ export function attemptOf(historyDir: string): number {
   );
 }
 
+export function restored(
+  dispatched: string,
+  live: string,
+  section: string | null,
+): string {
+  if (section === null) {
+    return dispatched;
+  }
+  const heading = `\n${section}\n`;
+  const at = live.lastIndexOf(heading);
+  if (at === -1) {
+    return dispatched;
+  }
+  return dispatched + live.slice(at + heading.length);
+}
+
 export function rotate(
   assignmentPath: string,
   historyDir: string,

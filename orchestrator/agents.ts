@@ -3,7 +3,7 @@ import { z } from "zod";
 import { parse } from "./schema.ts";
 import { DEFAULT_WRITE, PI_HOME, overlays } from "./sandbox.ts";
 import type { TaskId } from "./task.ts";
-import { ALL_ROLES, type Role } from "./runtime.ts";
+import { ALL_ROLES, type Role } from "./states.ts";
 import type { Activity } from "./activity.ts";
 
 const Entry = z.strictObject({
@@ -121,6 +121,7 @@ export interface AgentRow {
   activity: Activity;
   tokens: number | null;
   context_percent: number | null;
+  compactions: number;
   session: string | null;
   log: string | null;
   retry_at?: string;
@@ -144,6 +145,7 @@ export function idleRow(slot: AgentSlot, enabled = true): AgentRow {
     activity: { kind: "none" },
     tokens: null,
     context_percent: null,
+    compactions: 0,
     session: null,
     log: null,
   };

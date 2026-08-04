@@ -8,6 +8,8 @@ export const TEST_ROOT = path.join(os.tmpdir(), "task-graph-server-test");
 fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 fs.mkdirSync(TEST_ROOT, { recursive: true });
 
+process.env.TASK_GRAPH_TASKS_ROOT = path.join(TEST_ROOT, "task-graph-root");
+
 const live: string[] = [];
 
 export function tempDir(prefix: string): string {

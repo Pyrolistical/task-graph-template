@@ -1,9 +1,8 @@
 import { type TaskId, type TaskMeta } from "./task.ts";
-import { blockingCounts } from "./graph.ts";
 
 export const INBOX_RANKS = [
-  "READY_MANAGER_REVIEW",
-  "READY_TASK_GRAPH_UPDATE",
+  "MANAGER_REVIEW",
+  "HELD_DESIGN",
   "HELD_PLAN",
   "HELD_WORK",
   "NEW",
@@ -21,8 +20,10 @@ export interface InboxRow {
   waiting_since: string | null;
 }
 
-export function inbox(tasks: Map<TaskId, TaskMeta>): InboxRow[] {
-  const blocking = blockingCounts(tasks);
+export function inbox(
+  tasks: Map<TaskId, TaskMeta>,
+  blocking: Map<TaskId, number>,
+): InboxRow[] {
   const rows: InboxRow[] = [];
 
   for (const [id, task] of tasks) {

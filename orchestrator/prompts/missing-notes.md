@@ -1,8 +1,8 @@
-You submitted without appending an `## Implementation Notes`
-section to `../ASSIGNMENT.md`.
+You submitted with nothing written under `## Implementation Notes` in
+`../ASSIGNMENT.md`.
 
-Append `## Implementation Notes` at the very end of the file and write there,
-by number, what you did about every todo in `## Todos` — the change, the
-commit, and how you saw it work. Do not change a single character above it.
-Then submit again by calling the `submit` tool — or `blocked` with a `message`
-naming the wall if you genuinely cannot finish.
+- Record each todo by number as you finish it, under the `## Implementation
+  Notes` heading at the end of `../ASSIGNMENT.md`, changing nothing above it.
+- Commit messages are clear and concise. Do not push.
+
+Finish by calling `submit`, or `blocked`.

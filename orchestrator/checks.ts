@@ -35,7 +35,7 @@ export class CheckRunner {
   }
 
   isRunning(taskId: TaskId): boolean {
-    return this.view.some((check) => check.task_id === taskId);
+    return [...this.running.values()].some((check) => check.task_id === taskId);
   }
 
   start(

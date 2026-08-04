@@ -78,6 +78,15 @@ export function removeWorkspace(target: string): void {
   fs.rmSync(target, { recursive: true, force: true });
 }
 
+export function head(worktree: string): string {
+  return gitOrThrow(worktree, ["rev-parse", "HEAD"]).trim();
+}
+
+export function resetTo(worktree: string, commit: string): void {
+  gitOrThrow(worktree, ["reset", "--hard", "--quiet", commit]);
+  gitOrThrow(worktree, ["clean", "-q", "-f", "-d"]);
+}
+
 export function commonDir(cwd: string): string {
   return gitOrThrow(cwd, [
     "rev-parse",
@@ -145,36 +154,6 @@ export function commitCount(worktree: string, base: string): number {
       "--count",
       `refs/remotes/origin/${base}..HEAD`,
     ]).trim(),
-  );
-}
-
-export function range(worktree: string, base: string): string {
-  const from = gitOrThrow(worktree, [
-    "merge-base",
-    `refs/remotes/origin/${base}`,
-    "HEAD",
-  ]).trim();
-  const to = gitOrThrow(worktree, ["rev-parse", "HEAD"]).trim();
-  return `${from}..${to}`;
-}
-
-export function changedFiles(
-  repo: string,
-  base: string,
-  branch: string,
-): string[] {
-  return gitOrThrow(repo, ["diff", "--name-only", `${base}...${branch}`])
-    .split("\n")
-    .filter((line) => line.length > 0);
-}
-
-export function touchesTasks(
-  repo: string,
-  base: string,
-  branch: string,
-): boolean {
-  return changedFiles(repo, base, branch).some((file) =>
-    file.startsWith("tasks/"),
   );
 }
 

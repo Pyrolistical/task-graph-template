@@ -1,15 +1,7 @@
-Commit your work in this worktree, then submit again:
-
-```
-git add -A
-git commit -m "<what you did>"
-git status --porcelain
-```
-
+Your work was not found.
 {{#empty}}
 
-There is no commit of yours on this branch yet, so the branch as it stands
-carries none of this work.
+- The branch carries no commit of yours, so none of this work survives.
 {{/empty}}
 {{#dirty}}
 
@@ -18,9 +10,6 @@ carries none of this work.
 ```
 {{status}}
 ```
-
 {{/dirty}}
 
-That last `git status --porcelain` has to print nothing. Only what is committed
-survives this worktree. Once it does, submit again by calling the `submit`
-tool.
+Commit here until `git status --porcelain` prints nothing, then `submit` again.

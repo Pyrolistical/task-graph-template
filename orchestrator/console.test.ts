@@ -7,16 +7,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { idleRow, parseAgents } from "./agents.ts";
 import type { AgentRow } from "./agents.ts";
-import type { Activity } from "./activity.ts";
+import { type Activity, elapsed } from "./activity.ts";
 import type { TaskRow } from "./graph.ts";
 import {
   type Entry,
   type Layout,
   type Line,
+  type Mouse,
   type Pane,
+  type Scroll,
   type View,
   HEADER_LINES,
   MIN_PANE_WIDTH,
+  NEWS,
   PaneLines,
   QUEUE_LINES,
   SWITCH_OFF,
@@ -25,18 +28,22 @@ import {
   SessionTail,
   abortButton,
   activityLine,
+  baseOf,
   body,
   bodyHeight,
   charWidth,
   clip,
   detailLine,
-  elapsed,
+  drop,
   entryLines,
   frame,
   header,
   hitAt,
   keys,
   mouse,
+  newsButton,
+  newsRegion,
+  overlay,
   pad,
   paneWidth,
   panes,
@@ -45,12 +52,18 @@ import {
   recordEntries,
   renderLine,
   screen,
+  scrollBack,
+  scrollBottom,
+  scrollForward,
+  scrollTop,
   spanWidth,
   statsLine,
+  take,
+  topOf,
   textWidth,
   thousands,
   toggle,
-  tokensPerSecond,
+  within,
   wrap,
 } from "./console.ts";
 import type { Candidate } from "./scheduler.ts";
@@ -99,9 +112,8 @@ function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
   return {
     id: "000123",
     title: "port the console",
-    state: "WORKING",
+    state: "WORK",
     state_entered: new Date(1000).toISOString(),
-    open_task_graph_updates: 0,
     depends_on: [],
     blocking: 0,
     claimed_by: SLOTS[0]!.name,
@@ -125,7 +137,8 @@ function viewOf(overrides: Partial<View> = {}): View {
 function candidateOf(overrides: Partial<Candidate> = {}): Candidate {
   return {
     task_id: "000123",
-    rank: "READY_WORK_FRESH",
+    rank: "WORK_FRESH",
+    stage: "WORK",
     role: "worker",
     blocking: 0,
     prefer_agent: null,
@@ -139,7 +152,7 @@ function layoutOf(overrides: Partial<Layout> = {}): Layout {
     columns: 100,
     rows: 12,
     nowMs: 1000,
-    scroll: { anchor: 0, follow: true },
+    scroll: { bases: null, offsets: [] },
     readOnly: false,
     ...overrides,
   };
@@ -204,6 +217,40 @@ describe("spans", () => {
   test("pad fills the column a clipped emoji could not use", () => {
     expect(spanWidth(pad([{ text: "ab🔥cd" }], 4))).toBe(4);
     expect(spanWidth(pad([{ text: "🔥ab" }], 6))).toBe(6);
+  });
+
+  test("take cuts at the column without an ellipsis", () => {
+    expect(plain(take([{ text: "hello world" }], 5))).toBe("hello");
+    expect(take([{ text: "ab", sgr: "2" }, { text: "cd" }], 3)).toEqual([
+      { text: "ab", sgr: "2" },
+      { text: "c", sgr: undefined },
+    ]);
+  });
+
+  test("take spaces out an emoji straddling the cut", () => {
+    expect(plain(take([{ text: "ab🔥cd" }], 3))).toBe("ab ");
+    expect(spanWidth(take([{ text: "ab🔥cd" }], 3))).toBe(3);
+  });
+
+  test("drop keeps everything past the column", () => {
+    expect(plain(drop([{ text: "hello world" }], 6))).toBe("world");
+    expect(drop([{ text: "ab", sgr: "2" }, { text: "cd" }], 2)).toEqual([
+      { text: "cd" },
+    ]);
+  });
+
+  test("drop spaces out an emoji straddling the column", () => {
+    expect(plain(drop([{ text: "ab🔥cd" }], 3))).toBe(" cd");
+    expect(spanWidth(drop([{ text: "ab🔥cd" }], 3))).toBe(3);
+  });
+
+  test("take and drop split a line without losing a column", () => {
+    const line = [{ text: "ab🔥cd", sgr: "2" }, { text: "ef" }];
+    for (let at = 0; at <= spanWidth(line); at++) {
+      expect(spanWidth(take(line, at)) + spanWidth(drop(line, at))).toBe(
+        spanWidth(line),
+      );
+    }
   });
 
   test("render wraps sgr spans in escapes and leaves plain text alone", () => {
@@ -414,48 +461,6 @@ describe("Sessions", () => {
   });
 });
 
-describe("tokensPerSecond", () => {
-  test("no samples give no rate", () => {
-    expect(tokensPerSecond([], NOW)).toBeNull();
-  });
-
-  test("a single sample measures from when it arrived", () => {
-    expect(tokensPerSecond([{ timestampMs: NOW, tokens: 5 }], NOW + 5000)).toBe(
-      1,
-    );
-  });
-
-  test("two samples use the time between them", () => {
-    expect(
-      tokensPerSecond(
-        [
-          { timestampMs: NOW, tokens: 3 },
-          { timestampMs: NOW + 1000, tokens: 7 },
-        ],
-        NOW + 10_000,
-      ),
-    ).toBe(10);
-  });
-
-  test("same-time samples fall back to now", () => {
-    expect(
-      tokensPerSecond(
-        [
-          { timestampMs: NOW, tokens: 4 },
-          { timestampMs: NOW, tokens: 6 },
-        ],
-        NOW + 2000,
-      ),
-    ).toBe(5);
-  });
-
-  test("a sample in the future gives no rate", () => {
-    expect(tokensPerSecond([{ timestampMs: NOW + 1000, tokens: 5 }], NOW)).toBe(
-      null,
-    );
-  });
-});
-
 describe("panes", () => {
   test("an agent is joined to its task and its running check", () => {
     const pane = paneOf({
@@ -471,10 +476,10 @@ describe("panes", () => {
       ],
     });
 
-    expect(pane.task?.state).toBe("WORKING");
+    expect(pane.task?.state).toBe("WORK");
     expect(pane.check?.command).toBe("bun test");
     expect(pane.sinceMs).toBe(1000);
-    expect(detailLine(pane)).toBe("task 000123 · worker · WORKING · pid 4242");
+    expect(detailLine(pane)).toBe("task 000123 worker WORK pid 4242");
     expect(activityLine(pane)).toBe("check 1: bun test");
   });
 
@@ -493,7 +498,7 @@ describe("panes", () => {
     const pane = paneOf({ tasks: [] });
 
     expect(pane.task).toBeNull();
-    expect(detailLine(pane)).toBe("task 000123 · worker · pid 4242");
+    expect(detailLine(pane)).toBe("task 000123 worker pid 4242");
   });
 
   test("a retrying agent shows its attempt", () => {
@@ -514,7 +519,13 @@ describe("panes", () => {
   test("stats show the token rate over the last ten messages and context", () => {
     const pane = paneOf();
 
-    expect(statsLine(pane, 1234.56)).toBe("1.2k tok/s · ctx 42%");
+    expect(statsLine(pane, 1234.56)).toBe("1.2k tok/s ctx 42%");
+  });
+
+  test("stats count compactions after the context percentage", () => {
+    const pane = paneOf({ agents: [busyRow({ compactions: 3 })] });
+
+    expect(statsLine(pane, null)).toBe("ctx 42% x3");
   });
 });
 
@@ -545,29 +556,31 @@ describe("body", () => {
   }
 
   test("following keeps the newest entries when they overflow the pane", () => {
-    const lines = body(linesOf(["one", "two", "three"]), 2, {
-      anchor: 0,
-      follow: true,
-    });
+    const lines = linesOf(["one", "two", "three"]);
+    const shownLines = body(lines, 2, baseOf(lines.length, 2, undefined), 0);
 
-    expect(lines).toHaveLength(2);
-    expect(shown(lines)).toContain("three");
-    expect(shown(lines)).not.toContain("one");
+    expect(shownLines).toHaveLength(2);
+    expect(shown(shownLines)).toContain("three");
+    expect(shown(shownLines)).not.toContain("one");
   });
 
   test("scrolling back reveals older entries", () => {
-    const lines = body(linesOf(["one", "two", "three"]), 1, {
-      anchor: 1,
-      follow: false,
-    });
+    const lines = linesOf(["one", "two", "three"]);
+    const shownLines = body(lines, 1, baseOf(lines.length, 1, undefined), 1);
 
-    expect(shown(lines)).toContain("two");
+    expect(shown(shownLines)).toContain("two");
   });
 
-  test("an anchor past the end is clamped without being forgotten", () => {
-    const scroll = { anchor: 500, follow: false };
-    expect(body(linesOf(["only"]), 5, scroll)).toHaveLength(1);
-    expect(scroll.anchor).toBe(500);
+  test("a base past the end of a shrunken pane is clamped", () => {
+    expect(baseOf(1, 5, 500)).toBe(0);
+  });
+
+  test("scrolling back never runs off the top of the pane", () => {
+    const lines = linesOf(["one", "two", "three"]);
+
+    expect(shown(body(lines, 1, baseOf(lines.length, 1, undefined), 99))).toBe(
+      shown(body(lines, 1, 0, 0)),
+    );
   });
 
   test("new lines do not move what a scrolled pane is showing", () => {
@@ -575,11 +588,13 @@ describe("body", () => {
     const entries = ["one", "two", "three", "four"].map((text) =>
       entryOf(text),
     );
-    const scroll = { anchor: 1, follow: false };
+    const base = baseOf(cache.update(entries, 40).length, 2, undefined);
 
-    const before = shown(body(cache.update(entries, 40), 2, scroll));
+    const before = shown(body(cache.update(entries, 40), 2, base, 1));
     entries.push(entryOf("five"), entryOf("six"));
-    const after = shown(body(cache.update(entries, 40), 2, scroll));
+    const after = shown(
+      body(cache.update(entries, 40), 2, baseOf(6, 2, base), 1),
+    );
 
     expect(before).toContain("two");
     expect(after).toBe(before);
@@ -588,13 +603,35 @@ describe("body", () => {
   test("a following pane still moves with new lines", () => {
     const cache: PaneLines = new PaneLines();
     const entries = ["one", "two"].map((text) => entryOf(text));
-    const scroll = { anchor: 0, follow: true };
 
-    body(cache.update(entries, 40), 2, scroll);
     entries.push(entryOf("three"));
+    const lines = cache.update(entries, 40);
 
-    expect(shown(body(cache.update(entries, 40), 2, scroll))).toContain(
-      "three",
+    expect(
+      shown(body(lines, 2, baseOf(lines.length, 2, undefined), 0)),
+    ).toContain("three");
+  });
+
+  test("panes of different lengths scroll by the same amount", () => {
+    const short = linesOf(["a1", "a2", "a3"]);
+    const long = linesOf(["b1", "b2", "b3", "b4", "b5", "b6"]);
+    const step = (lines: Line[], offset: number) =>
+      shown(body(lines, 2, baseOf(lines.length, 2, undefined), offset));
+
+    expect(step(short, 0)).toContain("a3");
+    expect(step(long, 0)).toContain("b6");
+    expect(step(short, 1)).toContain("a1");
+    expect(step(long, 1)).toContain("b4");
+  });
+
+  test("a short pane stays at its top while a long one keeps going", () => {
+    const short = linesOf(["a1", "a2"]);
+    const long = linesOf(["b1", "b2", "b3", "b4"]);
+
+    expect(shown(body(short, 2, baseOf(2, 2, undefined), 1))).toContain("a1");
+    expect(shown(body(long, 2, baseOf(4, 2, undefined), 1))).toContain("b2");
+    expect(shown(body(long, 2, baseOf(4, 2, undefined), 1))).not.toContain(
+      "b4",
     );
   });
 
@@ -624,6 +661,107 @@ describe("body", () => {
   });
 });
 
+describe("scrolling", () => {
+  function mouseAt(column: number, row: number): Mouse {
+    return { button: 0, column, row, pressed: true };
+  }
+
+  test("the first step back freezes every pane's bottom", () => {
+    const scroll: Scroll = { bases: null, offsets: [] };
+
+    scrollBack(scroll, [4, 9], 1);
+
+    expect(scroll).toEqual({ bases: [4, 9], offsets: [1, 1] });
+  });
+
+  test("later steps back keep the frozen bases", () => {
+    const scroll: Scroll = { bases: [4, 9], offsets: [1, 1] };
+
+    scrollBack(scroll, [7, 12], 2);
+
+    expect(scroll).toEqual({ bases: [4, 9], offsets: [3, 3] });
+  });
+
+  test("a pane that runs out of history stops where it is", () => {
+    const scroll: Scroll = { bases: null, offsets: [] };
+
+    scrollBack(scroll, [4, 9], 6);
+
+    expect(scroll.offsets).toEqual([4, 9 - 3]);
+  });
+
+  test("a pane at its top scrolls forward with the rest, not after them", () => {
+    const scroll: Scroll = { bases: [4, 9], offsets: [4, 9] };
+
+    scrollForward(scroll, 2);
+
+    expect(scroll.offsets).toEqual([2, 7]);
+  });
+
+  test("scrolling forward at the bottom does nothing", () => {
+    const scroll: Scroll = { bases: null, offsets: [] };
+
+    scrollForward(scroll, 3);
+
+    expect(scroll).toEqual({ bases: null, offsets: [] });
+  });
+
+  test("every pane reaching the bottom re-enters follow", () => {
+    const scroll: Scroll = { bases: [4, 9], offsets: [2, 5] };
+
+    scrollForward(scroll, 3);
+    expect(scroll).toEqual({ bases: [4, 9], offsets: [0, 2] });
+
+    scrollForward(scroll, 3);
+    expect(scroll).toEqual({ bases: null, offsets: [] });
+  });
+
+  test("the top key takes every pane to its first line", () => {
+    const scroll: Scroll = { bases: null, offsets: [] };
+
+    scrollTop(scroll, [4, 9]);
+
+    expect(scroll).toEqual({ bases: [4, 9], offsets: [4, 9] });
+  });
+
+  test("the bottom key returns to follow", () => {
+    const scroll: Scroll = { bases: [4, 9], offsets: [3, 3] };
+
+    scrollBottom(scroll);
+
+    expect(scroll).toEqual({ bases: null, offsets: [] });
+  });
+
+  test("the button sits centred one row up from the bottom", () => {
+    const region = newsRegion(100, 12);
+
+    expect(region.row).toBe(10);
+    expect(region.to - region.from).toBe(spanWidth(newsButton()));
+    expect(region.from).toBe(Math.floor((100 - (region.to - region.from)) / 2));
+  });
+
+  test("the overlay drops the button in without moving the columns", () => {
+    const line = pad([{ text: "the pane", sgr: "2" }], 40);
+    const region = { row: 10, from: 10, to: 10 + spanWidth(newsButton()) };
+    const merged = overlay(line, newsButton(), region);
+
+    expect(spanWidth(merged)).toBe(40);
+    expect(plain(merged).slice(region.from, region.to)).toBe(NEWS);
+  });
+
+  test("a click on the button returns to following", () => {
+    const scroll: Scroll = { bases: [4, 9], offsets: [3, 3] };
+    const region = newsRegion(100, 12);
+
+    expect(within(region, mouseAt(region.from, region.row))).toBe(true);
+    expect(within(region, mouseAt(region.to, region.row))).toBe(false);
+    expect(within(region, mouseAt(region.from, region.row - 1))).toBe(false);
+
+    scrollBottom(scroll);
+    expect(scroll).toEqual({ bases: null, offsets: [] });
+  });
+});
+
 describe("wrapped pane lines", () => {
   test("entries already wrapped are not wrapped again", () => {
     const cache: PaneLines = new PaneLines();
@@ -644,10 +782,10 @@ describe("wrapped pane lines", () => {
     const entries = [entryOf("one"), last];
 
     cache.update(entries, 40);
-    last.text = "thinking · deeper";
+    last.text = "thinking deeper";
 
     expect(renderLine(cache.update(entries, 40)[1]!)).toContain(
-      "thinking · deeper",
+      "thinking deeper",
     );
   });
 
@@ -761,10 +899,58 @@ describe("screen", () => {
     }
   });
 
-  test("the reported total is the longest pane, which bounds the scroll", () => {
-    const { total } = screen(cells(2), [], layoutOf());
+  function deep(count: number) {
+    const many = cells(2);
+    many[0]!.lines = (width: number) =>
+      new PaneLines().update(
+        Array.from({ length: count }, (_, index) => entryOf(`line ${index}`)),
+        width,
+      );
+    return many;
+  }
 
-    expect(total).toBe(1);
+  test("lines arriving below a scrolled view raise the button", () => {
+    const { lines, news } = screen(
+      deep(8),
+      [],
+      layoutOf({ scroll: { bases: [0, 0], offsets: [0, 0] } }),
+    );
+
+    expect(news).toEqual(newsRegion(100, 12));
+    expect(lines[news!.row]).toContain(NEWS);
+  });
+
+  test("a following screen never shows the button", () => {
+    expect(screen(deep(8), [], layoutOf()).news).toBeNull();
+    expect(screen(deep(8), [], layoutOf()).lines.join("")).not.toContain(NEWS);
+  });
+
+  test("a scrolled screen with nothing new shows no button", () => {
+    const bottom = topOf(8, bodyHeight(12));
+
+    expect(
+      screen(
+        deep(8),
+        [],
+        layoutOf({ scroll: { bases: [bottom, 0], offsets: [2, 0] } }),
+      ).news,
+    ).toBeNull();
+  });
+
+  test("lines arriving do not move what a scrolled screen shows", () => {
+    const scroll: Scroll = { bases: [3, 0], offsets: [2, 0] };
+    const rowsOf = (count: number) =>
+      screen(deep(count), [], layoutOf({ scroll }))
+        .lines.slice(QUEUE_LINES + HEADER_LINES + 1)
+        .filter((_, index) => index !== 3);
+
+    expect(rowsOf(10)).toEqual(rowsOf(8));
+  });
+
+  test("the reported bases are each pane's bottom, which bound the scroll", () => {
+    const { bases } = screen(cells(2), [], layoutOf());
+
+    expect(bases).toEqual([0, 0]);
   });
 
   test("every pane switch is a hit region on the pane header row", () => {
@@ -893,14 +1079,14 @@ describe("switches", () => {
     const lines = header(paneOf(), null, 60, 1000, false);
 
     expect(renderLine(lines[0]!)).toBe(
-      "\x1b[32m[─●]\x1b[0m pi · anthropic/claude-sonnet-4-5 · slot 1       busy 0s",
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1                0s",
     );
   });
 
   test("a narrow pane clips the identity, never the switch or the state", () => {
     const line = renderLine(header(paneOf(), null, 30, 1000, false)[0]!);
 
-    expect(line).toBe("\x1b[32m[─●]\x1b[0m pi · anthropic/c… busy 0s");
+    expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
     expect(textWidth(line.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
   });
 
@@ -908,7 +1094,7 @@ describe("switches", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
 
     expect(renderLine(header(pane, null, 60, 1000, false)[0]!)).toBe(
-      "\x1b[2m[●─]\x1b[0m pi · anthropic/claude-sonnet-4-5 · slot 1          idle",
+      "\x1b[2m[●─]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1              idle",
     );
   });
 
@@ -916,7 +1102,7 @@ describe("switches", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
 
     expect(plain(header(pane, null, 60, 1000, true)[0]!)).toBe(
-      "disabled pi · anthropic/claude-sonnet-4-5 · slot 1      idle",
+      "disabled pi anthropic/claude-sonnet-4-5 slot 1          idle",
     );
   });
 });
@@ -934,18 +1120,20 @@ describe("the abort button", () => {
     expect(abortButton(pane, true)).toEqual([]);
   });
 
-  test("the button is present for each non-none activity kind", () => {
-    const kinds: Activity[] = [
-      { kind: "tool-call", tool: "bash", target: "bun test", started_at: NOW },
+  test("the button is present only inside a bash tool call", () => {
+    const pane = paneOf();
+    expect(plain(abortButton(pane, false))).toBe("[abort]");
+
+    const quiet: Activity[] = [
       { kind: "thinking", started_at: NOW },
       { kind: "compacting", reason: "overflow", started_at: NOW },
+      { kind: "tool-call", tool: "read", target: "a.txt", started_at: NOW },
     ];
 
-    for (const kind of kinds) {
-      const pane = paneOf({ agents: [busyRow({ activity: kind })] });
-      const button = abortButton(pane, false);
-      expect(button.length).toBeGreaterThan(0);
-      expect(plain(button)).toBe("[abort]");
+    for (const activity of quiet) {
+      expect(
+        abortButton(paneOf({ agents: [busyRow({ activity })] }), false),
+      ).toEqual([]);
     }
   });
 
@@ -1004,8 +1192,8 @@ describe("the queue header", () => {
     const { line } = queueHeader(
       viewOf({
         queue: [
-          candidateOf({ task_id: "000001", rank: "READY_WORK_REVIEW" }),
-          candidateOf({ task_id: "000002", rank: "READY_WORK_STARTED" }),
+          candidateOf({ task_id: "000001", rank: "WORK_REVIEW" }),
+          candidateOf({ task_id: "000002", rank: "WORK_STARTED" }),
           candidateOf({ task_id: "000003", rank: "resume" }),
         ],
       }),
@@ -1014,9 +1202,9 @@ describe("the queue header", () => {
     );
     const text = plain(line);
 
-    expect(text).toContain("000001 READY_WORK_REVIEW");
+    expect(text).toContain("000001 WORK_REVIEW");
     expect(text.indexOf("000001")).toBeLessThan(text.indexOf("000002"));
-    expect(text).toContain("000002 READY_WORK");
+    expect(text).toContain("000002 WORK");
     expect(text).toContain("000003 resume");
     expect(text.trimEnd().endsWith("3 queued")).toBe(true);
     expect(spanWidth(line)).toBe(120);
@@ -1024,12 +1212,12 @@ describe("the queue header", () => {
 
   test("a queued task is labelled with its task state", () => {
     const { line } = queueHeader(
-      viewOf({ queue: [candidateOf({ rank: "READY_WORK_FRESH" })] }),
+      viewOf({ queue: [candidateOf({ rank: "WORK_FRESH" })] }),
       100,
       false,
     );
 
-    expect(plain(line)).toContain("000123 READY_WORK");
+    expect(plain(line)).toContain("000123 WORK");
   });
 
   test("an empty queue says so", () => {

@@ -4,7 +4,13 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
-import { type TaskId, createTask, isValidId, writeTaskBody } from "./task.ts";
+import {
+  type TaskId,
+  createTask,
+  detectCycles,
+  isValidId,
+  writeTaskBody,
+} from "./task.ts";
 import type { TransitionArgs, TransitionName } from "./transition.ts";
 import { append } from "./queue.ts";
 import { Server } from "./server.ts";
@@ -50,7 +56,11 @@ export function build(server: Server): McpServer {
       inputSchema: z.object({ title: z.string().min(1) }),
     },
     async ({ title }) => {
-      const created = createTask(server.tasksDir, title);
+      const created = createTask(
+        server.tasksDir,
+        server.orchestratorDir,
+        title,
+      );
       server.transitions.append({
         task_id: created.id,
         transition: "create",
@@ -77,33 +87,39 @@ export function build(server: Server): McpServer {
     "task_submit",
     {
       description:
-        "Say the task is done with the stage it is in and move it forward. From NEW or BLOCKED it is dispatched — NEW → READY_PLAN, or BLOCKED while dependencies remain; BLOCKED → READY_PLAN once they are gone. From MANAGER_REVIEWING the work is landed first (rebase, recheck, fast-forward), then the task closes, or goes to READY_TASK_GRAPH_UPDATE when updates are queued. From TASK_GRAPH_UPDATING it closes, refused while any queued update is not marked done.",
+        "Say the task is done with the stage it is in and move it forward. From NEW or BLOCKED it is dispatched — NEW → DESIGN, or BLOCKED while dependencies remain; BLOCKED → DESIGN once they are gone. From MANAGER_REVIEW the work is landed first (rebase, recheck, fast-forward), then the task closes.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => {
-      const state = server.tasks().get(id)?.state;
-      if (state === "MANAGER_REVIEWING") {
+      const tasks = server.tasks();
+      const state = tasks.get(id)?.state;
+      if (state === "MANAGER_REVIEW") {
         return applied(await server.attemptMerge(id));
+      }
+      if (detectCycles(tasks).includes(id)) {
+        throw new Error(
+          `task "${id}" is part of a dependency cycle through ${tasks.get(id)?.depends_on.join(", ")}; it could never unblock`,
+        );
       }
       return judge(id, "submit");
     },
   );
 
   mcp.registerTool(
-    "task_add_feedback",
+    "task_feedback",
     {
       description:
-        "Send a task back to work with review findings: MANAGER_REVIEWING → READY_WORK. The findings are appended to the task body under # Review findings with a fresh Implementation Notes section for the next worker round, and the worker is reminded of them at dispatch.",
+        "Send a task back to work with review findings: MANAGER_REVIEW → WORK. The findings are appended to the task body under # Review findings with a fresh Implementation Notes section for the next worker round, and the worker is reminded of them at dispatch.",
       inputSchema: z.object({
         id: taskId,
         findings: z.array(z.string().min(1)).min(1),
       }),
     },
     async ({ id, findings }) => {
-      const result = judge(id, "addFeedback", { findings });
+      const result = judge(id, "feedback", { findings });
       append(
         server.runtime.taskDir(id),
-        "WORKING",
+        "WORK",
         server.prompts.fragment("work-findings", {
           findings: findings.map((finding) => ({ finding })),
         }),
@@ -116,7 +132,7 @@ export function build(server: Server): McpServer {
     "task_resume",
     {
       description:
-        "Take a task out of HELD, having decided the wall is gone. Returns to READY_PLAN from HELD_PLAN and to READY_WORK from HELD_WORK; dependencies added while it was held put it in BLOCKED instead.",
+        "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in BLOCKED instead, and a task that unblocks starts again at DESIGN.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => judge(id, "resume"),
@@ -126,28 +142,17 @@ export function build(server: Server): McpServer {
     "task_hold",
     {
       description:
-        "Park a task. From the planning-phase states (READY_PLAN, PLANNING, READY_PLAN_REVIEW, PLAN_REVIEWING) it lands in HELD_PLAN; from the work-phase states (READY_WORK, WORKING, READY_CHECK, CHECKING, READY_WORK_REVIEW, WORK_REVIEWING) in HELD_WORK. The document is yours to edit directly while it is held; task_resume sends it back, task_abort closes it.",
+        "Park a task, whether or not an agent is holding it. It lands in the held state of the phase it was in: HELD_DESIGN from DESIGN or DESIGN_REVIEW, HELD_PLAN from PLAN or PLAN_REVIEW, HELD_WORK from WORK, CHECK or WORK_REVIEW. The document is yours to edit directly while it is held; task_resume sends it back, task_abort closes it.",
       inputSchema: z.object({ id: taskId, reason: z.string().min(1) }),
     },
     async ({ id, reason }) => judge(id, "hold", { reason }),
   );
 
   mcp.registerTool(
-    "task_claim",
-    {
-      description:
-        "Take ownership of a task waiting on you: READY_MANAGER_REVIEW → MANAGER_REVIEWING, READY_TASK_GRAPH_UPDATE → TASK_GRAPH_UPDATING. The document is yours to edit directly while you hold it.",
-      inputSchema: z.object({ id: taskId }),
-    },
-    async ({ id }) =>
-      judge(id, "claim", { agentName: "manager", pid: process.pid }),
-  );
-
-  mcp.registerTool(
     "task_abort",
     {
       description:
-        "Throw the task away because it was the wrong shape, from MANAGER_REVIEWING once the work is in, or from HELD_PLAN or HELD_WORK while it is parked. Closes it right away; task graph updates queued on the document are applied first. To abort a task that is still in READY_PLAN or READY_WORK, task_hold it first. Refused if the branch already landed.",
+        "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => applied(server.attemptAbort(id)),
@@ -214,134 +219,115 @@ export function build(server: Server): McpServer {
     async ({ agent }) => applied(server.abortAgent(agent)),
   );
 
-  const views: [string, string, string, () => string][] = [
-    [
-      "inbox",
-      "orchestrator://inbox",
-      [
-        "everything waiting on the manager, most nearly closed first. Ranks and how to handle them:",
-        "READY_MANAGER_REVIEW: the work is done and the work review passed; task_submit to land it, task_add_feedback with findings to send it back to work, or task_abort. Task graph changes the close needs are edited into the document directly.",
-        "READY_TASK_GRAPH_UPDATE: queued graph updates await you; apply them by editing the graph, mark each update done in the document, then task_submit to close the task.",
-        "HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
-        "NEW: author the task (edit the file: body, checks, dependencies), then task_submit.",
-      ].join(" "),
-      () => server.runtime.inboxView,
-    ],
-    [
-      "agents",
-      "orchestrator://agents",
-      "every agent slot, idle ones included",
-      () => server.runtime.agentsView,
-    ],
-    [
-      "checks",
-      "orchestrator://checks",
-      "the check processes running right now",
-      () => server.runtime.checksView,
-    ],
-    [
-      "tasks",
-      "orchestrator://tasks",
-      "the last 100 tasks to change state",
-      () => server.runtime.tasksView,
-    ],
-    [
-      "queue",
-      "orchestrator://queue",
-      "the tasks waiting on a slot, in the order the scheduler will dispatch them",
-      () => server.runtime.queueView,
-    ],
-  ];
+  function resource(
+    name: string,
+    uri: string,
+    description: string,
+    mimeType: string,
+    read: () => string,
+  ): void {
+    mcp.registerResource(name, uri, { description, mimeType }, async () => ({
+      contents: [{ uri, mimeType, text: read() }],
+    }));
+  }
 
-  for (const [name, uri, description, filePath] of views) {
-    mcp.registerResource(
+  function view(name: string, description: string, filePath: () => string) {
+    resource(
       name,
-      uri,
-      { description, mimeType: "application/json" },
-      async () => ({
-        contents: [
-          {
-            uri,
-            mimeType: "application/json",
-            text: fs.existsSync(filePath())
-              ? fs.readFileSync(filePath(), "utf-8")
-              : "{}",
-          },
-        ],
-      }),
+      `orchestrator://${name}`,
+      description,
+      "application/json",
+      () => {
+        const target = filePath();
+        return fs.existsSync(target) ? fs.readFileSync(target, "utf-8") : "{}";
+      },
     );
   }
 
-  mcp.registerResource(
-    "paths",
-    "orchestrator://paths",
-    {
-      description:
-        "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
-      mimeType: "application/json",
-    },
-    async () => ({
-      contents: [
-        {
-          uri: "orchestrator://paths",
-          mimeType: "application/json",
-          text: JSON.stringify(
-            {
-              repo: server.repo,
-              tasks_dir: server.tasksDir,
-              agents_file: server.agentsPath,
-              overrides_prompts_dir: path.join(server.overridesDir, "prompts"),
-              orchestrator_prompts_dir: path.join(
-                server.orchestratorDir,
-                "prompts",
-              ),
-              runtime_root: server.runtime.root,
-              server_log: server.runtime.serverLog,
-              transition_log: server.runtime.transitionLog,
-              console_command: server.runtime.consoleCommand,
-              views: {
-                agents: server.runtime.agentsView,
-                checks: server.runtime.checksView,
-                tasks: server.runtime.tasksView,
-                inbox: server.runtime.inboxView,
-                queue: server.runtime.queueView,
-              },
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    }),
+  view(
+    "inbox",
+    [
+      "everything waiting on the manager, most nearly closed first. Ranks and how to handle them:",
+      "MANAGER_REVIEW: the work is done and the work review passed; task_submit to land it, task_feedback with findings to send it back to work, or task_abort. The document is yours to edit directly. Task graph changes the close needs are made by editing the graph yourself, at any time.",
+      "HELD_DESIGN/HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
+      "NEW: author the task (edit the file: body, checks, dependencies), then task_submit.",
+    ].join(" "),
+    () => server.runtime.inboxView,
   );
 
-  mcp.registerResource(
+  view(
+    "agents",
+    "every agent slot, idle ones included",
+    () => server.runtime.agentsView,
+  );
+
+  view(
+    "checks",
+    "the check processes running right now",
+    () => server.runtime.checksView,
+  );
+
+  view(
+    "tasks",
+    "the last 100 tasks to change state",
+    () => server.runtime.tasksView,
+  );
+
+  view(
+    "queue",
+    "the tasks waiting on a slot, in the order the scheduler will dispatch them",
+    () => server.runtime.queueView,
+  );
+
+  resource(
+    "paths",
+    "orchestrator://paths",
+    "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
+    "application/json",
+    () =>
+      JSON.stringify(
+        {
+          repo: server.repo,
+          tasks_dir: server.tasksDir,
+          agents_file: server.agentsPath,
+          overrides_prompts_dir: path.join(server.overridesDir, "prompts"),
+          orchestrator_prompts_dir: path.join(
+            server.orchestratorDir,
+            "prompts",
+          ),
+          runtime_root: server.runtime.root,
+          server_log: server.runtime.serverLog,
+          transition_log: server.runtime.transitionLog,
+          console_command: server.runtime.consoleCommand,
+          views: {
+            agents: server.runtime.agentsView,
+            checks: server.runtime.checksView,
+            tasks: server.runtime.tasksView,
+            inbox: server.runtime.inboxView,
+            queue: server.runtime.queueView,
+          },
+        },
+        null,
+        2,
+      ),
+  );
+
+  resource(
     "workspace_path",
     "orchestrator://workspace_path",
-    {
-      description: "the runtime directory, for file watchers",
-      mimeType: "text/plain",
-    },
-    async () => ({
-      contents: [
-        {
-          uri: "orchestrator://workspace_path",
-          mimeType: "text/plain",
-          text: server.runtime.root,
-        },
-      ],
-    }),
+    "the runtime directory, for file watchers",
+    "text/plain",
+    () => server.runtime.root,
   );
 
   return mcp;
 }
 
 async function main(): Promise<void> {
-  const repo = process.argv[2] ?? process.cwd();
   const tasksDir =
-    process.argv[3] === undefined ? undefined : path.resolve(process.argv[3]);
+    process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]);
   const server = await Server.start({
-    repo: path.resolve(repo),
+    repo: process.cwd(),
     tasksDir,
     serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
   });
