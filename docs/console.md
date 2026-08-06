@@ -3,14 +3,24 @@
 A terminal UI over the [views](runtime-directory.md#the-views), one pane per slot, with the agent's live transcript scrolling in each.
 
 ```bash
-bun orchestrator/console.ts [repo]     # interactive
-bun orchestrator/monitor.ts [repo]     # read-only
+bun orchestrator/main/console.ts [repo]   # interactive
+bun orchestrator/main/monitor.ts [repo]   # read-only
 ```
 
 - `repo` defaults to the current directory, and only names which runtime directory to read
 - it is a **reader**: it holds no state the server needs, opens no rpc channel, and can be started, killed and restarted while agents run
 - everything it draws comes from four JSON files and the session `.jsonl` the server points it at
 - `monitor.ts` is the same program with `readOnly` true — same layout, no switches, no buttons
+
+The console is laid out the same way the server is:
+
+| Where               | What it holds                                                      |
+| ------------------- | ------------------------------------------------------------------ |
+| `domain/text.ts`    | graphemes, east-asian widths, spans, clipping, wrapping            |
+| `domain/session.ts` | one session record in, transcript entries and a usage sample out   |
+| `policy/console.ts` | panes, headers, the frame, the scroll anchor and the click targets |
+| `policy/keys.ts`    | a chunk of stdin in, keys and mouse events out                     |
+| `adapters/tui.ts`   | tailing the session files, reading the views, and the tty itself   |
 
 ## Layout
 

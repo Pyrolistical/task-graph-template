@@ -53,9 +53,9 @@ The result is not a file edit.
 
 What each field means:
 
-- **`findings`** on a design review — the gaps between the design and the acceptance criteria, plus any way the design is missing or proposes no structure. Each goes to the designer's prompt queue, verbatim; the task goes back to `DESIGN`. An empty list approves the design.
-- **`findings`** on a plan review — the gaps between the plan and the acceptance criteria, plus any way the list is missing or misnumbered. Each goes to the planner's prompt queue, verbatim; the task goes back to `PLAN`. An empty list approves the plan.
-- **`findings`** on a work review — defects in _this_ work. Each is appended to the task body under `# Review findings`, verbatim, and the worker is reminded of the findings at dispatch. The task goes back to `WORK`. An empty list is the reviewer saying it is satisfied.
+- **`findings`** on a design review — the gaps between the design and the acceptance criteria, plus any way the design is missing or proposes no structure. Each goes to `findings.json`, verbatim, and comes back as the designer's next dispatch prompt; the task goes back to `DESIGN`. An empty list approves the design.
+- **`findings`** on a plan review — the gaps between the plan and the acceptance criteria, plus any way the list is missing or misnumbered. Each goes to `findings.json`, verbatim, and comes back as the planner's next dispatch prompt; the task goes back to `PLAN`. An empty list approves the plan.
+- **`findings`** on a work review — defects in _this_ work. Each goes to `findings.json` and is appended to the task body under `# Review findings`, verbatim, and comes back as the worker's next dispatch prompt. The task goes back to `WORK`. An empty list is the reviewer saying it is satisfied.
 - **`delegations`** — defects outside it. They go to the manager, who decides whether they become tasks. Keeping them out of `findings` is what stops a review from growing the task it is reviewing.
 - **`message`** on a `blocked` result — required, and becomes `held_reason` verbatim.
 
@@ -77,16 +77,20 @@ A result tool call that does not fit the state is refused before it runs, by the
 - a settle with no result call at all (prose instead of a call, a truncated context, an aborted turn) is `missing-result`, retried a fixed number of times and then held
 - the whole settle path is in [Settling an agent](settle.md)
 
-## The prompt queues
+## Findings and the prompt queue
 
-Transient feedback is queued per state in the runtime directory — `queue/<STATE>.md`, plain markdown, nothing structured — and delivered into the agent's session as one prompt at the next dispatch of that state:
+Findings — from a design, plan, work or manager review — go to one place, `findings.json` in the task's runtime directory:
 
-- design review findings queue to `DESIGN`
-- plan review findings queue to `PLAN`
-- failing checks, work review findings and manager findings queue to `WORK`
+- they replace the next dispatch prompt for the stage they were sent back to, as `<STATE>-with-findings.md`
+- they survive a compaction and a restart, so the agent is steered back with them intact
+- a rejection overwrites the file, so an agent is only ever answering the latest review
+- the file is cleared when the stage they were sent back to submits
+
+Failing checks go to the prompt queue instead — `queue/<STATE>.md`, plain markdown, nothing structured — and are delivered into the agent's session as one prompt at the next dispatch of that state:
 
 - the queue is drained when the state is dispatched, so a task that fails its checks is resumed with the failures already in its session
-- nothing in the queues is ever written to the task document
+- a queued entry is what makes a task resumable at all: findings regenerate the file and start a fresh session, a failed check reopens the one that produced it
+- nothing in the queue or in `findings.json` is ever written to the task document
 
 ## Rotation
 

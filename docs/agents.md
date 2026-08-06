@@ -165,4 +165,4 @@ Neither ever exhausts:
 
 - there is no retry limit, because the failure is not the task's fault
 - dropping the assignment would lose a live worktree and a session for a reason that will resolve on its own
-- the slot sits in `WAITING`, `agents.json` shows the reason and the next `retry_at`, and the manager can see at a glance that its capacity is halved and why
+- the slot sits in `WAITING`, `agents.json` shows the reason and the next `retry`, and the manager can see at a glance that its capacity is halved and why

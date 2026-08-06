@@ -1,6 +1,6 @@
 # The MCP tool surface
 
-One stdio server, calling `task.ts` and `transition.ts` in process.
+One stdio server, calling `task.ts` and `state-machine.ts` in process.
 
 - there is no command-line path into the graph for the manager to reach for
 - a single writer is what keeps the lock meaningful and the transition log complete
@@ -20,7 +20,7 @@ One stdio server, calling `task.ts` and `transition.ts` in process.
 | Tool                          | Effect                                                                                                                                                                                   |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task_submit(id)`             | `NEW` → `DESIGN` or `BLOCKED`; `BLOCKED` → `DESIGN` once the dependencies are gone; from `MANAGER_REVIEW` the branch is landed first (rebase, recheck, fast-forward) and the task closes |
-| `task_feedback(id, findings)` | `MANAGER_REVIEW` → `WORK`, findings appended under `# Review findings`                                                                                                                   |
+| `task_feedback(id, findings)` | `MANAGER_REVIEW` → `WORK`, findings appended under `# Review findings` and written to `findings.json` for the next worker                                                                |
 | `task_hold(id, reason)`       | design states → `HELD_DESIGN`, planning states → `HELD_PLAN`, work states → `HELD_WORK`                                                                                                  |
 | `task_resume(id)`             | `HELD_DESIGN` → `DESIGN`, `HELD_PLAN` → `PLAN`, `HELD_WORK` → `WORK`, or `BLOCKED` if dependencies were added while held                                                                 |
 | `task_abort(id)`              | `abort` from `MANAGER_REVIEW` or any held state, refusing a branch that landed                                                                                                           |

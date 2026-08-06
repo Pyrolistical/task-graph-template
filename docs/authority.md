@@ -7,20 +7,20 @@ The graph has one writer process — the server — but two authorities behind i
 - the server applies these on its own
 - each is fully determined by an observed fact: a process settled, a command returned an exit code, a result tool was called
 
-| Transition                                      | Triggering fact                                                                           |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `submit` from `DESIGN`                          | a `submit` call with the `## Design` section written                                      |
-| `submit` from `DESIGN_REVIEW`                   | a `submit` call with empty `findings`; the accepted `ASSIGNMENT.md` becomes the task body |
-| `submit` from `PLAN`                            | a `submit` call with the `## Todos` section written                                       |
-| `submit` from `PLAN_REVIEW`                     | a `submit` call with empty `findings`; the accepted `ASSIGNMENT.md` becomes the task body |
-| `submit` from `WORK`                            | a `submit` call with notes written, and the branch committed and clean                    |
-| `submit` from `WORK_REVIEW`                     | a `submit` call with empty `findings`                                                     |
-| `pass` from `CHECK`                             | every check exited 0                                                                      |
-| `fail` from `CHECK`                             | at least one check did not; command, code and tail go to the worker's prompt queue        |
-| `feedback` in `WORK_REVIEW` or `MANAGER_REVIEW` | a `findings` list, copied verbatim into the body under `# Review findings`                |
-| `feedback` in `DESIGN_REVIEW`                   | a design review finding, copied verbatim into the designer's prompt queue                 |
-| `feedback` in `PLAN_REVIEW`                     | a plan review finding, copied verbatim into the planner's prompt queue                    |
-| `hold <reason>`                                 | an issue outlasted its attempts; the reason names it                                      |
+| Transition                                      | Triggering fact                                                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `submit` from `DESIGN`                          | a `submit` call with the `## Design` section written                                                |
+| `submit` from `DESIGN_REVIEW`                   | a `submit` call with empty `findings`; the accepted `ASSIGNMENT.md` becomes the task body           |
+| `submit` from `PLAN`                            | a `submit` call with the `## Todos` section written                                                 |
+| `submit` from `PLAN_REVIEW`                     | a `submit` call with empty `findings`; the accepted `ASSIGNMENT.md` becomes the task body           |
+| `submit` from `WORK`                            | a `submit` call with notes written, and the branch committed and clean                              |
+| `submit` from `WORK_REVIEW`                     | a `submit` call with empty `findings`                                                               |
+| `pass` from `CHECK`                             | every check exited 0                                                                                |
+| `fail` from `CHECK`                             | at least one check did not; command, code and tail go to the worker's prompt queue                  |
+| `feedback` in `WORK_REVIEW` or `MANAGER_REVIEW` | a `findings` list, copied verbatim into the body under `# Review findings` and into `findings.json` |
+| `feedback` in `DESIGN_REVIEW`                   | a design review finding, copied verbatim into `findings.json` for the designer                      |
+| `feedback` in `PLAN_REVIEW`                     | a plan review finding, copied verbatim into `findings.json` for the planner                         |
+| `hold <reason>`                                 | an issue outlasted its attempts; the reason names it                                                |
 
 The claim is a write of the same kind, and the server is the only thing that makes it: it takes the claim when it dispatches a free slot to a task nothing is holding, and clears it when the holding process is gone.
 

@@ -22,6 +22,9 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
     history/
       ASSIGNMENT.1.md     # every superseded assignment, in order
       ASSIGNMENT.2.md
+    findings.json         # the latest review's findings, until the stage resubmits
+    queue/
+      WORK.md             # failing checks waiting for the next WORK dispatch
     worktree/             # clone of the repo, branch task/000042
     session/
       worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl
@@ -113,8 +116,7 @@ Five snapshots, one per question a reader asks.
       "pid": 92014,
       "started_at": "2026-07-29T02:09:44.221Z",
       "activity": "provider: 503 model loading",
-      "retry_at": "2026-07-29T02:14:14.000Z",
-      "attempt": 3
+      "retry": { "at": "2026-07-29T02:14:14.000Z", "attempt": 3 }
     }
   ]
 }
@@ -123,6 +125,7 @@ Five snapshots, one per question a reader asks.
 - `state` is one of `IDLE`, `DISABLED`, `SPAWNING`, `BUSY`, `WAITING`, `ABORTING`, `SETTLED` — the [agent state machine](agents.md#the-agent-state-machine)
 - an idle slot is a row with nulls, never a missing row; the pool is fixed at load and the view shows all of it
 - `enabled` is the agent's toggle, not the slot's: false on every slot of a disabled agent, including the ones still finishing a task, which read as `BUSY` with `enabled` false until released
+- `retry` is null unless the slot is backing off, when it carries the time of the next attempt and how many have been made
 - `tokens` and `context_percent` come from `get_session_stats`
 - what a turn cost in dollars is not tracked — it is a provider fact that says nothing about whether the work is progressing, and the two numbers that do (context left, what the agent is doing right now) are already here
 

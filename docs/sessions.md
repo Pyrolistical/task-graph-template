@@ -70,14 +70,14 @@ The same applies in reverse:
 | Trigger                                       | Session          | `ASSIGNMENT.md`                                                                                                |
 | --------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
 | first dispatch                                | `new_session`    | generated from the task body                                                                                   |
-| plan review rejected                          | `new_session`    | regenerated; the findings arrive in the prompt queue                                                           |
+| plan review rejected                          | `new_session`    | regenerated; the findings arrive as the dispatch prompt                                                        |
 | check failed                                  | `switch_session` | carried forward, with the worker's notes                                                                       |
 | settled without a result                      | `prompt` in situ | untouched                                                                                                      |
 | appended nothing                              | `prompt` in situ | untouched                                                                                                      |
 | came back blocked                             | `prompt` in situ | untouched                                                                                                      |
 | assignment changed above the appended section | `prompt` in situ | restored by the server above the agent's heading                                                               |
-| work review rejected                          | `switch_session` | regenerated from the body, which now carries `# Review findings` and a fresh `## Implementation Notes` heading |
-| manager review rejected                       | `switch_session` | regenerated the same way                                                                                       |
+| work review rejected                          | `new_session`    | regenerated from the body, which now carries `# Review findings` and a fresh `## Implementation Notes` heading |
+| manager review rejected                       | `new_session`    | regenerated the same way                                                                                       |
 | resumed out of a held state                   | `new_session`    | regenerated                                                                                                    |
 | provider error                                | `prompt` in situ | untouched                                                                                                      |
 | context overflow compaction                   | `steer` in situ  | untouched — it is what the steer points the agent back at                                                      |
@@ -90,6 +90,8 @@ The same applies in reverse:
 
 ## Resuming a failed check
 
+- a failed check is the only thing a resume is for: it is the only thing that queues an entry, and an unclaimed `WORK` with a live session and a queued entry is the whole resumable test
+- a review rejection queues nothing — it writes `findings.json` — so it is dispatched fresh, which is the rule this file argues for above
 - a failed check returns the task to `WORK`, and the scheduler's top rank is the resume
 - the same session is reopened, the same branch and worktree
 - the queued failures are already in the session as the first prompt

@@ -48,6 +48,7 @@ An MCP server that turns the task graph into a work queue for `pi` agents.
 
 | Document                                      | What it covers                                                                  |
 | --------------------------------------------- | ------------------------------------------------------------------------------- |
+| [The layers](architecture.md)                 | the onion: domain, policy, app, adapters, main, and the ports between them      |
 | [The runtime directory](runtime-directory.md) | `/tmp/task-graph-server/<repo>/`, the five views, the transition log, retention |
 | [The server](server.md)                       | startup, the tick, pausing, detaching, recovery                                 |
 | [The scheduler](scheduler.md)                 | dispatch order, the slot handoff, the manager inbox                             |
@@ -66,10 +67,11 @@ An MCP server that turns the task graph into a work queue for `pi` agents.
 
 **The tools around it**
 
-| Document                  | What it covers                                                         |
-| ------------------------- | ---------------------------------------------------------------------- |
-| [The console](console.md) | the live TUI over the views, and the command channel it writes back on |
-| [Testing](testing.md)     | the fake `pi`, the jigs, and the schema jig for measuring a real model |
+| Document                        | What it covers                                                         |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| [The console](console.md)       | the live TUI over the views, and the command channel it writes back on |
+| [Testing](testing.md)           | the fake `pi`, the jigs, the schema jig, and the Given/When/Then style |
+| [Behaviour tests](bdd-tests.md) | how a test is written here                                             |
 
 ## Where to start
 

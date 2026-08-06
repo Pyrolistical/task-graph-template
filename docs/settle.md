@@ -27,57 +27,38 @@ on agent_settled:
     calls ← the result tools called this turn, from the rpc stream
     if stopReason = length, or there is no call → raise "missing-result"
 
-    map the last call through the claimed state's result contract
-    if the tool is blocked         → raise "blocked"
+    if the last call is blocked    → raise "blocked"
 
-    compare ASSIGNMENT.md to what was dispatched
-    if it changed above the appended section       → restore everything above the
+    stage ← the stage table row for the claimed state
+
+    if the stage appends a section (DESIGN, PLAN, WORK):
+        if nothing was appended                   → raise the stage's "missing" issue
+        if anything above the section changed      → restore everything above the
                                                      agent's heading, keep what is
                                                      under it, raise
                                                      "modified-assignment"
+    else (the review stages, which append nothing):
+        if the assignment changed at all           → restore it, raise
+                                                     "modified-assignment"
 
-    if the claimed state is DESIGN:
-        if nothing was appended                   → raise "missing-design"
-        if the worktree is dirty or carries commits  → raise "modified-worktree"
-        submit, release the slot, done
+    if the stage guards its worktree and the tree broke the guard
+        untouched (design and planning)            → raise "modified-worktree"
+        committed (work)                           → raise "uncommitted"
 
-    if the claimed state is DESIGN_REVIEW:
-        if the assignment changed at all          → raise "modified-assignment"
-        if the worktree is dirty or carries commits
-                                                → raise "modified-worktree"
-        if findings is empty → submit with the assignment as the new body, done
-        findings → the designer's prompt queue, release the slot, done
+    if findings is not empty:                     # only a review can have any
+        write findings.json, feedback back to the stage it came from,
+        release the slot, done
 
-    if the claimed state is PLAN:
-        if nothing was appended                   → raise "missing-todos"
-        if the worktree is dirty or carries commits  → raise "modified-worktree"
-        submit, release the slot, done
-
-    if the claimed state is PLAN_REVIEW:
-        if the assignment changed at all          → raise "modified-assignment"
-        if the worktree is dirty or carries commits
-                                                → raise "modified-worktree"
-        if findings is empty → submit with the assignment as the new body, done
-        findings → the planner's prompt queue, release the slot, done
-
-    if the claimed state is WORK_REVIEW:
-        if the assignment changed at all          → raise "modified-assignment"
-        findings ← result.findings (+ the tasks/ guard)
-        findings → the body under # Review findings and the worker's queue,
-                   or submit if there are none, release the slot, done
-
-    # the claimed state is WORK
-    if nothing was appended                       → raise "missing-notes"
-    if the workspace is dirty, or the branch carries no commit of its own
-                                                  → raise "uncommitted"
-    submit with the assignment as the new body, release the slot
+    clear findings.json
+    submit — with the assignment as the new body when the stage hands one in
+    (DESIGN_REVIEW, PLAN_REVIEW, WORK) — release the slot
 ```
 
 As a table, since these are the cases that matter:
 
 | `stopReason` | result tool call | Server action                                              |
 | ------------ | ---------------- | ---------------------------------------------------------- |
-| `toolUse`    | `submit`         | per-state settle, `submit`, close stdin, release the slot  |
+| `toolUse`    | `submit`         | the settle above, `submit`, close stdin, release the slot  |
 | `stop`       | `blocked`        | raise `blocked`                                            |
 | `toolUse`    | wrong arguments  | never reaches the server; refused by the schema in-session |
 | `length`     | any              | raise `missing-result`                                     |

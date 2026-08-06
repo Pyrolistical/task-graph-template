@@ -1,0 +1,651 @@
+import { afterAll, beforeAll, describe, expect, setSystemTime } from "bun:test";
+import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
+import fs from "node:fs";
+import path from "node:path";
+import { describeActivity } from "../domain/activity.ts";
+import {
+  JsonlSplitter,
+  LOOP_LIMIT,
+  PiStream,
+  spawnArgs,
+} from "../domain/protocol.ts";
+import { PiProcess } from "./pi-process.ts";
+import type { Sample } from "../domain/rates.ts";
+import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
+import { Prompts } from "./prompts.ts";
+import { AGENT_STATES } from "../domain/state-machine.ts";
+
+beforeAll(() => {
+  setSystemTime(new Date("2026-01-01").getTime());
+});
+
+afterAll(() => {
+  setSystemTime();
+});
+
+function record(value: unknown): string {
+  return `${JSON.stringify(value)}\n`;
+}
+
+function bashCall(command: string): string {
+  return record({
+    type: "tool_execution_start",
+    toolName: "bash",
+    args: { command },
+  });
+}
+
+function deadProcess(): PiProcess {
+  const dir = tempDir("orchestrator-");
+  const command = path.join(dir, "exits.ts");
+  fs.writeFileSync(command, "process.exit(0);\n");
+
+  return new PiProcess(
+    {
+      provider: "fake",
+      model: "fake",
+      sessionDir: path.join(dir, "session"),
+      name: "000001 work",
+      cwd: dir,
+      extension: path.join(dir, "result-tools-worker.ts"),
+      log: path.join(dir, "rpc.jsonl"),
+    },
+    command,
+    ["bun"],
+  );
+}
+
+describe("Feature: splitting the rpc stream into records", () => {
+  testInTempDirs("records are split on newlines and nothing else", () => {
+    // Given a record whose text carries a separator of its own
+    const splitter = new JsonlSplitter();
+    const line = JSON.stringify({ type: "prompt", message: "a b" });
+
+    // When it is fed to the splitter
+    const records = splitter.feed(`${line}\n`);
+
+    // Then it comes back whole, because only a newline ends a record
+    expect(records).toEqual([line]);
+  });
+
+  testInTempDirs(
+    "a record split across reads is held until it is whole",
+    () => {
+      // Given the first half of a record, with no newline in it yet
+      const splitter = new JsonlSplitter();
+      expect(splitter.feed('{"type":"agent_')).toEqual([]);
+      expect(splitter.pending).toBe('{"type":"agent_');
+
+      // When the rest of it arrives
+      const records = splitter.feed('settled"}\n');
+
+      // Then the whole record comes back and nothing is left pending
+      expect(records).toEqual(['{"type":"agent_settled"}']);
+      expect(splitter.pending).toBe("");
+    },
+  );
+
+  testInTempDirs("a carriage return before the newline is dropped", () => {
+    // Given a record written with a carriage return before its newline
+    const splitter = new JsonlSplitter();
+
+    // When it is fed to the splitter
+    const records = splitter.feed('{"a":1}\r\n');
+
+    // Then the record is clean enough to parse
+    expect(records).toEqual(['{"a":1}']);
+  });
+
+  testInTempDirs("a line that is not a record is skipped", () => {
+    // Given a stream carrying a garbled line before a real record
+    const stream = new PiStream();
+
+    // When it is fed to the stream
+    const records = stream.feed(
+      `not json\n${record({ type: "agent_settled" })}`,
+    );
+
+    // Then the garbage is dropped and the record after it still lands
+    expect(records).toHaveLength(1);
+    expect(stream.state.settled).toBe(true);
+  });
+});
+
+describe("Feature: knowing when an agent's turn is over", () => {
+  testInTempDirs("the end of a message is not the end of a turn", () => {
+    // Given a turn that has ended a message and will retry
+    const stream = new PiStream();
+    stream.feed(record({ type: "agent_start" }));
+
+    // When the agent ends that message
+    stream.feed(record({ type: "agent_end", willRetry: true }));
+
+    // Then the turn is not settled, because pi may still retry inside it
+    expect(stream.state.settled).toBe(false);
+  });
+
+  testInTempDirs("the turn is over when pi says it has settled", () => {
+    // Given a turn that has started and ended a message
+    const stream = new PiStream();
+    stream.feed(record({ type: "agent_start" }));
+    stream.feed(record({ type: "agent_end", willRetry: true }));
+
+    // When pi says the turn has settled
+    stream.feed(record({ type: "agent_settled" }));
+
+    // Then the server may act on what the turn produced
+    expect(stream.state.settled).toBe(true);
+  });
+
+  testInTempDirs(
+    "the settle of one turn does not satisfy the next",
+    async () => {
+      // Given a turn that has already started and settled
+      const stream = new PiStream();
+      stream.feed(
+        record({ type: "agent_start" }) + record({ type: "agent_settled" }),
+      );
+      await stream.settled();
+
+      // When a new turn is started and waited on
+      stream.starting();
+      let settled = false;
+      void stream.settled().then(() => {
+        settled = true;
+      });
+      await Bun.sleep(5);
+      const before = settled;
+      stream.feed(record({ type: "agent_settled" }));
+      await Bun.sleep(5);
+
+      // Then only the new turn's own settle satisfies the wait
+      expect([before, settled]).toEqual([false, true]);
+    },
+  );
+
+  testInTempDirs("the outcome of a turn is its last assistant message", () => {
+    // Given an assistant message that ended in a provider error
+    const stream = new PiStream();
+
+    // When it is fed to the stream
+    stream.feed(
+      record({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "Connection error.",
+          usage: { cost: { total: 0.12 } },
+        },
+      }),
+    );
+
+    // Then the reason and its message are what the server will act on
+    expect(stream.state.stopReason).toBe("error");
+    expect(stream.state.errorMessage).toBe("Connection error.");
+
+    // Then the cost is not tracked, because it says nothing about progress
+    expect(stream.state).not.toHaveProperty("cost");
+  });
+
+  testInTempDirs("a tool result is never mistaken for the outcome", () => {
+    // Given a tool result that failed
+    const stream = new PiStream();
+
+    // When it is fed to the stream
+    stream.feed(
+      record({
+        type: "message_end",
+        message: { role: "toolResult", isError: true },
+      }),
+    );
+
+    // Then the turn has no outcome yet, because only the agent ends a turn
+    expect(stream.state.stopReason).toBeNull();
+  });
+
+  testInTempDirs(
+    "only an assistant message that spent tokens is measured",
+    () => {
+      // Given a turn with a measured message, an unmeasured one and a tool result
+      const samples: Sample[] = [];
+      const stream = new PiStream((sample) => samples.push(sample));
+      const message = (role: string, usage: unknown) =>
+        stream.feed(record({ type: "message_end", message: { role, usage } }));
+
+      // When all three are fed to the stream
+      message("assistant", { input: 900, output: 40, cost: { total: 0.1 } });
+      message("assistant", { cost: { total: 0.1 } });
+      message("toolResult", { output: 999 });
+
+      // Then only the measured assistant message becomes a sample of the rate
+      expect(samples).toEqual([{ timestampMs: Date.now(), tokens: 40 }]);
+    },
+  );
+});
+
+describe("Feature: matching a reply to what was asked", () => {
+  testInTempDirs(
+    "a reply is matched to the request that carried its id",
+    async () => {
+      // Given a request waiting on a reply, with another reply arriving first
+      const stream = new PiStream();
+      const expected = stream.expect("2");
+
+      // When both of the replies arrive
+      stream.feed(
+        record({ type: "response", id: "1", command: "prompt", success: true }),
+      );
+      stream.feed(
+        record({
+          type: "response",
+          id: "2",
+          command: "get_state",
+          success: true,
+          data: { sessionFile: "/tmp/s.jsonl" },
+        }),
+      );
+
+      // Then the waiting request is answered by its own reply
+      expect((await expected).data!.sessionFile).toBe("/tmp/s.jsonl");
+    },
+  );
+
+  testInTempDirs("a dead process rejects what is already waiting", () => {
+    // Given a request waiting on a reply
+    const stream = new PiStream();
+    const expected = stream.expect("1");
+
+    // When the pi process dies under it
+    stream.fail("the pi process closed its stdout");
+
+    // Then the wait is rejected rather than left hanging
+    expect(expected).rejects.toThrow(/closed its stdout/);
+  });
+
+  testInTempDirs(
+    "a dead process rejects what is asked of it afterwards",
+    () => {
+      // Given a process that has already died
+      const stream = new PiStream();
+      stream.fail("the pi process closed its stdout");
+
+      // When something else is asked of it
+      const expected = stream.expect("1");
+
+      // Then it is rejected at once, naming what went wrong
+      expect(expected).rejects.toThrow(/closed its stdout/);
+    },
+  );
+
+  testInTempDirs(
+    "a request made after the child died settles instead of hanging",
+    async () => {
+      // Given a pi process whose command exits immediately
+      const process = deadProcess();
+      await process.stream.settled();
+
+      // When something is asked of it
+      const outcome = await Promise.race([
+        process.lastAssistantText().then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        Bun.sleep(2000).then(() => "hung"),
+      ]);
+
+      // Then it is rejected quickly, so a tick is never blocked on a dead agent
+      expect(outcome).toBe("rejected");
+    },
+    10000,
+  );
+
+  testInTempDirs(
+    "a process whose stdout closed is not alive, exit code or not",
+    async () => {
+      // Given a pi process whose command exits immediately
+      const process = deadProcess();
+
+      // When its stream settles for the last time
+      await process.stream.settled();
+
+      // Then the server reads it as gone, and will not prompt it again
+      expect(process.alive).toBe(false);
+    },
+    10000,
+  );
+
+  testInTempDirs("an abort is recorded before the write that may fail", () => {
+    // Given a pi process whose command has already exited
+    const dir = tempDir("orchestrator-");
+    const script = path.join(dir, "exits.ts");
+    fs.writeFileSync(script, "process.exit(0);\n");
+    const proc = new PiProcess(
+      {
+        provider: "fake",
+        model: "fake",
+        sessionDir: path.join(dir, "session"),
+        name: "test",
+        cwd: dir,
+        extension: path.join(dir, "result-tools-worker.ts"),
+        log: path.join(dir, "rpc.jsonl"),
+      },
+      script,
+      ["bun"],
+    );
+    const aborting = () => (proc as unknown as { aborting: boolean }).aborting;
+    expect(aborting()).toBe(false);
+
+    // When it is aborted, and the write to the dead process fails
+    try {
+      proc.abort();
+    } catch {
+      // the write may fail because the process is already dead
+    }
+
+    // Then the abort is still recorded, so the settle is read as an abort
+    expect(aborting()).toBe(true);
+    proc.kill();
+  });
+});
+
+describe("Feature: what an agent is doing right now", () => {
+  testInTempDirs("a running tool call is the activity, first line only", () => {
+    // Given an agent that has started a command spanning several lines
+    const stream = new PiStream();
+
+    // When the tool call starts
+    stream.feed(bashCall("bun test\nsecond line"));
+
+    // Then the activity names the tool and the first line of what it runs
+    expect(stream.state.activity).toEqual({
+      kind: "tool-call",
+      tool: "bash",
+      target: "bun test",
+      started_at: Date.now(),
+    });
+  });
+
+  testInTempDirs("a compaction is the activity while it runs", () => {
+    // Given an agent inside a tool call
+    const stream = new PiStream();
+    stream.feed(bashCall("bun test"));
+
+    // When it starts compacting instead
+    stream.feed(record({ type: "compaction_start", reason: "overflow" }));
+
+    // Then the console shows the compaction and why it happened
+    expect(stream.state.activity).toEqual({
+      kind: "compacting",
+      reason: "overflow",
+      started_at: Date.now(),
+    });
+  });
+
+  testInTempDirs(
+    "every compaction is reported to the server, not just the first",
+    () => {
+      // Given a stream watched for compactions
+      let calls = 0;
+      const stream = new PiStream(
+        () => {},
+        () => {
+          calls++;
+        },
+      );
+      const compaction = record({
+        type: "compaction_start",
+        reason: "overflow",
+      });
+
+      // When two compactions happen in one turn
+      stream.feed(compaction);
+      stream.feed(compaction);
+
+      // Then the server hears about both, so it can steer the agent each time
+      expect(calls).toBe(2);
+    },
+  );
+
+  testInTempDirs("an agent between tool calls reads as thinking", () => {
+    // Given an agent inside a tool call
+    const stream = new PiStream();
+    stream.feed(bashCall("bun test"));
+
+    // When the tool call ends
+    stream.feed(record({ type: "tool_execution_end", toolCallId: "c1" }));
+
+    // Then it reads as thinking, because the turn is not over
+    expect(stream.state.activity).toEqual({
+      kind: "thinking",
+      started_at: Date.now(),
+    });
+  });
+
+  testInTempDirs("an agent that has settled is doing nothing", () => {
+    // Given an agent inside a tool call
+    const stream = new PiStream();
+    stream.feed(bashCall("bun test"));
+
+    // When the agent's turn settles
+    stream.feed(record({ type: "agent_settled" }));
+
+    // Then the pane shows nothing, because the agent is waiting on the server
+    expect(stream.state.activity).toEqual({ kind: "none" });
+  });
+
+  testInTempDirs(
+    "an agent that has just been prompted reads as thinking",
+    () => {
+      // Given a stream about to carry a new turn
+      const stream = new PiStream();
+
+      // When the turn is started
+      stream.starting();
+
+      // Then the pane shows it thinking before its first tool call arrives
+      expect(stream.state.activity).toEqual({
+        kind: "thinking",
+        started_at: Date.now(),
+      });
+    },
+  );
+
+  testInTempDirs(
+    "a tool call on a file is shown by the file it touches",
+    () => {
+      // Given an agent reading a file
+      const stream = new PiStream();
+
+      // When the tool call starts
+      stream.feed(
+        record({
+          type: "tool_execution_start",
+          toolName: "read",
+          args: { path: "/tmp/file.ts" },
+        }),
+      );
+
+      // Then the path is what the console shows
+      expect(stream.state.activity).toEqual({
+        kind: "tool-call",
+        tool: "read",
+        target: "/tmp/file.ts",
+        started_at: Date.now(),
+      });
+    },
+  );
+
+  testInTempDirs(
+    "a tool call with nothing to name falls back to its own name",
+    () => {
+      // Given an agent calling a tool that takes no arguments worth showing
+      const stream = new PiStream();
+
+      // When the tool call starts
+      stream.feed(
+        record({ type: "tool_execution_start", toolName: "think", args: {} }),
+      );
+
+      // Then the tool's own name is what the console shows
+      expect(stream.state.activity).toEqual({
+        kind: "tool-call",
+        tool: "think",
+        target: "think",
+        started_at: Date.now(),
+      });
+    },
+  );
+
+  testInTempDirs(
+    "every kind of activity has a line the console can draw",
+    () => {
+      // Given each kind of activity an agent can be in
+      const activities = [
+        {
+          kind: "tool-call",
+          tool: "bash",
+          target: "bun test",
+          started_at: Date.now(),
+        },
+        {
+          kind: "tool-call",
+          tool: "bash",
+          target: "bash",
+          started_at: Date.now(),
+        },
+        { kind: "thinking", started_at: Date.now() },
+        { kind: "compacting", reason: "overflow", started_at: Date.now() },
+        { kind: "none" },
+      ] as const;
+
+      // When each is written for the console
+      const written = activities.map(describeActivity);
+
+      // Then each reads as what it is, and an idle agent shows nothing
+      expect(written).toEqual([
+        "tool: bash — bun test (0s)",
+        "tool: bash (0s)",
+        "thinking (0s)",
+        "compacting (overflow) (0s)",
+        "",
+      ]);
+    },
+  );
+});
+
+describe("Feature: noticing an agent that has stopped making progress", () => {
+  testInTempDirs("one command repeated to the limit is a loop", () => {
+    // Given a turn that has repeated one command one short of the limit
+    const stream = new PiStream();
+    const build = bashCall("zig build --verbose 2>&1 | head -80");
+    for (let i = 0; i < LOOP_LIMIT - 1; i++) {
+      stream.feed(build);
+    }
+    expect(stream.state.looping).toBeNull();
+
+    // When it runs the same command once more
+    stream.feed(build);
+
+    // Then the server is told which command the agent is stuck on
+    expect(stream.state.looping).toBe("zig build --verbose 2>&1 | head -80");
+  });
+
+  testInTempDirs("a command that differs at all breaks the run", () => {
+    // Given a turn repeating one command, broken once by a different one
+    const stream = new PiStream();
+    for (let i = 0; i < LOOP_LIMIT - 1; i++) {
+      stream.feed(bashCall("zig build"));
+    }
+    stream.feed(bashCall("zig build -Doptimize=Debug"));
+
+    // When the original command is repeated again, up to one short of the limit
+    for (let i = 0; i < LOOP_LIMIT - 1; i++) {
+      stream.feed(bashCall("zig build"));
+    }
+
+    // Then it is not a loop, because the count starts over at any difference
+    expect(stream.state.looping).toBeNull();
+  });
+
+  testInTempDirs("the same command spread across turns is not a loop", () => {
+    // Given three turns, each repeating one command below the limit
+    const stream = new PiStream();
+    const build = bashCall("zig build");
+
+    // When all three turns run
+    for (let turn = 0; turn < 3; turn++) {
+      stream.starting();
+      for (let i = 0; i < LOOP_LIMIT - 1; i++) {
+        stream.feed(build);
+      }
+    }
+
+    // Then nothing is a loop, because a loop is repetition within one turn
+    expect(stream.state.looping).toBeNull();
+  });
+
+  testInTempDirs("a fresh prompt gives the agent a clean turn", () => {
+    // Given a turn the agent has looped in
+    const stream = new PiStream();
+    for (let i = 0; i < LOOP_LIMIT; i++) {
+      stream.feed(bashCall("zig build"));
+    }
+    expect(stream.state.looping).not.toBeNull();
+
+    // When the agent is prompted again
+    stream.starting();
+
+    // Then the loop is forgotten, so the nudge is judged on its own turn
+    expect(stream.state.looping).toBeNull();
+  });
+});
+
+describe("Feature: how an agent is spawned", () => {
+  testInTempDirs(
+    "the spawn line puts pi in rpc mode with its extension",
+    () => {
+      // Given the process a task is about to be dispatched to
+      const spec = {
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        sessionDir: "/tmp/s",
+        name: "000042 worker",
+        cwd: "/tmp/wt",
+        extension: "/repo/orchestrator/result-tools-worker.ts",
+        log: "/tmp/rpc.jsonl",
+      };
+
+      // When the command line is built
+      const args = spawnArgs(spec);
+
+      // Then pi is put in rpc mode, approving tools, with the state's extension
+      expect(args.slice(0, 2)).toEqual(["--mode", "rpc"]);
+      expect(args).toContain("--approve");
+      expect(args).toContain("--extension");
+      expect(args).toContain("/repo/orchestrator/result-tools-worker.ts");
+
+      // Then nothing is said in flags that the prompts say instead
+      expect(args).not.toContain("--append-system-prompt");
+      expect(args).not.toContain("--system-prompt");
+      expect(args).not.toContain("-p");
+      expect(args).not.toContain("--thinking");
+      expect(args).not.toContain("--tools");
+    },
+  );
+
+  testInTempDirs(
+    "every state has its own prompt, and none of them is empty",
+    () => {
+      // Given every state an agent is dispatched into
+      const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+      // When the fragment each is prompted with is read
+      const texts = AGENT_STATES.map((state) => prompts.fragment(state));
+
+      // Then no two states share a prompt, and none of them says nothing
+      expect(new Set(texts).size).toBe(AGENT_STATES.length);
+      expect(texts.filter((text) => text.trim() === "")).toEqual([]);
+    },
+  );
+});

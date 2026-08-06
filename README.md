@@ -119,7 +119,7 @@ git clone https://github.com/Pyrolistical/task-graph-template.git task-graph-tem
 cd task-graph-template
 bun install
 cd ../my-project
-claude mcp add task-graph -- bun ../task-graph-template/orchestrator/mcp.ts
+claude mcp add task-graph -- bun ../task-graph-template/orchestrator/main/mcp.ts
 ```
 
 Restart `claude`. Starting the server seeds `~/task-graph/<key>/` — the key is derived from the repository's path — with the contents of the template's `tasks/`. Fill in the pool it left there:
@@ -158,10 +158,6 @@ The repository the server drives is the directory it is started in, so `claude` 
 }
 ```
 
-### The task template
-
-A new task's document is copied from [`orchestrator/template.md`](orchestrator/template.md). Put a `template.md` in the task directory to override it.
-
 ### The manager skill
 
 [`task-graph-inbox`](.claude/skills/task-graph-inbox/SKILL.md) is the manager's loop written down: drain the inbox head first, by rank, then watch `inbox.json` for the next arrival. Link it into the project the manager runs in, so it stays the template's copy:
@@ -176,7 +172,7 @@ Start `claude` in the project root and confirm with `/mcp` that `task-graph` is 
 Once the server is up, a second terminal in your project root can monitor the pool:
 
 ```bash
-bun ../task-graph-template/orchestrator/console.ts
+bun ../task-graph-template/orchestrator/main/console.ts
 ```
 
 ## Design documentation

@@ -41,35 +41,81 @@ What it does is declared, not coded. A `Plan` maps task id → claimed state →
 
 ## The jigs
 
-| File                  | What it stands up                                                                                                                                   |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `temp.ts`             | a `test()` wrapper that gives each test its own temp directories and removes them on success, keeping them on failure so a failure can be inspected |
-| `orchestrator-jig.ts` | a real git repo with one commit, and `commitIn` to add more                                                                                         |
-| `graph-jig.ts`        | a task directory seeded with `next-task-id`, plus `baseMeta` and `bodyOf` for document-level tests                                                  |
-| `fixture.ts`          | the whole world: repo, task directory, agents file, runtime root, fake `pi`, and the `Plan` it runs                                                 |
-| `server-jig.ts`       | `serverFor(fixture)`, `editTaskFile`, and the two ways to advance time — `settle(server, ticks)` and `until(server, predicate)`                     |
+| File                  | What it stands up                                                                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `temp-dirs.ts`        | `testInTempDirs()`, a `test()` that gives each test its own temp directories and removes them on success, keeping them on failure so a failure can be inspected |
+| `ports.ts`            | pure fakes for every port in `app/ports.ts`, so an app module can be driven with no filesystem at all                                                           |
+| `orchestrator-jig.ts` | a real git repo with one commit, and `commitIn` to add more                                                                                                     |
+| `graph-jig.ts`        | a task directory seeded with `next-task-id`, plus `baseMeta` and `bodyOf` for document-level tests                                                              |
+| `fixture.ts`          | the whole world: repo, task directory, agents file, runtime root, fake `pi`, and the `Plan` it runs                                                             |
+| `server-jig.ts`       | `serverFor(fixture)`, `editTaskFile`, and the two ways to advance time — `settle(server, ticks)` and `until(server, predicate)`                                 |
 
 - `settle` and `until` both tick and drain, because a tick starts work the next tick observes; a test that ticked once and asserted would be asserting on a half-applied transition
 - `deadPid()` spawns and reaps a real process, which is the only honest way to get a pid that is certainly gone
 
 ## The layers
 
-| Suite                                                    | What it holds fixed                                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `task.test.ts`, `states.test.ts`, `machine.test.ts`      | the document and the state tables, with no server                                    |
-| `transitions.test.ts`                                    | every legal and illegal transition, against a task directory alone                   |
-| `scheduler.test.ts`, `agents.test.ts`, `prompts.test.ts` | ranking, pool loading, prompt resolution and overrides                               |
-| `rpc.test.ts`, `assignment.test.ts`, `runtime.test.ts`   | the pi protocol, the append-only rule, paths and view writing                        |
-| `server-*.test.ts`                                       | the whole server against the fake pi: dispatch, settle, checks, views, recovery      |
-| `console.test.ts`                                        | wrapping, wide characters, hit targets, tailing — all pure functions over fake views |
-| `mcp.test.ts`                                            | the tool surface over a real stdio client, in a subprocess                           |
+| Suite                                 | What it holds fixed                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| `domain/state-machine.test.ts`        | every edge of the state machine, and every edge it refuses                            |
+| `domain/*.test.ts`                    | the stage table, the task document, the append-only rule, rates, the console's text   |
+| `policy/settle.test.ts`               | what every settled turn means, as a table                                             |
+| `policy/scheduler.test.ts`            | ranking, slot choice, the inbox                                                       |
+| `policy/console.test.ts`              | panes, headers, the frame and the scroll anchor                                       |
+| `app/*.test.ts`                       | the pool, the reaper and the settle path over the fakes in `testing/ports.ts`         |
+| `adapters/*.test.ts`                  | transitions against a task directory, the pi protocol, pool loading, prompts, the tty |
+| `main/server-*.test.ts`               | the wired server against the fake pi: dispatch, settle, checks, views, recovery       |
+| `main/mcp.test.ts`                    | the tool surface over a real stdio client, in a subprocess                            |
+| `architecture.test.ts`, `bdd.test.ts` | the dependency rule, and the Given/When/Then style itself                             |
 
-`console.test.ts` is the largest of them because the console is the most-formatted code in the repo: grapheme segmentation, east-asian widths, clipping and the scroll anchor are all exact-output tests, which is what lets the drawing code stay free of defensive checks.
+A test lives in the layer it exercises. The pure layers need no fixture, no
+repository and no subprocess, so most of what used to need the fake `pi` is now
+a table of inputs — see [the layers](architecture.md).
+
+## Given, When, Then
+
+Every test in the orchestrator is written as [behaviour](bdd-tests.md): one
+`When` per test, complete sentences, domain language.
+
+```ts
+test("a worker that committed nothing is told its work is uncommitted", () => {
+  // Given a worker settled after calling submit with notes appended
+  const settled = anAgent("WORK");
+
+  // Given its branch carries no commit of its own
+  settled.worktree = { dirty: [], commits: 0 };
+
+  // When the server decides what to do with the settle
+  const intents = decideSettle(settled);
+
+  // Then the uncommitted issue is raised against it
+  expect(intents[0]).toMatchObject({ kind: "raise", issue: "uncommitted" });
+});
+```
+
+Only `adapters/` and `main/` may touch the filesystem in a test. `domain/`,
+`policy/` and `app/` are the layers that decide, so their suites use bun's own
+`test()` and never reach for `testInTempDirs`; a suite that needs a real
+repository, a task directory or a subprocess belongs further out.
+
+`bdd.test.ts` enforces the rules on every suite in the orchestrator: three
+comments per test, one `When`, prose rather than code, and a `Feature:` name on
+every `describe`. It also checks that it can read every suite, so a test file it
+cannot parse fails the check rather than passing it by default.
+
+The console is the most-formatted code in the repo, and it is tested where each
+part of it lives: `domain/text.test.ts` for grapheme segmentation, east-asian
+widths, clipping and wrapping; `domain/session.test.ts` for turning a session
+record into entries; `policy/console.test.ts` for panes, headers, the frame and
+the scroll anchor; `policy/keys.test.ts` for key and mouse decoding; and
+`adapters/tui.test.ts` for the two things that touch a disk — tailing a session
+file and reading the five views. They are exact-output tests, which is what lets
+the drawing code stay free of defensive checks.
 
 ## The schema jig
 
 ```bash
-bun orchestrator/tools-jig.ts --provider <provider> --model <model> [--trials N] [--states ...]
+bun orchestrator/testing/tools-jig.ts --provider <provider> --model <model> [--trials N] [--states ...]
 ```
 
 This one **does** call a model — it measures how reliably a model ends with the right result tool.

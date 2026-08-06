@@ -39,8 +39,8 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 
 ## The stage table is the source of truth
 
-- `states.ts` declares the eight stages once: state, phase, role, result-tool extension
-- everything else is derived from that one array — `NEXT_STATE`, `AGENT_STATES`, `STATE_ROLE`, `STATE_TOOLS`, `PHASE_OF`
+- `state-machine.ts` declares the eight stages once, and a stage carries everything the pipeline knows about it: state, phase, role, result-tool extension, the section its agent appends, the issue raised when it appends nothing, the guard its worktree is held to, where its findings send the task back to, and whether its `submit` hands the assignment in as the new task body
+- everything else is derived from that one array — `NEXT_STATE`, `AGENT_STATES`, `STAGE_OF`, the scheduler's `RANKS`, the issue table's state lists, and the settle
 - adding a stage is an entry in the array, not an edit to six lookup tables that have to agree
 - the two stages with a `null` role (`CHECK`, `MANAGER_REVIEW`) fall out of the agent-facing derivations by construction, so nothing claims them and no dispatcher special-cases them
 
@@ -57,7 +57,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 - the worker's appended notes are in the assignment it carries forward
 - it calls `submit` with `findings` and `delegations` and settles
 - it cannot pass or close anything: the server reads its tool call and applies it, while it still holds the claim, before the slot is released
-- findings → appended to the task body under `# Review findings`, task drops to `WORK`
+- findings → written to `findings.json` and appended to the task body under `# Review findings`, task drops to `WORK`, and the next worker is dispatched fresh with `WORK-with-findings.md`
 - no findings → up to `MANAGER_REVIEW`
 
 **`MANAGER_REVIEW`** is the manager, seeing only work that survived both a machine and a peer.
@@ -65,7 +65,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 The same split covers the design and the plan:
 
 - `DESIGN_REVIEW` and `PLAN_REVIEW` are each a fresh reviewer session reading a section the previous role appended — the `## Design` section, then the `## Todos` list
-- findings go back to the role that wrote it: design and plan findings replace its dispatch prompt with the `-with-findings` variant, work findings go through the prompt queue
+- findings go back to the role that wrote it, the same way in every phase: they are written to `findings.json` and replace its dispatch prompt with the `-with-findings` variant
 - no review closes anything, so a typo-level finding on a design, a plan or a piece of work never costs a manager round trip
 - the reviewer never applies its own findings and the server never interprets them
 - a finding is copied verbatim into the body, which is the only thing that makes the copy safe to do without a judge
