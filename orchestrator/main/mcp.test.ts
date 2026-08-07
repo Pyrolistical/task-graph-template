@@ -58,6 +58,23 @@ describe("Feature: the tool surface the manager works through", () => {
     return (result as { content: { text: string }[] }).content[0]!.text;
   }
 
+  async function resourceOf(client: Client, uri: string) {
+    const read = await client.readResource({ uri });
+    return JSON.parse((read.contents as { text: string }[])[0]!.text);
+  }
+
+  async function schedulingBecomes(client: Client, wanted: boolean) {
+    let seen: unknown = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      seen = (await resourceOf(client, "orchestrator://queue")).scheduling;
+      if (seen === wanted) {
+        break;
+      }
+      await Bun.sleep(250);
+    }
+    return seen;
+  }
+
   testInTempDirs(
     "the manager gets one tool per judgement it can make, plus the views",
     async () => {
@@ -572,5 +589,166 @@ describe("Feature: the tool surface the manager works through", () => {
       await client.close();
     },
     60000,
+  );
+
+  testInTempDirs(
+    "task_hold parks a task with the manager's reason on it",
+    async () => {
+      // Given a task an agent is working on
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "A task");
+      const client = await connect(fixture);
+
+      // When the manager parks it
+      const result = JSON.parse(
+        textOf(
+          await client.callTool({
+            name: "task_hold",
+            arguments: { id, reason: "the staging database is unreachable" },
+          }),
+        ),
+      );
+
+      // Then it lands in the held state of the phase it was in
+      expect(result.to).toBe("HELD_WORK");
+
+      // Then the reason it was parked is on the document for a person to read
+      const document = fs.readFileSync(
+        path.join(fixture.tasksDir, `${id}.md`),
+        "utf-8",
+      );
+      expect(document).toContain("the staging database is unreachable");
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "task_resume sends a held task back to the phase it was held from",
+    async () => {
+      // Given a task the manager parked while it was being worked on
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "A task");
+      const client = await connect(fixture);
+      await client.callTool({
+        name: "task_hold",
+        arguments: { id, reason: "the staging database is unreachable" },
+      });
+
+      // When the manager resumes it, having decided the wall is gone
+      const result = JSON.parse(
+        textOf(
+          await client.callTool({ name: "task_resume", arguments: { id } }),
+        ),
+      );
+
+      // Then it goes back to the phase it was parked from, ready to dispatch
+      expect(result.from).toBe("HELD_WORK");
+      expect(result.to).toBe("WORK");
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs("task_abort closes a held task for good", async () => {
+    // Given a task the manager parked and has decided against
+    const fixture = makeFixture();
+    const id = readyTask(fixture, "A task");
+    const client = await connect(fixture);
+    await client.callTool({
+      name: "task_hold",
+      arguments: { id, reason: "the wrong shape entirely" },
+    });
+
+    // When the manager throws it away
+    const result = JSON.parse(
+      textOf(await client.callTool({ name: "task_abort", arguments: { id } })),
+    );
+
+    // Then it is closed, and leaves the pipeline without being worked further
+    expect(result.to).toBe("CLOSED");
+
+    await client.close();
+  });
+
+  testInTempDirs(
+    "enable_scheduler is published where the console reads it",
+    async () => {
+      // Given a server that starts with nothing being dispatched
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+
+      // When the manager turns dispatching on
+      await client.callTool({ name: "enable_scheduler", arguments: {} });
+
+      // Then the next published queue says the scheduler is dispatching
+      expect(await schedulingBecomes(client, true)).toBe(true);
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "disable_scheduler is published where the console reads it",
+    async () => {
+      // Given a server that has been dispatching
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+      await client.callTool({ name: "enable_scheduler", arguments: {} });
+      expect(await schedulingBecomes(client, true)).toBe(true);
+
+      // When the manager pauses it
+      await client.callTool({ name: "disable_scheduler", arguments: {} });
+
+      // Then the next published queue says the scheduler is paused
+      expect(await schedulingBecomes(client, false)).toBe(false);
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs("agent_abort refuses a slot that is idle", async () => {
+    // Given a pool whose slots are all sitting idle
+    const fixture = makeFixture();
+    const client = await connect(fixture);
+    const agents = (await resourceOf(client, "orchestrator://agents"))
+      .agents as { name: string }[];
+
+    // When the manager aborts one of them
+    const result = await client.callTool({
+      name: "agent_abort",
+      arguments: { agent: agents[0]!.name },
+    });
+
+    // Then it is refused, because there is no command of its own to kill
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain(`${agents[0]!.name} is not running`);
+
+    await client.close();
+  });
+
+  testInTempDirs(
+    "agent_abort names the pool when the slot is unknown",
+    async () => {
+      // Given a server whose pool holds one slot
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+
+      // When the manager aborts a slot that does not exist
+      const result = await client.callTool({
+        name: "agent_abort",
+        arguments: { agent: "pi-fake-fake9" },
+      });
+
+      // Then the refusal lists the slots there are, so the name is easy to fix
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain('no agent slot named "pi-fake-fake9"');
+
+      await client.close();
+    },
   );
 });

@@ -116,6 +116,22 @@ describe("Feature: settling an agent that finished its turn", () => {
     ]);
   });
 
+  test("a worker that appended nothing is asked for its notes", () => {
+    // Given a worker settled after calling submit
+    const settled = anAgent("WORK");
+
+    // Given the assignment came back exactly as it was dispatched
+    settled.diff = "unchanged";
+
+    // When the server decides what to do with the settle
+    const intents = decideSettle(settled);
+
+    // Then the missing-notes issue is raised against it
+    expect(intents).toEqual([
+      { kind: "raise", issue: "missing-notes", detail: "", vars: {} },
+    ]);
+  });
+
   test("a worker that rewrote the assignment above its section has it restored", () => {
     // Given a worker settled after calling submit
     const settled = anAgent("WORK");

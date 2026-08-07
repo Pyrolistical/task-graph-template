@@ -72,6 +72,32 @@ describe("Feature: where a project's task graph is found", () => {
     },
     30000,
   );
+
+  testInTempDirs(
+    "with no base named the server lands work on the branch the repo is on",
+    async () => {
+      // Given a project checked out on a branch of its own naming
+      const fixture = makeFixture();
+      git.gitOrThrow(fixture.repo, ["checkout", "-q", "-b", "trunk"]);
+
+      // When a server is started against it without being told a base
+      const server = await startServer({
+        repo: fixture.repo,
+        agentsPath: fixture.agentsPath,
+        tasksDir: fixture.tasksDir,
+        orchestratorDir: fixture.orchestratorDir,
+        overridesDir: fixture.overridesDir,
+        serverRoot: fixture.serverRoot,
+        piCommand: fixture.piCommand,
+      });
+
+      // Then that branch is the one it will rebase onto and land work on
+      expect(server.base).toBe("trunk");
+
+      server.shutdown();
+    },
+    30000,
+  );
 });
 
 describe("Feature: a task that goes all the way through", () => {

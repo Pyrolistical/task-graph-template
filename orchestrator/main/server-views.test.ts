@@ -790,6 +790,35 @@ describe("Feature: aborting the command an agent is running", () => {
 
 describe("Feature: a manager that exits while its agents run on", () => {
   testInTempDirs(
+    "detaching stops the server listening on the console channel",
+    async () => {
+      // Given a running server that has applied a console command already
+      const fixture = makeFixture();
+      const server = await serverFor(fixture);
+      writeCommand(server.runtime, { command: "scheduler", enabled: true });
+      for (let waited = 0; waited < 200 && !server.schedulerEnabled; waited++) {
+        await Bun.sleep(10);
+      }
+      expect(server.schedulerEnabled).toBe(true);
+
+      // When the manager detaches from it
+      server.detach();
+
+      // Then a command written afterwards is neither consumed nor applied
+      writeCommand(server.runtime, { command: "scheduler", enabled: false });
+      await Bun.sleep(200);
+      expect(fs.existsSync(server.runtime.consoleCommand)).toBe(true);
+      expect(server.schedulerEnabled).toBe(true);
+
+      // Then the views it published are left on disk for the next manager
+      expect(fs.existsSync(server.runtime.agentsView)).toBe(true);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
     "a slot still running for a previous manager is not offered as capacity",
     async () => {
       const fixture = makeFixture();

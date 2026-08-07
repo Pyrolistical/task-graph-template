@@ -10,6 +10,7 @@ import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { templateOf } from "../testing/orchestrator-jig.ts";
 import {
+  type ClaimState,
   AGENT_STATES,
   REVIEW_STATES,
   STAGE_OF,
@@ -19,6 +20,35 @@ interface Schema {
   properties: Record<string, unknown>;
   required?: string[];
   additionalProperties?: boolean;
+}
+
+interface ToolResult {
+  content: { type: string; text: string }[];
+  terminate: boolean;
+}
+
+interface Tool {
+  name: string;
+  parameters: Schema;
+  execute: (
+    toolCallId: string,
+    params: Record<string, unknown>,
+  ) => Promise<ToolResult>;
+}
+
+async function toolsOf(state: ClaimState): Promise<Map<string, Tool>> {
+  const { default: factory } = await import(
+    `../result-tools-${STAGE_OF[state].tools}.ts`
+  );
+  const tools = new Map<string, Tool>();
+  factory({
+    registerTool: (tool: Tool) => tools.set(tool.name, tool),
+  } as never);
+  return tools;
+}
+
+function textOf(result: ToolResult): string {
+  return result.content[0]!.text;
 }
 
 function overrides(files: Record<string, string>): string {
@@ -383,19 +413,12 @@ describe("Feature: what an agent's result tool call means", () => {
       // When the extension of each state is loaded and its tools read
       const declared = [];
       for (const state of AGENT_STATES) {
-        const { default: factory } = await import(
-          `../result-tools-${STAGE_OF[state].tools}.ts`
-        );
-        const tools = new Map<string, Schema>();
-        factory({
-          registerTool: (tool: { name: string; parameters: Schema }) =>
-            tools.set(tool.name, tool.parameters),
-        } as never);
-        const submit = tools.get("submit")!;
+        const tools = await toolsOf(state);
+        const submit = tools.get("submit")!.parameters;
         declared.push({
           state,
           tools: [...tools.keys()].sort(),
-          blocked: tools.get("blocked")!.required,
+          blocked: tools.get("blocked")!.parameters.required,
           fields: Object.keys(submit.properties),
           required: submit.required ?? [],
           closed: submit.additionalProperties,
@@ -413,6 +436,70 @@ describe("Feature: what an agent's result tool call means", () => {
           closed: false,
         })),
       );
+    },
+  );
+
+  testInTempDirs(
+    "every result tool ends the turn it is called in",
+    async () => {
+      // Given every result tool of every state an agent runs in
+      const called = [];
+      for (const state of AGENT_STATES) {
+        const tools = await toolsOf(state);
+
+        // When each is called with arguments its state accepts
+        called.push(await tools.get("submit")!.execute("id", { findings: [] }));
+        called.push(
+          await tools
+            .get("blocked")!
+            .execute("id", { message: "the box is down" }),
+        );
+      }
+
+      // Then not one of them leaves the agent a turn to carry on in
+      expect(called.map((result) => result.terminate)).toEqual(
+        called.map(() => true),
+      );
+    },
+  );
+
+  testInTempDirs("a reviewer is told how many findings it filed", async () => {
+    // Given a work reviewer that found two defects
+    const tools = await toolsOf("WORK_REVIEW");
+
+    // When it submits both of them
+    const result = await tools
+      .get("submit")!
+      .execute("id", { findings: ["the null case is untested", "it leaks"] });
+
+    // Then it reads back that the work was rejected, and by how much
+    expect(textOf(result)).toBe("Work rejected with 2 finding(s).");
+  });
+
+  testInTempDirs("a reviewer that files nothing accepts the work", async () => {
+    // Given a work reviewer that could fault nothing
+    const tools = await toolsOf("WORK_REVIEW");
+
+    // When it submits an empty list of findings
+    const result = await tools.get("submit")!.execute("id", { findings: [] });
+
+    // Then it reads back that it has accepted the work
+    expect(textOf(result)).toBe("Work accepted.");
+  });
+
+  testInTempDirs(
+    "an agent that stops on a wall is told who reads it",
+    async () => {
+      // Given a worker that cannot get past the thing in its way
+      const tools = await toolsOf("WORK");
+
+      // When it reports itself blocked
+      const result = await tools
+        .get("blocked")!
+        .execute("id", { message: "the staging database is unreachable" });
+
+      // Then it reads back that a person has the turn now
+      expect(textOf(result)).toBe("Stopped: awaiting a person.");
     },
   );
 });
