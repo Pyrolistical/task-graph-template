@@ -39,38 +39,62 @@ function issuesOf(meta: Record<string, unknown>): string[] {
 }
 
 describe("Feature: the id a task is known by", () => {
-  testInTempDirs("an id is written as six digits, whatever its number", () => {
-    // Given the first, the forty-second and the last task a project can hold
-    const numbers = [1, 42, 999999];
+  testInTempDirs.each([
+    [1, "000001"],
+    [42, "000042"],
+    [999999, "999999"],
+  ])("the task number %p is written as the id %p", (number, id) => {
+    // Given the number of a task a project holds
+    const counted = number;
 
-    // When each number is written as an id
-    const ids = numbers.map(formatId);
+    // When the number is written as an id
+    const written = formatId(counted);
 
-    // Then each is padded to six digits, so ids sort as they were created
-    expect(ids).toEqual(["000001", "000042", "999999"]);
+    // Then it is padded to six digits, so ids sort as they were created
+    expect(written).toBe(id);
   });
 
-  testInTempDirs("only a six-digit string is a task id", () => {
-    // Given ids of every shape a hand-edited document might carry
-    const candidates = ["000001", "999999", "1", "00001", "0000001", "abc123"];
+  testInTempDirs.each([["000001"], ["999999"]])(
+    "the candidate %p is a task id",
+    (candidate) => {
+      // Given a string of exactly six digits
+      const written = candidate;
 
-    // When each candidate is checked
-    const valid = candidates.map(isValidId);
+      // When the candidate is checked
+      const isId = isValidId(written);
 
-    // Then only the six-digit strings are ids
-    expect(valid).toEqual([true, true, false, false, false, false]);
-  });
+      // Then it is a task id
+      expect(isId).toBe(true);
+    },
+  );
 
-  testInTempDirs("a number or a null is never a task id", () => {
-    // Given the values YAML produces for an unquoted or missing id
-    const candidates = [42, null];
+  testInTempDirs.each([["1"], ["00001"], ["0000001"], ["abc123"]])(
+    "the candidate %p is not a task id",
+    (candidate) => {
+      // Given a string a hand-edited document might carry in place of an id
+      const written = candidate;
 
-    // When each candidate is checked
-    const valid = candidates.map(isValidId);
+      // When the candidate is checked
+      const isId = isValidId(written);
 
-    // Then neither is an id, because an id is a quoted string
-    expect(valid).toEqual([false, false]);
-  });
+      // Then it is refused as an id, because an id is six digits and nothing else
+      expect(isId).toBe(false);
+    },
+  );
+
+  testInTempDirs.each([[42], [null]])(
+    "the value %p YAML produces for an unquoted or missing id is never an id",
+    (candidate) => {
+      // Given a value YAML produces for an id nobody quoted
+      const read = candidate;
+
+      // When the candidate is checked
+      const isId = isValidId(read);
+
+      // Then it is not an id, because an id is a quoted string
+      expect(isId).toBe(false);
+    },
+  );
 });
 
 describe("Feature: splitting a task document", () => {
@@ -184,24 +208,22 @@ describe("Feature: reading and writing a task's fields", () => {
     expect(attempt).toThrow(SchemaError);
   });
 
-  testInTempDirs("a title of any shape survives being written and read", () => {
-    // Given titles carrying every character YAML gives a meaning to
-    const titles = [
-      "Add: colon",
-      "fix #hash",
-      'quote " and \\ backslash',
-      "- dash",
-      "123",
-      "null",
-    ];
+  testInTempDirs.each([
+    ["Add: colon"],
+    ["fix #hash"],
+    ['quote " and \\ backslash'],
+    ["- dash"],
+    ["123"],
+    ["null"],
+  ])("the title %p survives being written and read", (title) => {
+    // Given a title carrying a character YAML gives a meaning to
+    const typed = title;
 
-    // When each is written into a document and read back
-    const read = titles.map(
-      (title) => parseTaskMeta(raw(baseMeta({ title }))).title,
-    );
+    // When it is written into a document and read back
+    const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
 
-    // Then each comes back as the person typed it
-    expect(read).toEqual(titles);
+    // Then it comes back as the person typed it
+    expect(read).toBe(typed);
   });
 
   testInTempDirs("a hold reason spanning many lines survives", () => {
@@ -258,33 +280,32 @@ describe("Feature: reading and writing a task's fields", () => {
     },
   );
 
-  testInTempDirs("a claim without both its halves is refused", () => {
-    // Given a claim missing its pid, and one missing the agent that made it
-    const halves = [
-      raw(baseMeta({ claimed_by: "a", claimed_pid: null })),
-      raw(baseMeta({ claimed_by: null, claimed_pid: 12 })),
-    ];
+  testInTempDirs.each([
+    [{ claimed_by: "a", claimed_pid: null }],
+    [{ claimed_by: null, claimed_pid: 12 }],
+  ])("the half claim %p is refused", (half) => {
+    // Given a claim missing one of its two halves
+    const document = raw(baseMeta(half));
 
-    // When each is parsed as a task
-    const issues = halves.map((half) => issuesOf(half).length > 0);
+    // When it is parsed as a task
+    const issues = issuesOf(document);
 
-    // Then both are refused, because a claim without a process cannot be reaped
-    expect(issues).toEqual([true, true]);
+    // Then it is refused, because a claim without a process cannot be reaped
+    expect(issues).not.toEqual([]);
   });
 
-  testInTempDirs("a check that is not a command line is refused", () => {
-    // Given a check written as an empty string, and one written as an object
-    const documents = [
-      { ...baseMeta(), checks: [""] },
-      { ...baseMeta(), checks: [{ command: "bun test" }] },
-    ];
+  testInTempDirs.each([
+    ["", "checks[0]: Too small"],
+    [{ command: "bun test" }, "checks[0]: Invalid input: expected string"],
+  ])("the check %p is refused with %p", (check, issue) => {
+    // Given a check that is not a command line
+    const document = { ...baseMeta(), checks: [check] };
 
-    // When each is parsed as a task
-    const issues = documents.map((document) => issuesOf(document)[0] ?? "");
+    // When it is parsed as a task
+    const issues = issuesOf(document);
 
-    // Then each is refused, naming the entry that is wrong
-    expect(issues[0]).toContain("checks[0]: Too small");
-    expect(issues[1]).toContain("checks[0]: Invalid input: expected string");
+    // Then it is refused, naming the entry that is wrong
+    expect(issues[0]).toContain(issue);
   });
 
   testInTempDirs(
@@ -417,46 +438,33 @@ describe("Feature: creating a task", () => {
     },
   );
 
-  testInTempDirs(
-    "a title full of awkward characters is stored verbatim",
-    () => {
-      // Given titles carrying replacement patterns and YAML metacharacters
+  testInTempDirs.each([
+    ["Fix $& and $` and $' handling"],
+    ['Add: colon, #hash and a "quote"'],
+  ])("the title %p is stored verbatim", (title) => {
+    // Given a title carrying characters a shell and YAML both give meaning to
+    const dir = makeTasksDir();
+
+    // When a task is created with it
+    const created = createTask(dir, ORCHESTRATOR_DIR, title);
+
+    // Then it comes back exactly as it was typed
+    expect(readTaskFile(created.filePath).meta.title).toBe(title);
+  });
+
+  testInTempDirs.each([[""], ["   "]])(
+    "a task titled %p is refused",
+    (title) => {
+      // Given a title with nothing in it a person could read
       const dir = makeTasksDir();
-      const titles = [
-        "Fix $& and $` and $' handling",
-        'Add: colon, #hash and a "quote"',
-      ];
 
-      // When a task is created with each of them
-      const stored = titles.map(
-        (title) =>
-          readTaskFile(createTask(dir, ORCHESTRATOR_DIR, title).filePath).meta
-            .title,
-      );
+      // When a task is created with it
+      const attempt = () => createTask(dir, ORCHESTRATOR_DIR, title);
 
-      // Then each comes back exactly as it was typed
-      expect(stored).toEqual(titles);
+      // Then it is refused, because a task nobody named cannot be worked on
+      expect(attempt).toThrow(/title is required/);
     },
   );
-
-  testInTempDirs("a task with no title is refused", () => {
-    // Given an empty title, and one that is only spaces
-    const dir = makeTasksDir();
-    const titles = ["", "   "];
-
-    // When a task is created with each of them
-    const refused = titles.map((title) => {
-      try {
-        createTask(dir, ORCHESTRATOR_DIR, title);
-        return "created";
-      } catch (err) {
-        return (err as Error).message;
-      }
-    });
-
-    // Then both are refused, because a task nobody named cannot be worked on
-    expect(refused.filter((one) => !/title is required/.test(one))).toEqual([]);
-  });
 
   testInTempDirs("ids are handed out in order and never repeat", () => {
     // Given an empty task directory

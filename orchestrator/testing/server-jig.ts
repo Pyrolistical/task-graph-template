@@ -68,6 +68,17 @@ export async function reaches(
   await until(server, () => stateOf(server, id) === state, ticks);
 }
 
+export function compactionsOf(server: Server, id: string): number | null {
+  if (!fs.existsSync(server.runtime.agentsView)) {
+    return null;
+  }
+  const view = JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8"));
+  const busy = view.agents.find(
+    (agent: { task_id: string | null }) => agent.task_id === id,
+  );
+  return busy?.compactions ?? null;
+}
+
 export function stateOf(server: Server, id: string): string {
   return server.tasks().get(id)?.state ?? "CLOSED";
 }

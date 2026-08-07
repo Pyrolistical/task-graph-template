@@ -11,6 +11,8 @@ import {
   ALLOWED_TRANSITIONS,
   TRANSITION_NAMES,
   type TransitionName,
+  type TaskState,
+  type Decision,
   decide,
 } from "../domain/state-machine.ts";
 import { createTask, readTaskFile } from "./task-store.ts";
@@ -21,6 +23,7 @@ import {
   claim,
   closeTask,
   closedPath,
+  documentOf,
   deadPid,
   makeTasksDir,
   metaOf,
@@ -114,6 +117,10 @@ function build(state: ValidState): { dir: string; id: string } {
   return { dir, id };
 }
 
+function landsIn(decided: Decision, state: ValidState): TaskState {
+  return decided.kind === "stay" ? state : decided.to;
+}
+
 describe("Feature: applying the state machine to the task directory", () => {
   testInTempDirs("the directory can put a task in every state there is", () => {
     // Given every state the machine allows a task to sit in
@@ -148,11 +155,8 @@ describe("Feature: applying the state machine to the task directory", () => {
       const result = run(dir, id, name, ...ARGS[name]);
       return {
         edge: `${state} --${name}-->`,
-        landed:
-          result.to === "CLOSED"
-            ? readTaskFile(closedPath(result)).meta.state
-            : metaOf(dir, id).state,
-        decided: decided.kind === "stay" ? state : decided.to,
+        landed: readTaskFile(documentOf(dir, id, result)).meta.state,
+        decided: landsIn(decided, state),
       };
     });
 
@@ -170,10 +174,10 @@ describe("Feature: applying the state machine to the task directory", () => {
         const before = fs.readFileSync(filePath, "utf-8");
 
         // When every transition the machine refuses from that state is applied
-        for (const name of TRANSITION_NAMES) {
-          if (ALLOWED_TRANSITIONS[state].includes(name)) {
-            continue;
-          }
+        const refused = TRANSITION_NAMES.filter(
+          (name) => !ALLOWED_TRANSITIONS[state].includes(name),
+        );
+        for (const name of refused) {
           expect(() => run(dir, id, name, ...ARGS[name])).toThrow(
             /not valid from state/,
           );
@@ -541,24 +545,21 @@ describe("Feature: parking a task on a person", () => {
     expect(metaOf(dir, id).state).toBe("WORK");
   });
 
-  testInTempDirs("every way out of a hold clears the reason", () => {
-    // Given a held task, and the two ways the manager can answer it
-    const exits = ["resume", "abort"] as const;
-
-    // When each exit is taken
-    const reasons = exits.map((exit) => {
+  testInTempDirs.each([["resume"], ["abort"]] as const)(
+    "answering a hold with %p clears the reason",
+    (exit) => {
+      // Given a held task, and the way the manager answers it
       const { dir, id } = toHeld();
-      const result = run(dir, id, exit);
-      const filePath =
-        result.to === "CLOSED"
-          ? closedPath(result)
-          : path.join(dir, `${id}.md`);
-      return readTaskFile(filePath).meta.held_reason;
-    });
 
-    // Then neither leaves a stale reason behind on the document
-    expect(reasons).toEqual([null, null]);
-  });
+      // When that exit is taken
+      const result = run(dir, id, exit);
+
+      // Then the document it lands on carries no stale reason
+      expect(readTaskFile(documentOf(dir, id, result)).meta.held_reason).toBe(
+        null,
+      );
+    },
+  );
 
   testInTempDirs(
     "a task given a dependency while held resumes into BLOCKED",

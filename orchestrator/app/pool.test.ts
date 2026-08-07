@@ -105,41 +105,27 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
   });
 
-  test("a slot that is not inside a bash call is refused", () => {
-    // Given the ways an agent can be busy without running a command
-    const elsewhere: Activity[] = [
-      { kind: "none" },
-      { kind: "thinking", started_at: Date.now() },
-      { kind: "compacting", reason: "overflow", started_at: Date.now() },
-      {
-        kind: "tool-call",
-        tool: "read",
-        target: "a.txt",
-        started_at: Date.now(),
-      },
-    ];
-
-    // Given a slot sitting in each of them in turn
-    const { pool } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-
-    // When the slot is aborted from each
-    const refusals = elsewhere.map((activity) => {
+  test.each<[Activity]>([
+    [{ kind: "none" }],
+    [{ kind: "thinking", started_at: 0 }],
+    [{ kind: "compacting", reason: "overflow", started_at: 0 }],
+    [{ kind: "tool-call", tool: "read", target: "a.txt", started_at: 0 }],
+  ])(
+    "a slot that is %p rather than inside a bash call is refused",
+    (activity) => {
+      // Given a slot busy in a way that is not running a command
+      const { pool } = aPool();
+      const worker = pool.worker("pi-fake-fake-1");
       worker.state = "BUSY";
       worker.process = aSession(activity);
-      try {
-        pool.abortAgent("pi-fake-fake-1");
-        return "aborted";
-      } catch (err) {
-        return (err as Error).message;
-      }
-    });
 
-    // Then every one of them is refused, because there is no command to kill
-    expect(
-      refusals.filter((one) => !/not running a bash tool call/.test(one)),
-    ).toEqual([]);
-  });
+      // When the slot is aborted
+      const attempt = () => pool.abortAgent("pi-fake-fake-1");
+
+      // Then it is refused, because there is no command to kill
+      expect(attempt).toThrow(/not running a bash tool call/);
+    },
+  );
 
   test("a slot with no process at all is refused as not running", () => {
     // Given a slot the scheduler has never dispatched to

@@ -18,25 +18,62 @@ export function tempDir(prefix: string): string {
   return dir;
 }
 
+export async function withTasksRoot<T>(
+  root: string,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  const previous = process.env.TASK_GRAPH_TASKS_ROOT;
+  process.env.TASK_GRAPH_TASKS_ROOT = root;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.TASK_GRAPH_TASKS_ROOT;
+    } else {
+      process.env.TASK_GRAPH_TASKS_ROOT = previous;
+    }
+  }
+}
+
+function inTempDirs<Args extends unknown[]>(
+  fn: (...args: Args) => void | Promise<void>,
+): (...args: Args) => Promise<void> {
+  return async (...args: Args) => {
+    const mark = live.length;
+    try {
+      await fn(...args);
+    } catch (err) {
+      live.splice(mark);
+      throw err;
+    }
+    for (const dir of live.splice(mark)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
 export function testInTempDirs(
   name: string,
   fn: () => void | Promise<void>,
   timeout?: number,
 ): void {
-  test(
-    name,
-    async () => {
-      const mark = live.length;
-      try {
-        await fn();
-      } catch (err) {
-        live.splice(mark);
-        throw err;
-      }
-      for (const dir of live.splice(mark)) {
-        fs.rmSync(dir, { recursive: true, force: true });
-      }
-    },
-    timeout,
-  );
+  test(name, inTempDirs(fn), timeout);
 }
+
+type Args<Row> = Row extends readonly [...infer Cells] ? Cells : never;
+
+testInTempDirs.each = <const Rows extends readonly (readonly unknown[])[]>(
+  rows: Rows,
+) => {
+  return (
+    name: string,
+    fn: (...args: Args<Rows[number]>) => void | Promise<void>,
+    timeout?: number,
+  ): void => {
+    test.each(rows as unknown as unknown[][])(
+      name,
+      inTempDirs(fn as (...args: unknown[]) => void | Promise<void>),
+      timeout,
+    );
+  };
+};

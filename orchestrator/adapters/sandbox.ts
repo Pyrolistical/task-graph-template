@@ -154,13 +154,10 @@ export function expandHome(target: string): string {
   return path.resolve(target);
 }
 
+export function expandAll(targets: string[]): string[] {
+  return [...new Set(targets.map(expandHome))];
+}
+
 export function overlays(targets: string[]): string[] {
-  const resolved = new Set<string>();
-  for (const target of targets) {
-    const full = expandHome(target);
-    if (fs.existsSync(full)) {
-      resolved.add(full);
-    }
-  }
-  return [...resolved];
+  return expandAll(targets).filter((target) => fs.existsSync(target));
 }

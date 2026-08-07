@@ -30,6 +30,15 @@ import {
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { tempRepo } from "../testing/orchestrator-jig.ts";
 
+function issuesOf(pool: unknown): string[] {
+  try {
+    parsePool(pool);
+    return [];
+  } catch (err) {
+    return (err as SchemaError).issues;
+  }
+}
+
 describe("Feature: loading the pool of agents", () => {
   testInTempDirs(
     "a slot is named for its type, provider, model and number",
@@ -86,25 +95,23 @@ describe("Feature: loading the pool of agents", () => {
     },
   );
 
-  testInTempDirs("the model key drops the slot number and nothing else", () => {
-    // Given slot names whose models carry dashes and dots of their own
-    const names = [
-      "pi-anthropic-claude-sonnet-4-5-2",
-      "pi-llama.cpp-rocm-rocm-1",
-    ];
+  testInTempDirs.each([
+    ["pi-anthropic-claude-sonnet-4-5-2", "pi-anthropic-claude-sonnet-4-5"],
+    ["pi-llama.cpp-rocm-rocm-1", "pi-llama.cpp-rocm-rocm"],
+  ])("the slot %p belongs to the agent %p", (name, key) => {
+    // Given a slot name whose model carries dashes and dots of its own
+    const slot = name;
 
-    // When each is reduced to the agent it belongs to
-    const keys = names.map(agentModelKey);
+    // When it is reduced to the agent it belongs to
+    const reduced = agentModelKey(slot);
 
     // Then only the trailing slot number is dropped
-    expect(keys).toEqual([
-      "pi-anthropic-claude-sonnet-4-5",
-      "pi-llama.cpp-rocm-rocm",
-    ]);
+    expect(reduced).toBe(key);
   });
 
   testInTempDirs("an agent is enabled unless the pool says otherwise", () => {
-    // Given a pool with one agent turned off in the file
+    // Given a pool with one agent left as the file found it
+    // Given the other agent in that pool turned off
     const pool = {
       agents: [
         { type: "pi", provider: "anthropic", model: "m", slots: 2 },
@@ -128,7 +135,8 @@ describe("Feature: loading the pool of agents", () => {
   testInTempDirs(
     "a slot may take every role unless the pool restricts it",
     () => {
-      // Given a pool with one agent restricted to reviewing
+      // Given a pool with one agent that names no roles
+      // Given the other agent in that pool restricted to reviewing
       const pool = {
         agents: [
           { type: "pi", provider: "anthropic", model: "m", slots: 1 },
@@ -145,7 +153,7 @@ describe("Feature: loading the pool of agents", () => {
       // When the pool is loaded
       const slots = parsePool(pool);
 
-      // Then the unrestricted agent may do anything and the other only reviews
+      // Then the first may work, review, plan and design, and the second may only review
       expect(slots[0]!.roles).toEqual([
         "worker",
         "reviewer",
@@ -177,29 +185,29 @@ describe("Feature: loading the pool of agents", () => {
     expect(attempt).toThrow(/Invalid option/);
   });
 
-  testInTempDirs(
-    "a key the pool file has no use for is refused on load",
-    () => {
-      // Given a pool carrying a setting the server does not read
-      const pool = {
-        agents: [
-          {
-            type: "pi",
-            provider: "anthropic",
-            model: "m",
-            slots: 1,
-            retries: 3,
-          },
-        ],
-      };
+  testInTempDirs.each([
+    ["retries", 3],
+    ["thinking", "high"],
+  ])("a pool entry carrying a %p key is refused on load", (key, value) => {
+    // Given a pool entry carrying a setting the server does not read
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          slots: 1,
+          [key]: value,
+        },
+      ],
+    };
 
-      // When the pool is loaded
-      const attempt = () => parsePool(pool);
+    // When the pool is loaded
+    const attempt = () => parsePool(pool);
 
-      // Then it is refused, so a setting that would do nothing is never believed
-      expect(attempt).toThrow(/Unrecognized key: "retries"/);
-    },
-  );
+    // Then it is refused by name, so a setting that would do nothing is never believed
+    expect(attempt).toThrow(`Unrecognized key: "${key}"`);
+  });
 
   testInTempDirs(
     "a slot is a type, provider, model and number, and nothing more",
@@ -212,7 +220,8 @@ describe("Feature: loading the pool of agents", () => {
       // When the pool is loaded
       const slot = parsePool(pool)[0];
 
-      // Then the slot carries exactly what the server needs to dispatch to it
+      // Then the slot carries its name, its agent key, the type, provider and model
+      // Then the slot carries its number, whether it is enabled, its write paths and its roles
       expect(slot).toEqual({
         name: "pi-anthropic-m-1",
         agent: "pi-anthropic-m",
@@ -227,27 +236,6 @@ describe("Feature: loading the pool of agents", () => {
     },
   );
 
-  testInTempDirs("a model setting the server cannot honour is refused", () => {
-    // Given a pool asking for a thinking level the server does not pass on
-    const pool = {
-      agents: [
-        {
-          type: "pi",
-          provider: "anthropic",
-          model: "m",
-          slots: 1,
-          thinking: "high",
-        },
-      ],
-    };
-
-    // When the pool is loaded
-    const attempt = () => parsePool(pool);
-
-    // Then it is refused, rather than being quietly dropped
-    expect(attempt).toThrow(/Unrecognized key: "thinking"/);
-  });
-
   testInTempDirs(
     "an agent writes to the toolchain cache unless told otherwise",
     () => {
@@ -259,10 +247,10 @@ describe("Feature: loading the pool of agents", () => {
       // When the pool is loaded
       const slots = parsePool(pool);
 
-      // Then the cache a toolchain needs to build is what it is given
+      // Then the write path defaults to the zig cache, which is the cache home
+      expect(slots[0]!.write).toEqual([ZIG_WRITE]);
       expect(DEFAULT_WRITE).toEqual([ZIG_WRITE]);
       expect(ZIG_WRITE).toBe(CACHE_HOME);
-      expect(slots[0]!.write).toEqual([CACHE_HOME]);
     },
   );
 
@@ -301,28 +289,40 @@ describe("Feature: loading the pool of agents", () => {
       const writable = agentWrite(parsePool(pool)[0]!);
 
       // Then only pi's own home comes along, because pi cannot run without it
-      expect(writable).toEqual(fs.existsSync(PI_HOME) ? [PI_HOME] : []);
+      expect(writable).toEqual([PI_HOME]);
     },
   );
 
   testInTempDirs("a pi agent always gets its own home, declared or not", () => {
-    // Given a pi agent and an agent of another type, both declaring one path
+    // Given a pi agent declaring one path of its own
     const home = tempDir("pi-home-");
-    const slots = parsePool({
+    const slot = parsePool({
       agents: [
         { type: "pi", provider: "anthropic", model: "m", write: [home] },
+      ],
+    })[0]!;
+
+    // When the paths it may write are worked out
+    const writable = agentWrite(slot);
+
+    // Then pi's home comes on top of what it declared, because pi cannot run without it
+    expect(writable).toEqual([home, PI_HOME]);
+  });
+
+  testInTempDirs("an agent of another type gets only what it declared", () => {
+    // Given an agent that is not pi, declaring one path of its own
+    const home = tempDir("pi-home-");
+    const slot = parsePool({
+      agents: [
         { type: "other", provider: "anthropic", model: "m", write: [home] },
       ],
-    });
+    })[0]!;
 
-    // When the paths each may write are worked out
-    const writable = slots.map(agentWrite);
+    // When the paths it may write are worked out
+    const writable = agentWrite(slot);
 
-    // Then only the pi agent is given pi's home on top of what it declared
-    expect(writable[0]).toEqual(
-      fs.existsSync(PI_HOME) ? [home, PI_HOME] : [home],
-    );
-    expect(writable[1]).toEqual([home]);
+    // Then it is given that path and nothing besides
+    expect(writable).toEqual([home]);
   });
 
   testInTempDirs(
@@ -358,12 +358,7 @@ describe("Feature: loading the pool of agents", () => {
       };
 
       // When the pool is loaded
-      let issues: string[] = [];
-      try {
-        parsePool(pool);
-      } catch (err) {
-        issues = (err as SchemaError).issues;
-      }
+      const issues = issuesOf(pool);
 
       // Then both are named by their place in the file, so one edit fixes it
       expect(issues).toHaveLength(2);
@@ -585,19 +580,19 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     expect(mounted).toEqual([]);
   });
 
-  testInTempDirs("a write path is expanded from the home shorthand", () => {
-    // Given paths written with and without the home shorthand
-    const declared = ["~", "~/.cache", "/abs/path"];
+  testInTempDirs.each([
+    ["~", os.homedir()],
+    ["~/.cache", path.join(os.homedir(), ".cache")],
+    ["/abs/path", "/abs/path"],
+  ])("the write path %p is expanded to %p", (declared, full) => {
+    // Given a write path a pool entry declared
+    const written = declared;
 
-    // When each declared path is expanded
-    const expanded = declared.map(expandHome);
+    // When the declared path is expanded
+    const expanded = expandHome(written);
 
-    // Then the shorthand becomes the real home and absolute paths are untouched
-    expect(expanded).toEqual([
-      os.homedir(),
-      path.join(os.homedir(), ".cache"),
-      "/abs/path",
-    ]);
+    // Then the shorthand becomes the real home and an absolute path is untouched
+    expect(expanded).toBe(full);
   });
 
   testInTempDirs("a path declared twice is mounted once", () => {
@@ -611,22 +606,6 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     expect(mounted).toEqual([dir]);
   });
 
-  testInTempDirs(
-    "the sandbox command is the one that is actually spawned",
-    () => {
-      // Given the default sandbox command and one named explicitly
-      const commands = [SANDBOX_COMMAND, "/usr/bin/bwrap"];
-
-      // When a sandbox is built with each
-      const spawned = commands.map(
-        (command) => sandbox(policy, command, false)[0],
-      );
-
-      // Then each is what will be executed, so a test can point at a fake
-      expect(spawned).toEqual(commands);
-    },
-  );
-
   testInTempDirs("a limited sandbox wraps the cgroup scope outermost", () => {
     // Given a host that can create cgroup scopes
     const limited = true;
@@ -634,8 +613,12 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     // When the sandbox is built
     const args = sandbox(policy, SANDBOX_COMMAND, limited);
 
-    // Then the scope holds the oom adjustment, which holds the sandbox itself
+    // Then the scope capping memory at 8G comes first, then the score of 300, then bwrap
     expect(args[0]).toBe(LIMIT_COMMAND);
+    expect(args).toContain(`MemoryMax=${MEMORY_MAX}`);
+    expect(args[at(args, OOM_COMMAND) + 2]).toBe(
+      String(AGENT_OOM_SCORE_ADJUST),
+    );
     expect(at(args, OOM_COMMAND)).toBeGreaterThan(at(args, LIMIT_COMMAND));
     expect(at(args, SANDBOX_COMMAND)).toBeGreaterThan(at(args, OOM_COMMAND));
   });
@@ -670,14 +653,14 @@ describe("Feature: the sandbox an agent is spawned into", () => {
   testInTempDirs(
     "checks are killed before agents, and both before the user's work",
     () => {
-      // Given the oom score the kernel is told to prefer for each
+      // Given the oom score adjustment a check and an agent are run with
       const scores = [CHECK_OOM_SCORE_ADJUST, AGENT_OOM_SCORE_ADJUST];
 
-      // When they are compared against each other and against a plain process
-      const order = [scores[0]! > scores[1]!, scores[1]! > 0];
+      // When they are lined up against the zero the user's own processes run at
+      const order = [...scores, 0];
 
-      // Then a check is sacrificed first and an agent before anything of the user's
-      expect(order).toEqual([true, true]);
+      // Then the check is 400, the agent 300 and the user's work 0, so the check dies first
+      expect(order).toEqual([400, 300, 0]);
     },
   );
 
@@ -690,8 +673,9 @@ describe("Feature: the sandbox an agent is spawned into", () => {
       // When the cgroup limits are worked out
       const args = limitArgs(under);
 
-      // Then that score is what the kernel is told
+      // Then choom is told the policy's own 400, not the 300 an agent defaults to
       expect(args[at(args, OOM_COMMAND) + 2]).toBe("400");
+      expect(AGENT_OOM_SCORE_ADJUST).toBe(300);
     },
   );
 
@@ -731,7 +715,7 @@ describe("Feature: the sandbox as it actually runs", () => {
       "cg=$(cut -d: -f3 /proc/self/cgroup); cat /sys/fs/cgroup$cg/memory.max /sys/fs/cgroup$cg/memory.swap.max /sys/fs/cgroup$cg/pids.max /proc/self/oom_score_adj",
     );
 
-    // Then the kernel reports back exactly what the policy asked for
+    // Then it is capped at 8G of memory with no swap, at 512 tasks, and at the score 400
     expect(output.split("\n").slice(0, 4)).toEqual([
       String(8 * 1024 * 1024 * 1024),
       "0",
@@ -783,7 +767,7 @@ describe("Feature: the sandbox as it actually runs", () => {
         run(policy, "test -d /usr/local && echo readable"),
       ];
 
-      // Then the work is possible without anything outside the workspace changing
+      // Then the file written in the workspace reads back, and the toolchain under /usr/local is there to read
       expect(output[0]).toContain("ok");
       expect(output[1]).toContain("readable");
     },

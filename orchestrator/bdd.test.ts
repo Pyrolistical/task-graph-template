@@ -32,7 +32,11 @@ function suites(): string[] {
 
 function cases(file: string): Case[] {
   const source = fs.readFileSync(path.join(ROOT, file), "utf-8");
-  const blocks = source.split(/^ {2}(?:test|testInTempDirs)\(\s*/m).slice(1);
+  const blocks = source
+    .split(
+      /^ {2}(?:test|testInTempDirs)(?:\.each(?:<[^>]*>)?\([\s\S]*?\))?\(\s*/m,
+    )
+    .slice(1);
 
   return blocks.map((block) => {
     const name = /^"([^"]*)"/.exec(block)?.[1] ?? "(unnamed)";

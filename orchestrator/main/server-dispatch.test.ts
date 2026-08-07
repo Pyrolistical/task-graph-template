@@ -1,5 +1,9 @@
 import { describe, expect } from "bun:test";
-import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
+import {
+  tempDir,
+  testInTempDirs,
+  withTasksRoot,
+} from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/transition-store.ts";
@@ -38,9 +42,8 @@ describe("Feature: where a project's task graph is found", () => {
     async () => {
       const fixture = makeFixture();
       const root = tempDir("task-graph-root-");
-      const previous = process.env.TASK_GRAPH_TASKS_ROOT;
-      process.env.TASK_GRAPH_TASKS_ROOT = root;
-      try {
+
+      await withTasksRoot(root, async () => {
         // Given a project that has never had a task graph
         const tasksDir = defaultTasksDir(fixture.repo);
 
@@ -62,13 +65,7 @@ describe("Feature: where a project's task graph is found", () => {
         ).toBe("1\n");
 
         server.shutdown();
-      } finally {
-        if (previous === undefined) {
-          delete process.env.TASK_GRAPH_TASKS_ROOT;
-        } else {
-          process.env.TASK_GRAPH_TASKS_ROOT = previous;
-        }
-      }
+      });
     },
     30000,
   );

@@ -171,26 +171,52 @@ describe("Feature: the numbers on a pane header", () => {
     expect(stats).toBe("ctx 42% x3");
   });
 
-  test("an elapsed time changes units as it grows", () => {
-    // Given durations spanning seconds, minutes and hours
-    const durations = [5_400, 95_000, 3_780_000, -5];
+  test.each([
+    [5_400, "5s"],
+    [95_000, "1m35s"],
+    [3_780_000, "1h03m"],
+  ])("a duration of %p milliseconds reads as %p", (duration, reads) => {
+    // Given a duration a slot has been running for
+    const measured = duration;
 
-    // When each is written for a header
-    const written = durations.map(elapsed);
+    // When it is written for a header
+    const written = elapsed(measured);
 
-    // Then each reads in the largest unit that fits, and never below zero
-    expect(written).toEqual(["5s", "1m35s", "1h03m", "0s"]);
+    // Then it reads in the largest unit that fits it
+    expect(written).toBe(reads);
   });
 
-  test("a token count is only abbreviated once it passes a thousand", () => {
-    // Given a count below a thousand and one above it
-    const counts = [999, 12_345];
+  test("a duration that ran backwards reads as no time at all", () => {
+    // Given a duration measured across a clock that went backwards
+    const measured = -5;
 
-    // When each is written for a header
-    const written = counts.map(thousands);
+    // When it is written for a header
+    const written = elapsed(measured);
 
-    // Then only the larger one is abbreviated
-    expect(written).toEqual(["999", "12.3k"]);
+    // Then it reads as zero, never as a negative time
+    expect(written).toBe("0s");
+  });
+
+  test("a token count below a thousand is written out in full", () => {
+    // Given a count of tokens below a thousand
+    const used = 999;
+
+    // When it is written for a header
+    const written = thousands(used);
+
+    // Then every digit of it is shown
+    expect(written).toBe("999");
+  });
+
+  test("a token count past a thousand is abbreviated", () => {
+    // Given a count of tokens past a thousand
+    const used = 12_345;
+
+    // When it is written for a header
+    const written = thousands(used);
+
+    // Then it is written in thousands, to one decimal place
+    expect(written).toBe("12.3k");
   });
 });
 
@@ -925,24 +951,30 @@ describe("Feature: the abort button on a pane", () => {
     expect(button).toEqual([]);
   });
 
-  test("only a slot inside a bash call offers a button", () => {
-    // Given a slot inside a bash call, and slots busy in every other way
-    const elsewhere: Activity[] = [
-      { kind: "thinking", started_at: NOW },
-      { kind: "compacting", reason: "overflow", started_at: NOW },
-      { kind: "tool-call", tool: "read", target: "a.txt", started_at: NOW },
-    ];
+  test("a slot inside a bash call offers a button", () => {
+    // Given a slot inside a bash call
+    const pane = paneOf();
 
-    // When the button is drawn for each of them
-    const drawn = [
-      plain(abortButton(paneOf())),
-      ...elsewhere.map((activity) =>
-        plain(abortButton(paneOf({ agents: [busyRow({ activity })] }))),
-      ),
-    ];
+    // When the button is drawn
+    const drawn = plain(abortButton(pane));
 
-    // Then only the bash call has one, because only a command can be killed
-    expect(drawn).toEqual(["[abort]", "", "", ""]);
+    // Then it offers to abort, because a running command can be killed
+    expect(drawn).toBe("[abort]");
+  });
+
+  test.each<[Activity]>([
+    [{ kind: "thinking", started_at: NOW }],
+    [{ kind: "compacting", reason: "overflow", started_at: NOW }],
+    [{ kind: "tool-call", tool: "read", target: "a.txt", started_at: NOW }],
+  ])("a slot that is %p offers no button", (activity) => {
+    // Given a slot busy in a way that is not a bash call
+    const pane = paneOf({ agents: [busyRow({ activity })] });
+
+    // When the button is drawn
+    const drawn = plain(abortButton(pane));
+
+    // Then there is none, because only a command can be killed
+    expect(drawn).toBe("");
   });
 
   test("the button sits at the right of the activity row", () => {

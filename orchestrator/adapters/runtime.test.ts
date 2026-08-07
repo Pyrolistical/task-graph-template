@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, setSystemTime } from "bun:test";
-import { TEST_ROOT, tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
+import {
+  TEST_ROOT,
+  tempDir,
+  testInTempDirs,
+  withTasksRoot,
+} from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -164,42 +169,44 @@ describe("Feature: where a project's runtime state lives", () => {
 });
 
 describe("Feature: where a project's task graph lives", () => {
-  testInTempDirs("a project under home is keyed by its path below home", () => {
-    // Given projects at, under and outside the user's home directory
+  testInTempDirs.each([
+    ["/home/model/project", "project"],
+    ["/home/model/a/b", "a-b"],
+  ])("the project %p under home is keyed by %p", (project, key) => {
+    // Given the path of a project below the user's home directory
     const home = "/home/model";
-    const projects = [
-      "/home/model/project",
-      "/home/model/a/b",
-      "/home/model",
-      "/tmp/other",
-    ];
 
-    // When the graph key of each is worked out
-    const keys = projects.map((project) => graphKey(project, home));
+    // When the graph key of it is worked out
+    const worked = graphKey(project, home);
 
-    // Then a project under home reads as its own name, and others as their path
-    expect(keys).toEqual(["project", "a-b", "-home-model", "-tmp-other"]);
+    // Then the key is its path below home, flattened into one name
+    expect(worked).toBe(key);
+  });
+
+  testInTempDirs.each([
+    ["/home/model", "-home-model"],
+    ["/tmp/other", "-tmp-other"],
+  ])("the project %p outside home is keyed by %p", (project, key) => {
+    // Given the path of a project that is not below the user's home directory
+    const home = "/home/model";
+
+    // When the graph key of it is worked out
+    const worked = graphKey(project, home);
+
+    // Then the key is its whole path, flattened into one name
+    expect(worked).toBe(key);
   });
 
   testInTempDirs(
     "the root the graph lives under can be pointed elsewhere",
-    () => {
+    async () => {
       // Given an environment naming another root for task graphs
-      const previous = process.env.TASK_GRAPH_TASKS_ROOT;
-      process.env.TASK_GRAPH_TASKS_ROOT = "/tmp/tg";
+      const root = "/tmp/tg";
 
       // When the task directory of a project is worked out
-      const dir = (() => {
-        try {
-          return defaultTasksDir("/home/model/project");
-        } finally {
-          if (previous === undefined) {
-            delete process.env.TASK_GRAPH_TASKS_ROOT;
-          } else {
-            process.env.TASK_GRAPH_TASKS_ROOT = previous;
-          }
-        }
-      })();
+      const dir = await withTasksRoot(root, () =>
+        defaultTasksDir("/home/model/project"),
+      );
 
       // Then it is that root joined with the project's key
       expect(dir).toBe("/tmp/tg/project");
@@ -274,19 +281,27 @@ describe("Feature: discarding a task that is finished with", () => {
 });
 
 describe("Feature: telling whether a process is still running", () => {
-  testInTempDirs(
-    "a running process is alive and an invented pid is not",
-    () => {
-      // Given this process, and a pid nothing has ever had
-      const pids = [process.pid, 2 ** 22];
+  testInTempDirs("a process that is running reads as alive", () => {
+    // Given the pid of this process, which is certainly running
+    const candidate = process.pid;
 
-      // When each candidate is checked
-      const alive = pids.map(isProcessAlive);
+    // When the candidate is checked
+    const alive = isProcessAlive(candidate);
 
-      // Then only the real one is alive
-      expect(alive).toEqual([true, false]);
-    },
-  );
+    // Then it reads as alive
+    expect(alive).toBe(true);
+  });
+
+  testInTempDirs("a pid nothing has ever had reads as dead", () => {
+    // Given a pid beyond anything this machine has handed out
+    const candidate = 2 ** 22;
+
+    // When the candidate is checked
+    const alive = isProcessAlive(candidate);
+
+    // Then it reads as dead, so the reaper is free to take the task back
+    expect(alive).toBe(false);
+  });
 
   testInTempDirs("a child that exited is dead, waited on or not", async () => {
     // Given a detached child that has run to completion

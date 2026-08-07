@@ -227,37 +227,46 @@ describe("Feature: taking and clearing a claim", () => {
     expect(metaOf(dir, id).claimed_by).toBeNull();
   });
 
-  testInTempDirs(
-    "a claim without a real agent name or process is refused",
-    () => {
-      // Given a task ready to be claimed
-      const { dir, id } = newTask();
-      run(dir, id, "submit");
+  testInTempDirs.each([
+    ["  ", 12, '"agentName" must be a non-empty string'],
+    ["a", 0, '"pid" must be a positive integer'],
+    ["a", 1.5, '"pid" must be a positive integer'],
+  ])("a claim by %p with the pid %p is refused", (agent, pid, refusal) => {
+    // Given a task ready to be claimed
+    const { dir, id } = newTask();
+    run(dir, id, "submit");
 
-      // When claims are made with a blank name, a zero pid and a fractional one
-      const refused = [
-        () => claim(dir, id, "  "),
-        () => claim(dir, id, "a", 0),
-        () => claim(dir, id, "a", 1.5),
-      ].map((take) => {
-        try {
-          take();
-          return "claimed";
-        } catch (err) {
-          return (err as Error).message;
-        }
-      });
+    // When the claim is made
+    const attempt = () => claim(dir, id, agent, pid);
 
-      // Then each is refused, and the task is left unclaimed where it stood
-      expect(refused[0]).toContain('"agentName" must be a non-empty string');
-      expect(refused[1]).toContain('"pid" must be a positive integer');
-      expect(refused[2]).toContain('"pid" must be a positive integer');
-      const meta = metaOf(dir, id);
-      expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeNull();
-    },
-  );
+    // Then it is refused, and the task is left unclaimed where it stood
+    expect(attempt).toThrow(refusal);
+    const meta = metaOf(dir, id);
+    expect(meta.state).toBe("DESIGN");
+    expect(meta.claimed_by).toBeNull();
+  });
 });
+
+function handingIn(state: string): { dir: string; id: string } {
+  const stages: Record<string, () => { dir: string; id: string }> = {
+    WORK: () => toWorking(),
+    PLAN_REVIEW: () => {
+      const task = toPlan();
+      claim(task.dir, task.id, "p");
+      run(task.dir, task.id, "submit");
+      claim(task.dir, task.id, "pr");
+      return task;
+    },
+    DESIGN_REVIEW: () => {
+      const task = toDesign();
+      claim(task.dir, task.id, "d");
+      run(task.dir, task.id, "submit");
+      claim(task.dir, task.id, "dr");
+      return task;
+    },
+  };
+  return stages[state]!();
+}
 
 describe("Feature: what a review writes into the task body", () => {
   testInTempDirs(
@@ -382,32 +391,17 @@ describe("Feature: what a review writes into the task body", () => {
     expect(bodyOf(path.join(dir, `${id}.md`))).toBe(accepted);
   });
 
-  testInTempDirs(
-    "a stage that hands in a body cannot submit without one",
-    () => {
-      // Given a task waiting in each of the stages that hand in a body
-      const work = toWorking();
-      const plan = toPlan();
-      claim(plan.dir, plan.id, "p");
-      run(plan.dir, plan.id, "submit");
-      claim(plan.dir, plan.id, "pr");
-      const design = toDesign();
-      claim(design.dir, design.id, "d");
-      run(design.dir, design.id, "submit");
-      claim(design.dir, design.id, "dr");
+  testInTempDirs.each([["WORK"], ["PLAN_REVIEW"], ["DESIGN_REVIEW"]])(
+    "a task in %p cannot submit without a body",
+    (state) => {
+      // Given a task waiting in a stage that hands in a body
+      const { dir, id } = handingIn(state);
 
-      // When each submits with no body
-      const refused = [work, plan, design].map(({ dir, id }) => {
-        try {
-          apply(dir, id, "submit", {});
-          return "submitted";
-        } catch (err) {
-          return (err as Error).message;
-        }
-      });
+      // When it submits with no body
+      const attempt = () => apply(dir, id, "submit", {});
 
-      // Then every one of them is refused for the missing body
-      expect(refused.filter((one) => !/body/.test(one))).toEqual([]);
+      // Then it is refused for the missing body
+      expect(attempt).toThrow(/body/);
     },
   );
 
@@ -681,21 +675,21 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     const { dir, id } = newTask();
     const filePath = path.join(dir, `${id}.md`);
     const original = bodyOf(filePath);
-    const steps: [string | null, TransitionName, string[], string][] = [
-      [null, "submit", [], original],
-      ["designer", "submit", [], original],
-      ["design-reviewer", "submit", ["\n# accepted"], "\n# accepted"],
-      ["planner", "submit", [], "\n# accepted"],
-      ["plan-reviewer", "submit", ["\n# accepted"], "\n# accepted"],
-      ["agent-1", "submit", ["\n# accepted"], "\n# accepted"],
-      [null, "pass", [], "\n# accepted"],
-      ["reviewer", "submit", [], "\n# accepted"],
+    const steps: [string[], TransitionName, string[], string][] = [
+      [[], "submit", [], original],
+      [["designer"], "submit", [], original],
+      [["design-reviewer"], "submit", ["\n# accepted"], "\n# accepted"],
+      [["planner"], "submit", [], "\n# accepted"],
+      [["plan-reviewer"], "submit", ["\n# accepted"], "\n# accepted"],
+      [["agent-1"], "submit", ["\n# accepted"], "\n# accepted"],
+      [[], "pass", [], "\n# accepted"],
+      [["reviewer"], "submit", [], "\n# accepted"],
     ];
 
     // When the task is walked from new to closed
-    for (const [agent, name, args, expected] of steps) {
-      const held = bodyOf(filePath);
-      if (agent !== null) {
+    for (const [agents, name, args, expected] of steps) {
+      for (const agent of agents) {
+        const held = bodyOf(filePath);
         claim(dir, id, agent);
         expect(bodyOf(filePath)).toBe(held);
       }

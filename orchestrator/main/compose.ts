@@ -50,6 +50,7 @@ import {
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
   hasLimits,
+  overlays,
   sandbox,
 } from "../adapters/sandbox.ts";
 import {
@@ -172,7 +173,7 @@ export function wire(options: WiringOptions): Server {
             cwd: spec.cwd,
             writable: [runtime.taskDir(spec.taskId)],
             readable: [repo, orchestratorDir],
-            overlay: agentWrite(spec.slot),
+            overlay: overlays(agentWrite(spec.slot)),
             oomScoreAdjust: AGENT_OOM_SCORE_ADJUST,
           },
           sandboxCommand,
@@ -200,7 +201,7 @@ export function wire(options: WiringOptions): Server {
             cwd: worktree,
             writable: [worktree],
             readable: [repo],
-            overlay: checkWrite(slots),
+            overlay: overlays(checkWrite(slots)),
             oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
           },
           sandboxCommand,

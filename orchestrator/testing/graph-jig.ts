@@ -233,6 +233,16 @@ export function closeTask(dir: string, id: string) {
   return run(dir, id, "submit");
 }
 
+export function documentOf(
+  dir: string,
+  id: string,
+  result: TransitionResult,
+): string {
+  return result.to === "CLOSED"
+    ? closedPath(result)
+    : path.join(dir, `${id}.md`);
+}
+
 export function closedPath(result: TransitionResult): string {
   if (result.to !== "CLOSED") {
     throw new Error(`the task landed in ${result.to}, not CLOSED`);

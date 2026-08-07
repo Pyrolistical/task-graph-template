@@ -52,6 +52,26 @@ function modules(): Module[] {
   return found;
 }
 
+function suitesIn(layers: Layer[]): string[] {
+  const found: string[] = [];
+
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith(".test.ts")) {
+        found.push(path.relative(ROOT, full));
+      }
+    }
+  };
+
+  for (const layer of layers) {
+    walk(path.join(ROOT, layer));
+  }
+  return found;
+}
+
 function importsOf(module: Module): string[] {
   return [...module.source.matchAll(/from "(\.[^"]*\.ts)"/g)].map((match) => {
     const target = path.join(path.dirname(module.path), match[1]!);
@@ -105,20 +125,7 @@ describe("Feature: the dependency rule", () => {
 
   test("no test in an inner layer reaches for the filesystem", () => {
     // Given every suite in the layers that only decide
-    const suites: string[] = [];
-    const walk = (dir: string) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(full);
-        } else if (entry.name.endsWith(".test.ts")) {
-          suites.push(path.relative(ROOT, full));
-        }
-      }
-    };
-    for (const layer of INNER_TESTS) {
-      walk(path.join(ROOT, layer));
-    }
+    const suites = suitesIn(INNER_TESTS);
 
     // Given there are enough of them for the rule to mean something
     expect(suites.length).toBeGreaterThan(4);

@@ -12,7 +12,9 @@ import {
   setPlan,
 } from "../testing/fixture.ts";
 import { writeCommand } from "../adapters/command.ts";
+import { eventually } from "../testing/wait.ts";
 import {
+  compactionsOf,
   editTaskFile,
   reaches,
   serverFor,
@@ -243,22 +245,10 @@ describe("Feature: what the agents view says about a running agent", () => {
 
       // When it is dispatched and runs until it compacts
       server.setSchedulerEnabled(true);
-      const compactions = () => {
-        if (!fs.existsSync(server.runtime.agentsView)) {
-          return null;
-        }
-        const view = JSON.parse(
-          fs.readFileSync(server.runtime.agentsView, "utf-8"),
-        );
-        const busy = view.agents.find(
-          (agent: { task_id: string | null }) => agent.task_id === id,
-        );
-        return busy?.compactions ?? null;
-      };
-      await until(server, () => compactions() === 1);
+      await until(server, () => compactionsOf(server, id) === 1);
 
       // Then the console can see how often it has compacted on this task
-      expect(compactions()).toBe(1);
+      expect(compactionsOf(server, id)).toBe(1);
 
       await server.drain();
       server.shutdown();
@@ -354,14 +344,8 @@ describe("Feature: the log of every transition applied", () => {
 });
 
 describe("Feature: commands the console writes for the server", () => {
-  async function applied(done: () => boolean): Promise<void> {
-    for (let waited = 0; waited < 200 && !done(); waited++) {
-      await Bun.sleep(10);
-    }
-    if (!done()) {
-      throw new Error("the server never applied the console command");
-    }
-  }
+  const applied = (done: () => boolean) =>
+    eventually(done, "applied the console command");
 
   testInTempDirs(
     "a written command toggles the scheduler and an agent, and is consumed",
@@ -426,8 +410,12 @@ describe("Feature: commands the console writes for the server", () => {
         agent: "pi-nobody-nothing",
         enabled: false,
       });
-      await applied(() =>
-        fs.readFileSync(server.runtime.serverLog, "utf-8").includes("refused"),
+      await eventually(
+        () =>
+          fs
+            .readFileSync(server.runtime.serverLog, "utf-8")
+            .includes("refused"),
+        "logged the refusal",
       );
 
       // Then the refusal is logged and the server carries on running
@@ -585,22 +573,21 @@ describe("Feature: turning an agent off and on", () => {
     30000,
   );
 
-  testInTempDirs(
-    "an agent that is not in the pool is refused",
-    async () => {
+  testInTempDirs.each([
+    ["pi-fake-fake-1", 'no agent named "pi-fake-fake-1"'],
+    ["nope", "the pool has pi-fake-fake"],
+  ])(
+    "the name %p, which is not an agent in the pool, is refused",
+    async (name, refusal) => {
       // Given a server whose pool holds one agent
       const fixture = makeFixture();
       const server = await serverFor(fixture);
 
-      // When a slot name and an unknown name are passed where an agent belongs
-      const refused = [
-        () => server.setAgentEnabled("pi-fake-fake-1", false),
-        () => server.setAgentEnabled("nope", true),
-      ];
+      // When a name the pool does not hold is passed where an agent belongs
+      const attempt = () => server.setAgentEnabled(name, false);
 
-      // Then both are refused, and the pool it does have is named
-      expect(refused[0]).toThrow(/no agent named "pi-fake-fake-1"/);
-      expect(refused[1]).toThrow(/the pool has pi-fake-fake/);
+      // Then it is refused, and the pool it does have is named
+      expect(attempt).toThrow(refusal);
 
       server.shutdown();
     },
@@ -736,13 +723,13 @@ describe("Feature: aborting the command an agent is running", () => {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
-      for (let waited = 0; waited < 200; waited++) {
-        await Bun.sleep(10);
-        const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
-        if (log.includes("aborted bash")) {
-          break;
-        }
-      }
+      await eventually(
+        () =>
+          fs
+            .readFileSync(server.runtime.serverLog, "utf-8")
+            .includes("aborted bash"),
+        "killed the command",
+      );
       server.setSchedulerEnabled(false);
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
@@ -769,13 +756,13 @@ describe("Feature: aborting the command an agent is running", () => {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
-      for (let waited = 0; waited < 200; waited++) {
-        await Bun.sleep(10);
-        const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
-        if (log.includes("refused")) {
-          break;
-        }
-      }
+      await eventually(
+        () =>
+          fs
+            .readFileSync(server.runtime.serverLog, "utf-8")
+            .includes("refused"),
+        "logged the refusal",
+      );
 
       // Then the refusal is logged and the server carries on running
       expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
@@ -796,9 +783,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const fixture = makeFixture();
       const server = await serverFor(fixture);
       writeCommand(server.runtime, { command: "scheduler", enabled: true });
-      for (let waited = 0; waited < 200 && !server.schedulerEnabled; waited++) {
-        await Bun.sleep(10);
-      }
+      await eventually(() => server.schedulerEnabled, "started its scheduler");
       expect(server.schedulerEnabled).toBe(true);
 
       // When the manager detaches from it

@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
+import { eventually } from "../testing/wait.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { Sessions, SessionTail, frame, readView } from "./tui.ts";
@@ -268,9 +269,7 @@ describe("Feature: the command channel between console and server", () => {
 
       // When the console writes a command
       writeCommand(runtime, { command: "scheduler", enabled: true });
-      for (let waited = 0; waited < 100 && taken.length === 0; waited++) {
-        await Bun.sleep(10);
-      }
+      await eventually(() => taken.length > 0, "handed the command over", 100);
       watcher.close();
 
       // Then the server is handed it without waiting for a tick, and consumes it
