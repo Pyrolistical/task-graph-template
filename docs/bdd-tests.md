@@ -11,19 +11,13 @@ Write Bun tests using **Given / When / Then** comments. Each comment must be a c
 5. There can be **only one `When` per test**. The `When` represents the single behavior being tested.
 6. Multiple `Given` and `Then` statements are allowed.
 7. Use domain language that describes what the system does.
-8. Every actor a `Then` names has a `Given` that put it there. Two agents in the
-   `Then` means two `Given`s.
-9. A `Then` says what the value **is**, not that it is what something needs. Say
-   "the write path defaults to the zig cache", never "the cache it is given".
+8. Each Given/When/Then should be self consistent. Everything When/Then refers should be defined in the Givens.
+9. Given/When/Then should read like a story that explains a part of the system to the reader. The Then should be explict on what the values are not some vague notion of correctness.
 10. A `Then` describes the system, never the test, the suite or the rig.
 11. No `or` in a `Given`, `When` or `Then`. Alternatives are separate tests.
-12. **No conditionals in a test** — no `if`, no ternary, no branch in an
-    expectation. A test that branches is a test that is sometimes not run.
-    Branching belongs in a jig under `orchestrator/testing/`.
-13. A table of examples is `test.each` — one row per case, so each is its own
-    named test. Never `map` a literal list inside the `When`. Mapping is for a
-    list the system itself defines (every state, every transition), or for a
-    `Then` that is a relation between the rows.
+12. **No conditionals in a test**, conditionals means they are separate tests.
+13. Use `test.each` instead of mapping over values within a test.
+14. If a test needs a second `When`, it means it either is two tests or the first When is setting up state, in which case the test jig should be created to turn it into a Given.
 
 ## Example
 
@@ -50,8 +44,7 @@ describe("Feature: Account withdrawal", () => {
 });
 ```
 
-A table reads the same way, once per row. `testInTempDirs.each` is the same
-thing for a test that needs temporary directories.
+A table reads the same way, once per row.
 
 ```ts
 test.each([
@@ -69,4 +62,3 @@ test.each([
 });
 ```
 
-If a test needs a second `When`, it is usually testing **two behaviors** and should be split into separate tests. If a second `When` is used to setup state, then better test infrastructure needs to be created to turn that into a Given.
