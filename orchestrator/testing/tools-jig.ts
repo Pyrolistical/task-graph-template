@@ -107,19 +107,13 @@ const SCENARIOS: Record<ClaimState, Scenario[]> = {
       name: "approve",
       tool: "submit",
       prompt:
-        "Review this work: the commit adds hello.txt with 'hello' and the notes address every todo. It is correct. Finish by calling the submit tool with empty findings and delegations. Do not use any other tools.",
+        "Review this work: the commit adds hello.txt with 'hello' and the notes address every todo. It is correct. Finish by calling the submit tool with empty findings. Do not use any other tools.",
     },
     {
       name: "reject",
       tool: "submit",
       prompt:
-        "Review this work: the commit adds hello.txt, but the notes ignore todo 2 and hello.txt says 'hola'. Finish by calling the submit tool with those defects in findings and an empty delegations list. Do not use any other tools.",
-    },
-    {
-      name: "delegate",
-      tool: "submit",
-      prompt:
-        "Review this work: the commit is correct, but the same bug lives in fetch.ts outside this task. Finish by calling the submit tool with an empty findings list and that in delegations. Do not use any other tools.",
+        "Review this work: the commit adds hello.txt, but the notes ignore todo 2 and hello.txt says 'hola'. Finish by calling the submit tool with those defects in findings. Do not use any other tools.",
     },
     {
       name: "blocked",

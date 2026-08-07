@@ -9,7 +9,11 @@ import { render } from "../domain/template.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { templateOf } from "../testing/orchestrator-jig.ts";
-import { AGENT_STATES, STAGE_OF } from "../domain/state-machine.ts";
+import {
+  AGENT_STATES,
+  REVIEW_STATES,
+  STAGE_OF,
+} from "../domain/state-machine.ts";
 
 interface Schema {
   properties: Record<string, unknown>;
@@ -298,47 +302,32 @@ describe("Feature: what an agent's result tool call means", () => {
         resultFromCall(state, { tool: "submit", args: {} }),
       );
 
-      // Then each is a plain submit, with no findings and no delegations
+      // Then each is a plain submit, carrying no findings
       expect(results).toEqual(
-        states.map(() => ({ type: "submit", findings: [], delegations: [] })),
+        states.map(() => ({ type: "submit", findings: [] })),
       );
     },
   );
 
-  testInTempDirs(
-    "a work review submit carries findings and delegations",
-    () => {
-      // Given a reviewer that found a problem and work for another task
-      const args = {
-        findings: ["the null case is untested"],
-        delegations: ["the same bug lives in fetch.ts"],
-      };
+  testInTempDirs("a review submit carries the findings it was given", () => {
+    // Given the states an agent reviews in
+    const states = REVIEW_STATES;
 
-      // When it submits its review
-      const result = resultFromCall("WORK_REVIEW", { tool: "submit", args });
+    // When each submits a review that found one problem
+    const results = states.map((state) =>
+      resultFromCall(state, {
+        tool: "submit",
+        args: { findings: ["the null case is untested"] },
+      }),
+    );
 
-      // Then both lists come back, one to send the worker back and one to file
-      expect(result).toEqual({
+    // Then every one of them comes back carrying that finding
+    expect(results).toEqual(
+      states.map(() => ({
         type: "submit",
         findings: ["the null case is untested"],
-        delegations: ["the same bug lives in fetch.ts"],
-      });
-    },
-  );
-
-  testInTempDirs("a design or plan review submit carries only findings", () => {
-    // Given a design reviewer that found a problem
-    const args = { findings: ["it names no modules"] };
-
-    // When it submits its review
-    const result = resultFromCall("DESIGN_REVIEW", { tool: "submit", args });
-
-    // Then the findings come back, and there are no delegations to file
-    expect(result).toEqual({
-      type: "submit",
-      findings: ["it names no modules"],
-      delegations: [],
-    });
+      })),
+    );
   });
 
   testInTempDirs("an agent in any state can report itself blocked", () => {
@@ -388,7 +377,7 @@ describe("Feature: what an agent's result tool call means", () => {
         WORK: [],
         DESIGN_REVIEW: ["findings"],
         PLAN_REVIEW: ["findings"],
-        WORK_REVIEW: ["findings", "delegations"],
+        WORK_REVIEW: ["findings"],
       };
 
       // When the extension of each state is loaded and its tools read

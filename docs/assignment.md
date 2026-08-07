@@ -38,32 +38,29 @@ The result is not a file edit.
 - there is one extension per _state_, so the same `submit` name works everywhere while the schema the model sees is the one shape that state accepts
 - six result types, one per role-phase pair, sharing the `blocked` arm
 
-| Tool      | Arguments                                 | Result                                    | States                         |
-| --------- | ----------------------------------------- | ----------------------------------------- | ------------------------------ |
-| `submit`  | none (designer/planner/worker extension)  | `{type: "submit"}`                        | `DESIGN`, `PLAN`, `WORK`       |
-| `submit`  | `findings: string[]` (design/plan review) | `{type: "submit", findings}`              | `DESIGN_REVIEW`, `PLAN_REVIEW` |
-| `submit`  | `findings`, `delegations` (work review)   | `{type: "submit", findings, delegations}` | `WORK_REVIEW`                  |
-| `blocked` | `message: string`                         | `{type: "blocked", message}`              | every state                    |
+| Tool      | Arguments                                | Result                       | States                                        |
+| --------- | ---------------------------------------- | ---------------------------- | --------------------------------------------- |
+| `submit`  | none (designer/planner/worker extension) | `{type: "submit"}`           | `DESIGN`, `PLAN`, `WORK`                      |
+| `submit`  | `findings: string[]` (any review)        | `{type: "submit", findings}` | `DESIGN_REVIEW`, `PLAN_REVIEW`, `WORK_REVIEW` |
+| `blocked` | `message: string`                        | `{type: "blocked", message}` | every state                                   |
 
 - each tool returns `terminate: true`, so the call ends the turn on the spot
 - the result is a tool call, not prose — there is nothing to mis-parse on the way out
 - every argument is required and no others are accepted, so a shape that does not fit the state never reaches the server
 - `pi` validates the call against the tool's schema before the tool runs and hands the failure back to the agent as a tool error, inside the same turn
-- there is no state a schema cannot express, because no two states share a schema
+- a stage that writes and a stage that reviews carry different shapes, and each extension declares only its own
 
 What each field means:
 
 - **`findings`** on a design review — the gaps between the design and the acceptance criteria, plus any way the design is missing or proposes no structure. Each goes to `findings.json`, verbatim, and comes back as the designer's next dispatch prompt; the task goes back to `DESIGN`. An empty list approves the design.
 - **`findings`** on a plan review — the gaps between the plan and the acceptance criteria, plus any way the list is missing or misnumbered. Each goes to `findings.json`, verbatim, and comes back as the planner's next dispatch prompt; the task goes back to `PLAN`. An empty list approves the plan.
 - **`findings`** on a work review — defects in _this_ work. Each goes to `findings.json` and is appended to the task body under `# Review findings`, verbatim, and comes back as the worker's next dispatch prompt. The task goes back to `WORK`. An empty list is the reviewer saying it is satisfied.
-- **`delegations`** — defects outside it. They go to the manager, who decides whether they become tasks. Keeping them out of `findings` is what stops a review from growing the task it is reviewing.
 - **`message`** on a `blocked` result — required, and becomes `held_reason` verbatim.
 
-Both lists are held to the same standard, and it is a standard about **description, not instruction**:
+Findings are held to a standard about **description, not instruction**:
 
 - name the symbol, the file and the input that breaks it, say what goes wrong, and stop
 - a reviewer that writes "use a Map here" has skipped the part only it can supply — what it saw — and substituted the part the worker is better placed to decide
-- a delegation phrased as a fix is worse still: the manager is being asked to approve a solution to a problem it has not been shown
 
 A result tool call that does not fit the state is refused before it runs, by the schema, and the agent is told inside its own turn.
 

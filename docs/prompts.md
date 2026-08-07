@@ -49,7 +49,7 @@ They are not one file with a conditional:
 - a **planner** is told the deliverable is the `## Todos` section, numbered `1.` to `n.` consecutively, each todo carrying everything needed to act on it
 - a **plan reviewer** is told it reviews a plan, not code, against the same three properties
 - a **worker** is told to do every todo and record it by number under `## Implementation Notes`, and to commit as it goes
-- a **work reviewer** is told it did not write the code and was not told why any of it is the way it is; that a finding is one defect in this work named by symbol, file and input; and that a defect outside this work is a delegation
+- a **work reviewer** is told it did not write the code and was not told why any of it is the way it is, and that a finding is one defect in this work named by symbol, file and input
 
 What the result tools are and how they are shaped is left to their schemas, which every session already carries.
 
@@ -59,7 +59,7 @@ The overlap — `../ASSIGNMENT.md` is the task body, write only your own section
 
 - a designer is not told that a planner decomposes its design
 - a plan reviewer is not told that an implementer executes the list
-- a work reviewer is not told that the manager triages its delegations
+- a work reviewer is not told that the manager reads what it accepted
 - the pipeline is the server's business: an agent cannot act on what happens after it settles, so telling it costs context and invites it to write for the next role instead of doing its own job
 
 ## A project can replace any of them
@@ -101,8 +101,8 @@ Making the result a tool call removes the register problem entirely: a model tha
 
 The same reasoning splits `missing-result` per state, the way `blocked` is split, and splits the extensions with it:
 
-- every state calls the same two tools, but not the same shape
-- a worker calls bare `submit`, a plan reviewer `submit` with `findings` and no `delegations`, and a work reviewer `submit` with both
+- every state calls the same two tools, but not always the same shape
+- a worker calls bare `submit`, and every reviewer calls `submit` with `findings`
 - an agent shown another state's shape would be told to send something the state refuses
 - one extension per state, each declaring only its own shape, means there is no call the schema accepts and the state does not
 

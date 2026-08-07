@@ -21,7 +21,6 @@ export interface Step {
   notes?: string;
   submit?: boolean;
   findings?: string[];
-  delegations?: string[];
   blocked?: string;
   raw_final_message?: string;
   tamper?: { from: string; to: string };
@@ -88,17 +87,12 @@ function resultCall(step) {
     return { name: "blocked", args: { message: step.blocked } };
   }
   if (step.submit) {
-    if (state === "DESIGN_REVIEW" || state === "PLAN_REVIEW") {
+    if (
+      state === "DESIGN_REVIEW" ||
+      state === "PLAN_REVIEW" ||
+      state === "WORK_REVIEW"
+    ) {
       return { name: "submit", args: { findings: step.findings ?? [] } };
-    }
-    if (state === "WORK_REVIEW") {
-      return {
-        name: "submit",
-        args: {
-          findings: step.findings ?? [],
-          delegations: step.delegations ?? [],
-        },
-      };
     }
     return { name: "submit", args: {} };
   }

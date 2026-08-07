@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Settlement, decideSettle } from "./settle.ts";
-import type { ClaimState } from "../domain/state-machine.ts";
+import { type ClaimState, isReviewState } from "../domain/state-machine.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 
 function anAgent(state: ClaimState): Settlement {
@@ -17,10 +17,7 @@ function anAgent(state: ClaimState): Settlement {
 }
 
 function submitArgs(state: ClaimState): Record<string, unknown> {
-  if (state === "WORK_REVIEW") {
-    return { findings: [], delegations: [] };
-  }
-  if (state === "DESIGN_REVIEW" || state === "PLAN_REVIEW") {
+  if (isReviewState(state)) {
     return { findings: [] };
   }
   return {};
@@ -74,7 +71,7 @@ describe("Feature: settling an agent that finished its turn", () => {
     settled.calls = [
       {
         tool: "submit",
-        args: { findings: ["the null case is untested"], delegations: [] },
+        args: { findings: ["the null case is untested"] },
       },
     ];
 

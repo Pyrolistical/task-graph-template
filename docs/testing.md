@@ -23,7 +23,7 @@ What it does is declared, not coded. A `Plan` maps task id → claimed state →
 | Field                                               | What the fake agent does                                     |
 | --------------------------------------------------- | ------------------------------------------------------------ |
 | `design` / `todos` / `notes`                        | append that section to `ASSIGNMENT.md`                       |
-| `submit`, `findings`, `delegations`                 | call the state's `submit` result tool with those arguments   |
+| `submit`, `findings`                                | call the state's `submit` result tool with those arguments   |
 | `blocked`                                           | call `blocked` with that message                             |
 | `raw_final_message`                                 | answer in prose and call nothing — the `missing-result` path |
 | `commit` / `write`                                  | commit a file, or write one and leave it dirty               |

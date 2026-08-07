@@ -50,7 +50,7 @@ One tool per judgement, named for the judgement.
 
 **The server states facts, the manager states opinions.**
 
-- an agent's opinion is neither — it sits in `findings` or `delegations` until something with authority reads it
+- an agent's opinion is neither — it sits in `findings` until something with authority reads it
 - the mechanical `feedback`s are the edge the server sits on deliberately: a written finding is copied, never interpreted
 - a failed check does not even get that far — it is a `fail` whose details go to the prompt queue, not to the graph, because nobody has to decide anything about a red build
 - to resolve a held task the manager edits the task directly (the document, or `task_write_body`) and `resume`s

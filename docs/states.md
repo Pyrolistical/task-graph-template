@@ -55,7 +55,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 
 - a fresh agent, a fresh session, the worktree and the acceptance criteria
 - the worker's appended notes are in the assignment it carries forward
-- it calls `submit` with `findings` and `delegations` and settles
+- it calls `submit` with `findings` and settles
 - it cannot pass or close anything: the server reads its tool call and applies it, while it still holds the claim, before the slot is released
 - findings → written to `findings.json` and appended to the task body under `# Review findings`, task drops to `WORK`, and the next worker is dispatched fresh with `WORK-with-findings.md`
 - a second rejection of the same review holds the task into `HELD_WORK` instead: the count of consecutive failures lives in `review-failure-count` under the task's runtime dir, and the second one writes `failed 2nd review with <findings>` into `held_reason`
@@ -143,7 +143,7 @@ Every task is designed, then planned, before it is worked.
 An agent that cannot finish sets `result.type: blocked` with a message.
 
 - the server asks once whether it really is a wall
-  - for a reviewer: a blocker that is work outside this task's scope is a `delegation`
+  - for a reviewer: work outside this task's scope is not a wall, and not a finding either
   - for a worker: a wall it can work around is not a wall
 - if the next settle is blocked again it applies `hold`, which clears the claim and records the message verbatim in `held_reason`
 - a person is the most expensive thing the system can spend, so it is worth one prompt to be sure

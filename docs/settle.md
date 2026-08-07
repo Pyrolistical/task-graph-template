@@ -119,7 +119,7 @@ The reaction matters more than the number:
 ### `blocked` keeps its single attempt
 
 - for the opposite reason: it is not a failure, the agent stated an outcome
-- the second look is there to catch the one confusion the fragment can resolve — a reviewer that meant a delegation, a worker that could route around the wall
+- the second look is there to catch the one confusion the fragment can resolve — a reviewer that hit nothing worse than work outside the task, a worker that could route around the wall
 - if the agent says it again, it means it, and asking a third time is arguing with the answer
 
 ### Why they are named
@@ -182,6 +182,3 @@ when a reviewer settles in WORK_REVIEW:
     the second rejection of the same review skips the bounce and
     holds instead, with the findings as the reason      (→ HELD_WORK)
 ```
-
-- `delegations` are not touched here
-- they are part of the `submit` call, and the manager decides at `MANAGER_REVIEW` what should become a task

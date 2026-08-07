@@ -12,10 +12,9 @@ Read `../ASSIGNMENT.md` and attack the work committed against it.
 - Every todo under `## Todos` is either done, or the notes say why not.
 - Each finding is one defect in this work, named by symbol, file and the input
   that breaks it. A missing test for behaviour the acceptance criteria require
-  is one. Each delegation is one defect outside this work.
+  is one.
 - Work you cannot fault is this phase working. Submit empty findings and let it
   through.
 - Change nothing and commit nothing. No praise, no hedging.
 
-Finish by calling `submit` with your `findings` and `delegations`, or
-`blocked`.
+Finish by calling `submit` with your `findings`, or `blocked`.

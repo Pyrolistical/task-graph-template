@@ -1,4 +1,4 @@
-import type { ClaimState } from "./state-machine.ts";
+import { type ClaimState, isReviewState } from "./state-machine.ts";
 
 export const SUBMIT_TOOL = "submit";
 export const BLOCKED_TOOL = "blocked";
@@ -11,8 +11,7 @@ export interface ResultCall {
 }
 
 export type AgentResult =
-  | { type: "blocked"; message: string }
-  | { type: "submit"; findings: string[]; delegations: string[] };
+  { type: "blocked"; message: string } | { type: "submit"; findings: string[] };
 
 export function resultFromCall(
   state: ClaimState,
@@ -22,21 +21,9 @@ export function resultFromCall(
     return { type: "blocked", message: call.args.message as string };
   }
 
-  if (state === "WORK_REVIEW") {
-    return {
-      type: "submit",
-      findings: call.args.findings as string[],
-      delegations: call.args.delegations as string[],
-    };
+  if (isReviewState(state)) {
+    return { type: "submit", findings: call.args.findings as string[] };
   }
 
-  if (state === "DESIGN_REVIEW" || state === "PLAN_REVIEW") {
-    return {
-      type: "submit",
-      findings: call.args.findings as string[],
-      delegations: [],
-    };
-  }
-
-  return { type: "submit", findings: [], delegations: [] };
+  return { type: "submit", findings: [] };
 }

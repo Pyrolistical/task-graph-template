@@ -719,7 +719,7 @@ describe("Feature: an agent that stops short of finishing", () => {
   );
 
   testInTempDirs(
-    "a reviewer that reconsiders its blocker delegates it instead",
+    "a reviewer that reconsiders its blocker submits instead",
     async () => {
       const fixture = makeFixture();
       const id = readyTask(fixture, "Do a thing");
@@ -734,15 +734,12 @@ describe("Feature: an agent that stops short of finishing", () => {
           ],
           WORK_REVIEW: [
             { blocked: "the retry loop in fetch.ts has the same bug" },
-            {
-              submit: true,
-              delegations: ["the retry loop in fetch.ts has the same bug"],
-            },
+            { submit: true },
           ],
         },
       });
 
-      // Given a reviewer that reports a blocker and then delegates it instead
+      // Given a reviewer that reports a blocker and then submits anyway
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -945,42 +942,6 @@ describe("Feature: a review that comes back unusable", () => {
       expect(assignment).toContain("# The body of this task");
       expect(assignment).not.toContain("# Changed");
       expect(assignment).toContain("did the work");
-
-      server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
-    "a review that delegates work leaves it for the manager to read",
-    async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
-        [id]: {
-          WORK: [
-            {
-              submit: true,
-              notes: "did the work",
-              commit: { path: "a.txt", contents: "a" },
-            },
-          ],
-          WORK_REVIEW: [
-            { submit: true, delegations: ["the same bug lives in fetch.ts"] },
-          ],
-        },
-      });
-
-      // Given a reviewer that accepts the work and delegates other work with it
-      const server = await serverFor(fixture);
-
-      // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-
-      // Then the delegation does not send the work back, and waits on a person
-      expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
 
       server.shutdown();
     },
