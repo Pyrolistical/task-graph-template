@@ -3,9 +3,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "mcp": "orchestrator/main/mcp.ts",
-    "console": "orchestrator/main/console.ts",
-    "monitor": "orchestrator/main/monitor.ts"
+    "mcp": "mcp.ts",
+    "console": "console.ts"
   },
   "scripts": {
     "test": "bun test",

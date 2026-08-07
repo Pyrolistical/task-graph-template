@@ -100,6 +100,8 @@ stateDiagram-v2
     manager --> [*] : submit, abort
 ```
 
+A second rejection of the same review holds the task instead of bouncing it: `DESIGN_REVIEW → HELD_DESIGN`, `PLAN_REVIEW → HELD_PLAN`, `WORK_REVIEW → HELD_WORK`, with the findings in `held_reason`.
+
 The manager is at both ends: it defines the task before anyone can work on it, and it is the only role that can close one.
 
 ### The manager inbox
@@ -119,7 +121,7 @@ git clone https://github.com/Pyrolistical/task-graph-template.git task-graph-tem
 cd task-graph-template
 bun install
 cd ../my-project
-claude mcp add task-graph -- bun ../task-graph-template/orchestrator/main/mcp.ts
+claude mcp add task-graph -- bun ../task-graph-template/mcp.ts
 ```
 
 Restart `claude`. Starting the server seeds `~/task-graph/<key>/` — the key is derived from the repository's path — with the contents of the template's `tasks/`. Fill in the pool it left there:
@@ -172,7 +174,7 @@ Start `claude` in the project root and confirm with `/mcp` that `task-graph` is 
 Once the server is up, a second terminal in your project root can monitor the pool:
 
 ```bash
-bun ../task-graph-template/orchestrator/main/console.ts
+bun ../task-graph-template/console.ts
 ```
 
 ## Design documentation

@@ -232,12 +232,12 @@ export function frame(
     ),
   );
 
-  const queue = queueHeader(view, layout.columns, layout.readOnly);
+  const queue = queueHeader(view, layout.columns);
   const rendered = screen(cells, queue.line, layout);
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
 }
 
-export async function main(repo: string, readOnly: boolean): Promise<void> {
+export async function main(repo: string): Promise<void> {
   const runtime: Runtime = new Runtime(repo);
   if (!fs.existsSync(runtime.agentsView)) {
     throw new Error(`console: no server state at ${runtime.root}`);
@@ -271,7 +271,6 @@ export async function main(repo: string, readOnly: boolean): Promise<void> {
         rows,
         nowMs: Date.now(),
         scroll,
-        readOnly,
       });
     } catch (err) {
       restore();

@@ -248,6 +248,7 @@ export class FakeJournal implements Journal {
 export class FakeInbox implements Inbox {
   private readonly entries = new Map<string, string>();
   private readonly found = new Map<TaskId, string[]>();
+  private readonly failures = new Map<TaskId, number>();
 
   queue(taskId: TaskId, state: string, entry: string): void {
     this.entries.set(`${taskId}/${state}`, entry);
@@ -274,6 +275,18 @@ export class FakeInbox implements Inbox {
 
   clearFindings(taskId: TaskId): void {
     this.found.delete(taskId);
+  }
+
+  reviewFailures(taskId: TaskId): number {
+    return this.failures.get(taskId) ?? 0;
+  }
+
+  setReviewFailures(taskId: TaskId, failures: number): void {
+    this.failures.set(taskId, failures);
+  }
+
+  clearReviewFailures(taskId: TaskId): void {
+    this.failures.delete(taskId);
   }
 }
 

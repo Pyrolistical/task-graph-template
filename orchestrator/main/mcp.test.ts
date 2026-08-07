@@ -43,7 +43,7 @@ describe("Feature: the tool surface the manager works through", () => {
     await client.connect(
       new StdioClientTransport({
         command: "bun",
-        args: [path.join(import.meta.dir, "mcp.ts"), fixture.tasksDir],
+        args: [path.join(import.meta.dir, "../../mcp.ts"), fixture.tasksDir],
         cwd,
         env: {
           ...(process.env as Record<string, string>),

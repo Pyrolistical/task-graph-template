@@ -26,8 +26,11 @@ import { CheckRunner } from "../adapters/check-runner.ts";
 import { clearClaim, takeClaim } from "../adapters/claim.ts";
 import { takeCommand, watchCommands } from "../adapters/command.ts";
 import {
+  clearFailureCount,
   clearFindings,
+  readFailureCount,
   readFindings,
+  writeFailureCount,
   writeFindings,
 } from "../adapters/findings.ts";
 import * as git from "../adapters/git.ts";
@@ -218,6 +221,12 @@ export function wire(options: WiringOptions): Server {
     setFindings: (taskId, findings) =>
       writeFindings(runtime.findings(taskId), findings),
     clearFindings: (taskId) => clearFindings(runtime.findings(taskId)),
+    reviewFailures: (taskId) =>
+      readFailureCount(runtime.reviewFailures(taskId)),
+    setReviewFailures: (taskId, failures) =>
+      writeFailureCount(runtime.reviewFailures(taskId), failures),
+    clearReviewFailures: (taskId) =>
+      clearFailureCount(runtime.reviewFailures(taskId)),
   };
 
   const assignments: Assignments = {

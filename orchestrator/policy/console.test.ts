@@ -747,17 +747,6 @@ describe("Feature: drawing the whole screen", () => {
     });
   });
 
-  test("a read-only screen offers nothing to click at all", () => {
-    // Given two panes drawn for a monitor rather than a console
-    const panes = cells(2);
-
-    // When the screen is drawn read-only
-    const { hits } = screen(panes, [], layoutOf({ readOnly: true }));
-
-    // Then there are no click targets, because a monitor holds no authority
-    expect(hits).toEqual([]);
-  });
-
   test("a pane inside a bash call offers an abort target on its activity row", () => {
     // Given one pane whose agent is inside a bash tool call
     const panes = cells(1);
@@ -812,19 +801,6 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then only the click inside the target sends the command
     expect(clicked).toEqual([abort.command, null]);
-  });
-
-  test("a read-only screen offers no abort target", () => {
-    // Given a pane whose agent is inside a bash tool call
-    const panes = cells(1);
-
-    // When the screen is drawn read-only
-    const { hits } = screen(panes, [], layoutOf({ readOnly: true }));
-
-    // Then there is nothing to abort with, as with every other control
-    expect(hits.some((hit) => hit.command.command === "agent_abort")).toBe(
-      false,
-    );
   });
 
   test("an idle pane offers no abort target", () => {
@@ -886,9 +862,9 @@ describe("Feature: the switches on a pane header", () => {
   test("a switch shows its state by which side the knob sits on", () => {
     // Given a switch that is on, one that is off, and one with a label
     const switches = [
-      toggle(true, "", false),
-      toggle(false, "", false),
-      toggle(true, "scheduler", false),
+      toggle(true, ""),
+      toggle(false, ""),
+      toggle(true, "scheduler"),
     ];
 
     // When each is drawn for a console that can click it
@@ -898,27 +874,12 @@ describe("Feature: the switches on a pane header", () => {
     expect(drawn).toEqual([SWITCH_ON, SWITCH_OFF, `${SWITCH_ON} scheduler`]);
   });
 
-  test("a read-only console draws the switches as words", () => {
-    // Given the same three switches
-    const switches = [
-      toggle(true, "", true),
-      toggle(false, "", true),
-      toggle(false, "scheduler", true),
-    ];
-
-    // When each is drawn for a monitor, which cannot click them
-    const drawn = switches.map(plain);
-
-    // Then each reads as a word, so nothing looks like a control
-    expect(drawn).toEqual(["enabled", "disabled", "scheduler disabled"]);
-  });
-
   test("the pane header leads with the agent's switch", () => {
     // Given a busy pane in a sixty-column terminal
     const pane = paneOf();
 
     // When its header is drawn
-    const lines = header(pane, null, 60, 1000, false);
+    const lines = header(pane, null, 60, 1000);
 
     // Then the switch comes first, then the identity, then how long it has run
     expect(renderLine(lines[0]!)).toBe(
@@ -931,7 +892,7 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf();
 
     // When its header is drawn
-    const line = renderLine(header(pane, null, 30, 1000, false)[0]!);
+    const line = renderLine(header(pane, null, 30, 1000)[0]!);
 
     // Then the identity is what gives way, and the row still fills the pane
     expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
@@ -943,24 +904,11 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
 
     // When its header is drawn
-    const line = renderLine(header(pane, null, 60, 1000, false)[0]!);
+    const line = renderLine(header(pane, null, 60, 1000)[0]!);
 
     // Then the switch says disabled and the slot itself still reads as idle
     expect(line).toBe(
       "\x1b[2m[●─]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1              idle",
-    );
-  });
-
-  test("a read-only pane header spells the switch out instead", () => {
-    // Given a slot whose agent has been turned off
-    const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
-
-    // When its header is drawn read-only
-    const line = plain(header(pane, null, 60, 1000, true)[0]!);
-
-    // Then the switch is a word, and the rest of the header is unchanged
-    expect(line).toBe(
-      "disabled pi anthropic/claude-sonnet-4-5 slot 1          idle",
     );
   });
 });
@@ -971,20 +919,9 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
 
     // When the button is drawn
-    const button = abortButton(pane, false);
+    const button = abortButton(pane);
 
     // Then there is none, because there is no command to kill
-    expect(button).toEqual([]);
-  });
-
-  test("a read-only console offers no button", () => {
-    // Given a slot inside a bash tool call
-    const pane = paneOf();
-
-    // When the button is drawn read-only
-    const button = abortButton(pane, true);
-
-    // Then there is none, because a monitor holds no authority
     expect(button).toEqual([]);
   });
 
@@ -998,9 +935,9 @@ describe("Feature: the abort button on a pane", () => {
 
     // When the button is drawn for each of them
     const drawn = [
-      plain(abortButton(paneOf(), false)),
+      plain(abortButton(paneOf())),
       ...elsewhere.map((activity) =>
-        plain(abortButton(paneOf({ agents: [busyRow({ activity })] }), false)),
+        plain(abortButton(paneOf({ agents: [busyRow({ activity })] }))),
       ),
     ];
 
@@ -1013,7 +950,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf();
 
     // When the header is drawn
-    const line = renderLine(header(pane, null, 60, 1000, false)[2]!);
+    const line = renderLine(header(pane, null, 60, 1000)[2]!);
 
     // Then the activity is at the left of the row and the button at its right
     expect(line).toBe(
@@ -1026,7 +963,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
 
     // When the header is drawn
-    const line = renderLine(header(pane, null, 60, 1000, false)[2]!);
+    const line = renderLine(header(pane, null, 60, 1000)[2]!);
 
     // Then the activity row carries nothing at all
     expect(line).toBe("\x1b[2m\x1b[0m");
@@ -1048,7 +985,7 @@ describe("Feature: the abort button on a pane", () => {
     });
 
     // When the header is drawn for a thirty-column pane
-    const line = renderLine(header(pane, null, 30, 1000, false)[2]!);
+    const line = renderLine(header(pane, null, 30, 1000)[2]!);
 
     // Then the command is clipped, the elapsed time and button both survive
     expect(line).toBe(
@@ -1064,7 +1001,7 @@ describe("Feature: the queue line above the panes", () => {
     const view = viewOf({ scheduling: true, queue: [candidateOf()] });
 
     // When the queue line is drawn
-    const { line } = queueHeader(view, 100, false);
+    const { line } = queueHeader(view, 100);
 
     // Then the switch comes before the first queued task
     const text = plain(line);
@@ -1083,7 +1020,7 @@ describe("Feature: the queue line above the panes", () => {
     });
 
     // When the queue line is drawn
-    const { line } = queueHeader(view, 120, false);
+    const { line } = queueHeader(view, 120);
 
     // Then the tasks read in dispatch order, each with its rank
     const text = plain(line);
@@ -1101,7 +1038,7 @@ describe("Feature: the queue line above the panes", () => {
     const view = viewOf({ queue: [candidateOf({ rank: "WORK_FRESH" })] });
 
     // When the queue line is drawn
-    const { line } = queueHeader(view, 100, false);
+    const { line } = queueHeader(view, 100);
 
     // Then the task is labelled with its state rather than its rank's name
     expect(plain(line)).toContain("000123 WORK");
@@ -1112,7 +1049,7 @@ describe("Feature: the queue line above the panes", () => {
     const view = viewOf();
 
     // When the queue line is drawn
-    const { line } = queueHeader(view, 100, false);
+    const { line } = queueHeader(view, 100);
 
     // Then it reads as nothing queued
     expect(plain(line).trimEnd().endsWith("nothing queued")).toBe(true);
@@ -1125,7 +1062,7 @@ describe("Feature: the queue line above the panes", () => {
     );
 
     // When the queue line is drawn
-    const { line } = queueHeader(viewOf({ queue }), 60, false);
+    const { line } = queueHeader(viewOf({ queue }), 60);
 
     // Then the total survives, the line fits, and the tail of the queue is cut
     expect(spanWidth(line)).toBe(60);
@@ -1138,22 +1075,11 @@ describe("Feature: the queue line above the panes", () => {
     const view = viewOf({ scheduling: true });
 
     // When the queue line is drawn
-    const { hits } = queueHeader(view, 100, false);
+    const { hits } = queueHeader(view, 100);
 
     // Then its switch is a target at the top left that would turn it off
     expect(hits[0]!.command).toEqual({ command: "scheduler", enabled: false });
     expect(hits[0]!.from).toBe(0);
     expect(hits[0]!.row).toBe(0);
-  });
-
-  test("a read-only queue line offers nothing to click", () => {
-    // Given a view drawn for a monitor rather than a console
-    const view = viewOf();
-
-    // When the queue line is drawn read-only
-    const { hits } = queueHeader(view, 100, true);
-
-    // Then it carries no target, because a monitor holds no authority
-    expect(hits).toEqual([]);
   });
 });

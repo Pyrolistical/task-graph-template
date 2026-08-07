@@ -86,7 +86,6 @@ export function layoutOf(overrides: Partial<Layout> = {}): Layout {
     rows: 12,
     nowMs: 1000,
     scroll: { bases: null, offsets: [] },
-    readOnly: false,
     ...overrides,
   };
 }

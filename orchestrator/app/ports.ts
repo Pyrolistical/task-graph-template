@@ -118,6 +118,9 @@ export interface Inbox {
   findings(taskId: TaskId): string[];
   setFindings(taskId: TaskId, findings: string[]): void;
   clearFindings(taskId: TaskId): void;
+  reviewFailures(taskId: TaskId): number;
+  setReviewFailures(taskId: TaskId, failures: number): void;
+  clearReviewFailures(taskId: TaskId): void;
 }
 
 export interface Assignments {
@@ -186,6 +189,7 @@ export interface Paths {
   assignment(id: TaskId): string;
   history(id: TaskId): string;
   findings(id: TaskId): string;
+  reviewFailures(id: TaskId): string;
   sessionDir(id: TaskId, role: Role): string;
   rpcLog(id: TaskId): string;
   checkLog(id: TaskId, index: number): string;

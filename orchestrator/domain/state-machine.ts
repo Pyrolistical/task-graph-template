@@ -139,9 +139,13 @@ type AnyStage = (typeof STAGES)[number];
 
 export type AgentStage = Extract<AnyStage, { role: Role }>;
 
+export type ReviewStage = Extract<AnyStage, { role: "reviewer" }>;
+
 export type StageState = AnyStage["state"];
 
 export type ClaimState = AgentStage["state"];
+
+export type ReviewState = ReviewStage["state"];
 
 export type AdvancingState = Exclude<StageState, "MANAGER_REVIEW">;
 
@@ -152,6 +156,12 @@ export const AGENT_STAGES = STAGES.filter(
 export const AGENT_STATES = AGENT_STAGES.map(
   (stage) => stage.state,
 ) as ClaimState[];
+
+export const REVIEW_STATES = STAGES.filter(
+  (stage) => stage.role === "reviewer",
+).map((stage) => stage.state) as ReviewState[];
+
+export const REVIEW_FAILURE_LIMIT = 2;
 
 export const STAGE_OF = Object.fromEntries(
   STAGES.map((stage) => [stage.state, stage]),
@@ -192,6 +202,10 @@ export function isStage(state: TaskState): state is StageState {
 
 export function isAgentState(state: TaskState): state is ClaimState {
   return (AGENT_STATES as readonly string[]).includes(state);
+}
+
+export function isReviewState(state: TaskState): state is ReviewState {
+  return (REVIEW_STATES as readonly string[]).includes(state);
 }
 
 export const TRANSITION_NAMES = [

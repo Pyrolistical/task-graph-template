@@ -100,6 +100,7 @@ The runtime toggle is not written back to `agents.json`:
 
 - nothing here bounds retries, and nothing needs to
 - a task that keeps bouncing shows up as repeated `fail` and `feedback` lines against the same `task_id` in the transition log, and the manager is the thing watching
+- a review rejected twice holds instead of bouncing — `failed 2nd review with <findings>` in `held_reason` — so a bounce that never resolves becomes a hold
 
 ## Aborting one tool call
 

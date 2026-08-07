@@ -23,6 +23,8 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
       ASSIGNMENT.1.md     # every superseded assignment, in order
       ASSIGNMENT.2.md
     findings.json         # the latest review's findings, until the stage resubmits
+    review-failure-count  # consecutive rejections by the review the task is in;
+                          # the second one holds it, cleared when a review passes
     queue/
       WORK.md             # failing checks waiting for the next WORK dispatch
     worktree/             # clone of the repo, branch task/000042

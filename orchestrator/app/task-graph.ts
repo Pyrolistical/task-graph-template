@@ -15,11 +15,13 @@ import {
   taskRows,
 } from "../domain/graph.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
-import type {
-  TaskState,
-  TransitionArgs,
-  TransitionName,
-  TransitionResult,
+import {
+  type TaskState,
+  type TransitionArgs,
+  type TransitionName,
+  type TransitionResult,
+  REVIEW_FAILURE_LIMIT,
+  isReviewState,
 } from "../domain/state-machine.ts";
 
 export interface Snapshot {
@@ -115,6 +117,9 @@ export class TaskGraph {
     const tasks = this.list();
     const before = tasks.get(taskId);
     const result = this.tasks.apply(taskId, name, args);
+    if (name === "submit" && isReviewState(result.from)) {
+      this.inbox.clearReviewFailures(taskId);
+    }
     const to = (result.to ?? before?.state ?? "NEW") as TaskState;
 
     if (to === "CLOSED" && before !== undefined) {
@@ -142,6 +147,20 @@ export class TaskGraph {
 
   feedback(taskId: TaskId, findings: string[], by: string): TransitionResult {
     this.inbox.setFindings(taskId, findings);
+    const state = this.tasks.read(taskId)?.state;
+    if (state !== undefined && isReviewState(state)) {
+      const failures = this.inbox.reviewFailures(taskId) + 1;
+      if (failures >= REVIEW_FAILURE_LIMIT) {
+        this.inbox.clearReviewFailures(taskId);
+        return this.transition(
+          taskId,
+          "hold",
+          { reason: `failed 2nd review with ${findings.join(", ")}` },
+          by,
+        );
+      }
+      this.inbox.setReviewFailures(taskId, failures);
+    }
     return this.transition(taskId, "feedback", { findings }, by);
   }
 

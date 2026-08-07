@@ -58,6 +58,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 - it calls `submit` with `findings` and `delegations` and settles
 - it cannot pass or close anything: the server reads its tool call and applies it, while it still holds the claim, before the slot is released
 - findings → written to `findings.json` and appended to the task body under `# Review findings`, task drops to `WORK`, and the next worker is dispatched fresh with `WORK-with-findings.md`
+- a second rejection of the same review holds the task into `HELD_WORK` instead: the count of consecutive failures lives in `review-failure-count` under the task's runtime dir, and the second one writes `failed 2nd review with <findings>` into `held_reason`
 - no findings → up to `MANAGER_REVIEW`
 
 **`MANAGER_REVIEW`** is the manager, seeing only work that survived both a machine and a peer.
@@ -68,6 +69,7 @@ The same split covers the design and the plan:
 - findings go back to the role that wrote it, the same way in every phase: they are written to `findings.json` and replace its dispatch prompt with the `-with-findings` variant
 - no review closes anything, so a typo-level finding on a design, a plan or a piece of work never costs a manager round trip
 - the reviewer never applies its own findings and the server never interprets them
+- the same two-rejection rule holds into `HELD_DESIGN` / `HELD_PLAN`; `MANAGER_REVIEW` bounces are never counted — the manager is the person a hold would escalate to
 - a finding is copied verbatim into the body, which is the only thing that makes the copy safe to do without a judge
 
 ## The design and planning phases
@@ -177,6 +179,7 @@ To resolve a hold:
 - then `resume`, or `abort` to throw the task away
 - there is no todo-adding; the todo list is the planner's to write
 - a task held before it was designed is re-designed; one held before it was planned is re-planned
+- a review-failure hold records the findings in `held_reason`, and `resume` starts a fresh failure count
 
 ### Held is not BLOCKED
 

@@ -3,14 +3,12 @@
 A terminal UI over the [views](runtime-directory.md#the-views), one pane per slot, with the agent's live transcript scrolling in each.
 
 ```bash
-bun orchestrator/main/console.ts [repo]   # interactive
-bun orchestrator/main/monitor.ts [repo]   # read-only
+bun console.ts [repo]
 ```
 
 - `repo` defaults to the current directory, and only names which runtime directory to read
 - it is a **reader**: it holds no state the server needs, opens no rpc channel, and can be started, killed and restarted while agents run
 - everything it draws comes from four JSON files and the session `.jsonl` the server points it at
-- `monitor.ts` is the same program with `readOnly` true — same layout, no switches, no buttons
 
 The console is laid out the same way the server is:
 
@@ -107,7 +105,6 @@ SGR mouse reporting is on, and the console registers click targets as it renders
 - `[abort]` only appears when that agent is inside a `bash` tool call; the server refuses the command otherwise
 - it kills the command, not the turn — the agent sees a failed tool call and carries on, and the slot stays where it is
 - the agent switch names the **agent** (`type-provider-model`) and toggles every slot of it; abort names the **slot** (with its trailing number), because it kills one command in one process
-- `monitor.ts` renders switches as the words `enabled` / `disabled` and registers no targets at all
 
 ## The command channel
 

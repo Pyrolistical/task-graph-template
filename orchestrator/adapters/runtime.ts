@@ -124,6 +124,10 @@ export class Runtime {
     return path.join(this.taskDir(id), "findings.json");
   }
 
+  reviewFailures(id: TaskId): string {
+    return path.join(this.taskDir(id), "review-failure-count");
+  }
+
   worktree(id: TaskId): string {
     return path.join(this.taskDir(id), "worktree");
   }

@@ -12,9 +12,16 @@ import {
   setPlan,
 } from "../testing/fixture.ts";
 import { ISSUES } from "../domain/issues.ts";
-import { readFindings } from "../adapters/findings.ts";
+import { readFailureCount, readFindings } from "../adapters/findings.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
-import { reaches, serverFor, settle, stateOf } from "../testing/server-jig.ts";
+import { bodyOf } from "../testing/graph-jig.ts";
+import {
+  reaches,
+  serverFor,
+  settle,
+  stateOf,
+  until,
+} from "../testing/server-jig.ts";
 
 describe("Feature: what a reviewer sends back to the worker", () => {
   testInTempDirs(
@@ -226,6 +233,264 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       expect(workSessions.length).toBeGreaterThan(0);
       expect(reviewSessions.length).toBeGreaterThan(0);
       expect(reviewSessions).not.toEqual(workSessions);
+
+      server.shutdown();
+    },
+    30000,
+  );
+});
+
+describe("Feature: a review that fails twice", () => {
+  testInTempDirs(
+    "a first review failure bounces the work back and is counted",
+    async () => {
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "Do a thing");
+      setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "round one",
+              commit: { path: "a.txt", contents: "a" },
+            },
+          ],
+          WORK_REVIEW: [{ submit: true, findings: ["finding one"] }],
+        },
+      });
+
+      // Given work a reviewer will send back
+      const server = await serverFor(fixture);
+
+      // When the work is done, checked and reviewed once
+      server.setSchedulerEnabled(true);
+      await until(server, () =>
+        server.transitions.read().some((e) => e.transition === "feedback"),
+      );
+      server.setSchedulerEnabled(false);
+
+      // Then the failure is counted and the work only bounced back
+      expect(readFailureCount(server.runtime.reviewFailures(id))).toBe(1);
+      expect(stateOf(server, id)).toBe("WORK");
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "a second review failure holds the task with the findings as the reason",
+    async () => {
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "Do a thing");
+      setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "round one",
+              commit: { path: "a.txt", contents: "a" },
+            },
+            {
+              submit: true,
+              notes: "round two",
+              commit: { path: "b.txt", contents: "b" },
+            },
+          ],
+          WORK_REVIEW: [
+            { submit: true, findings: ["finding one"] },
+            { submit: true, findings: ["finding two"] },
+          ],
+        },
+      });
+
+      // Given work sent back once by a review
+      const server = await serverFor(fixture);
+
+      // When the review fails a second time
+      server.setSchedulerEnabled(true);
+      await reaches(server, id, "HELD_WORK");
+      server.setSchedulerEnabled(false);
+      await server.drain();
+
+      // Then the task is held with the second round's findings as the reason
+      const task = server.tasks().get(id)!;
+      expect(task.state).toBe("HELD_WORK");
+      expect(task.held_reason).toBe("failed 2nd review with finding two");
+      expect(task.claimed_by).toBeNull();
+
+      // Then only the first round's findings reached the body
+      const body = bodyOf(path.join(fixture.tasksDir, `${id}.md`));
+      expect(body).toContain("- finding one");
+      expect(body).not.toContain("finding two");
+
+      // Then the count file is gone and the findings wait for the resume
+      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
+      expect(readFindings(server.runtime.findings(id))).toEqual([
+        "finding two",
+      ]);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "a review that finally passes clears the count",
+    async () => {
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "Do a thing");
+      setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "round one",
+              commit: { path: "a.txt", contents: "a" },
+            },
+            {
+              submit: true,
+              notes: "round two",
+              commit: { path: "b.txt", contents: "b" },
+            },
+          ],
+          WORK_REVIEW: [
+            { submit: true, findings: ["finding one"] },
+            { submit: true },
+          ],
+        },
+      });
+
+      // Given work sent back once and then accepted
+      const server = await serverFor(fixture);
+
+      // When the task runs to the manager
+      server.setSchedulerEnabled(true);
+      await reaches(server, id, "MANAGER_REVIEW");
+      server.setSchedulerEnabled(false);
+
+      // Then the passing review cleared the count
+      expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
+      expect(
+        server.transitions.read().some((e) => e.transition === "hold"),
+      ).toBe(false);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "manager review bounces are never counted",
+    async () => {
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "Do a thing");
+      setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "round one",
+              commit: { path: "a.txt", contents: "a" },
+            },
+            {
+              submit: true,
+              notes: "round two",
+              commit: { path: "b.txt", contents: "b" },
+            },
+          ],
+          WORK_REVIEW: [{ submit: true }],
+        },
+      });
+
+      // Given work the manager will send back twice
+      const server = await serverFor(fixture);
+      server.setSchedulerEnabled(true);
+      await reaches(server, id, "MANAGER_REVIEW");
+      server.setSchedulerEnabled(false);
+
+      // When the manager sends it back, and again after the redo
+      server.transition(
+        id,
+        "feedback",
+        { findings: ["the manager wants changes"] },
+        "manager",
+      );
+      server.setSchedulerEnabled(true);
+      await reaches(server, id, "MANAGER_REVIEW");
+      server.setSchedulerEnabled(false);
+      server.transition(
+        id,
+        "feedback",
+        { findings: ["the manager wants more changes"] },
+        "manager",
+      );
+
+      // Then it is back in WORK, never held, and no review was ever counted
+      expect(stateOf(server, id)).toBe("WORK");
+      expect(
+        server.transitions.read().some((e) => e.transition === "hold"),
+      ).toBe(false);
+      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "resume after a review-failure hold starts the count fresh",
+    async () => {
+      const fixture = makeFixture();
+      const id = readyTask(fixture, "Do a thing");
+      setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "round one",
+              commit: { path: "a.txt", contents: "a" },
+            },
+            {
+              submit: true,
+              notes: "round two",
+              commit: { path: "b.txt", contents: "b" },
+            },
+            {
+              submit: true,
+              notes: "round three",
+              commit: { path: "c.txt", contents: "c" },
+            },
+          ],
+          WORK_REVIEW: [
+            { submit: true, findings: ["finding one"] },
+            { submit: true, findings: ["finding two"] },
+            { submit: true, findings: ["finding three"] },
+          ],
+        },
+      });
+
+      // Given work held after two review failures
+      const server = await serverFor(fixture);
+      server.setSchedulerEnabled(true);
+      await reaches(server, id, "HELD_WORK");
+      server.setSchedulerEnabled(false);
+
+      // When the manager resumes it and the redo fails once
+      server.transition(id, "resume", {}, "manager");
+      server.setSchedulerEnabled(true);
+      await until(
+        server,
+        () => readFailureCount(server.runtime.reviewFailures(id)) === 1,
+      );
+      server.setSchedulerEnabled(false);
+
+      // Then one failure only bounces it, never holds it again
+      expect(stateOf(server, id)).toBe("WORK");
+      expect(
+        server.transitions.read().filter((e) => e.transition === "hold"),
+      ).toHaveLength(1);
 
       server.shutdown();
     },

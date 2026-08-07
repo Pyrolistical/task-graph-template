@@ -96,20 +96,18 @@ export interface Hit extends Region {
   command: Command;
 }
 
-export function toggle(on: boolean, label: string, readOnly: boolean): Line {
+export function toggle(on: boolean, label: string): Line {
   const suffix = label === "" ? "" : ` ${label}`;
   return [
     {
-      text: readOnly
-        ? `${label === "" ? "" : `${label} `}${on ? "enabled" : "disabled"}`
-        : `${on ? SWITCH_ON : SWITCH_OFF}${suffix}`,
+      text: `${on ? SWITCH_ON : SWITCH_OFF}${suffix}`,
       sgr: on ? GREEN : DIM,
     },
   ];
 }
 
-export function abortButton(pane: Pane, readOnly: boolean): Line {
-  if (readOnly || !abortable(pane.agent.activity)) {
+export function abortButton(pane: Pane): Line {
+  if (!abortable(pane.agent.activity)) {
     return [];
   }
   return [{ text: "[abort]", sgr: RED }];
@@ -118,9 +116,8 @@ export function abortButton(pane: Pane, readOnly: boolean): Line {
 export function queueHeader(
   view: View,
   columns: number,
-  readOnly: boolean,
 ): { line: Line; hits: Hit[] } {
-  const scheduler = toggle(view.scheduling, "scheduler", readOnly);
+  const scheduler = toggle(view.scheduling, "scheduler");
   const divider: Span = { text: " │ ", sgr: DIM };
   const summary =
     view.queue.length === 0 ? "nothing queued" : `${view.queue.length} queued`;
@@ -154,16 +151,14 @@ export function queueHeader(
       ],
       columns,
     ),
-    hits: readOnly
-      ? []
-      : [
-          {
-            row: 0,
-            from: 0,
-            to: spanWidth(scheduler),
-            command: { command: "scheduler", enabled: !view.scheduling },
-          },
-        ],
+    hits: [
+      {
+        row: 0,
+        from: 0,
+        to: spanWidth(scheduler),
+        command: { command: "scheduler", enabled: !view.scheduling },
+      },
+    ],
   };
 }
 
@@ -234,9 +229,8 @@ export function header(
   rate: number | null,
   width: number,
   nowMs: number,
-  readOnly: boolean,
 ): Line[] {
-  const enabled = toggle(pane.agent.enabled, "", readOnly);
+  const enabled = toggle(pane.agent.enabled, "");
   const right = stateLine(pane, nowMs);
   const room = width - spanWidth(enabled) - textWidth(right) - 1;
   const left = clip([{ text: ` ${identity(pane.agent)}` }], room);
@@ -244,7 +238,7 @@ export function header(
     1,
     width - spanWidth(enabled) - spanWidth(left) - textWidth(right),
   );
-  const button = abortButton(pane, readOnly);
+  const button = abortButton(pane);
   const buttonWidth = spanWidth(button);
   const activityRow = (() => {
     if (pane.check !== null) {
@@ -405,7 +399,6 @@ export interface Layout {
   rows: number;
   nowMs: number;
   scroll: Scroll;
-  readOnly: boolean;
 }
 
 export interface Frame {
@@ -420,7 +413,7 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
     throw new Error("console: the agents view is empty");
   }
 
-  const { columns, rows, nowMs, scroll, readOnly } = layout;
+  const { columns, rows, nowMs, scroll } = layout;
   const width = paneWidth(columns, cells.length);
   if (width < MIN_PANE_WIDTH) {
     const needed = MIN_PANE_WIDTH * cells.length + cells.length - 1;
@@ -438,34 +431,32 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
     const base = baseOf(paneLines.length, height, scroll.bases?.[index]);
     bases.push(base);
     unread = unread || topOf(paneLines.length, height) > base;
-    if (!readOnly) {
-      const from = index * (width + 1);
+    const from = index * (width + 1);
+    hits.push({
+      row: QUEUE_LINES,
+      from,
+      to: from + spanWidth(toggle(pane.agent.enabled, "")),
+      command: {
+        command: "agent",
+        agent: pane.agent.agent,
+        enabled: !pane.agent.enabled,
+      },
+    });
+    const button = abortButton(pane);
+    if (button.length > 0) {
+      const buttonWidth = spanWidth(button);
       hits.push({
-        row: QUEUE_LINES,
-        from,
-        to: from + spanWidth(toggle(pane.agent.enabled, "", readOnly)),
+        row: QUEUE_LINES + 2,
+        from: from + width - buttonWidth,
+        to: from + width,
         command: {
-          command: "agent",
-          agent: pane.agent.agent,
-          enabled: !pane.agent.enabled,
+          command: "agent_abort",
+          "agent-name-slot": pane.agent.name,
         },
       });
-      const button = abortButton(pane, readOnly);
-      if (button.length > 0) {
-        const buttonWidth = spanWidth(button);
-        hits.push({
-          row: QUEUE_LINES + 2,
-          from: from + width - buttonWidth,
-          to: from + width,
-          command: {
-            command: "agent_abort",
-            "agent-name-slot": pane.agent.name,
-          },
-        });
-      }
     }
     return [
-      ...header(pane, rate, width, nowMs, readOnly),
+      ...header(pane, rate, width, nowMs),
       [{ text: "─".repeat(width), sgr: DIM }],
       ...body(paneLines, height, base, scroll.offsets[index] ?? 0),
     ];

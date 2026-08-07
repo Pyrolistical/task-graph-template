@@ -4,14 +4,21 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
-import { type TaskId, detectCycles, isValidId } from "../domain/task.ts";
-import { createTask, writeTaskBody } from "../adapters/task-store.ts";
+import {
+  type TaskId,
+  detectCycles,
+  isValidId,
+} from "./orchestrator/domain/task.ts";
+import {
+  createTask,
+  writeTaskBody,
+} from "./orchestrator/adapters/task-store.ts";
 import type {
   TransitionArgs,
   TransitionName,
-} from "../domain/state-machine.ts";
-import { Server } from "../app/server.ts";
-import { wire } from "./compose.ts";
+} from "./orchestrator/domain/state-machine.ts";
+import { Server } from "./orchestrator/app/server.ts";
+import { wire } from "./orchestrator/main/compose.ts";
 
 const TICK_MS = 500;
 

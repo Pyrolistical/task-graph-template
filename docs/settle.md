@@ -179,6 +179,8 @@ when a reviewer settles in WORK_REVIEW:
            under # Review findings, plus a fresh ## Implementation Notes
            heading; the findings are also queued to the worker's
            session                                    (→ WORK)
+    the second rejection of the same review skips the bounce and
+    holds instead, with the findings as the reason      (→ HELD_WORK)
 ```
 
 - `delegations` are not touched here
