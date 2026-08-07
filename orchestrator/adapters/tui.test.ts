@@ -3,7 +3,7 @@ import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import { eventually } from "../testing/wait.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { Sessions, SessionTail, frame, readView } from "./tui.ts";
+import { Sessions, SessionTail, frame, frameOrError, readView } from "./tui.ts";
 import {
   type Command,
   takeCommand,
@@ -348,6 +348,21 @@ describe("Feature: reading the views the server publishes", () => {
 
     // Then it names the view and the array it expected to find in it
     expect(attempt).toThrow(/has no "tasks" array/);
+  });
+
+  testInTempDirs("a console with no views to read draws the failure", () => {
+    // Given a runtime directory no server has ever written to
+    const runtime: Runtime = new Runtime(
+      path.join(tempDir("console-"), "repo"),
+      tempDir("console-"),
+    );
+
+    // When a frame is drawn from it
+    const { lines } = frameOrError(runtime, new Sessions(), layoutOf());
+
+    // Then the screen says the console cannot draw, and why
+    expect(lines.join("\n")).toContain("the console cannot draw");
+    expect(lines.join("\n")).toContain("no server state");
   });
 
   testInTempDirs("a frame joins the views to the sessions they name", () => {

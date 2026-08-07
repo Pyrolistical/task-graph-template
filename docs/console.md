@@ -89,7 +89,8 @@ Two caches keep a 1s redraw cheap:
 
 - input is parsed by `keys()`, which splits a raw chunk into whole escape sequences rather than characters, so one paste or one fast scroll does not desynchronise the parser
 - redraws are coalesced: a tick every 1s, and input schedules at most one frame per 16ms
-- the alternate screen is entered on start and restored on `q`, `SIGINT`, `SIGTERM`, and on any error thrown while drawing — a crash must not leave the terminal in raw mode with the cursor hidden
+- a failure while reading the views is drawn instead of thrown: the message is centred on the screen, so a console pointed at a server that never started says so rather than exiting
+- the alternate screen is entered on start and restored on `q`, `SIGINT`, `SIGTERM`, and on an error thrown while drawing that failure itself — a crash must not leave the terminal in raw mode with the cursor hidden
 
 ## Clicking
 

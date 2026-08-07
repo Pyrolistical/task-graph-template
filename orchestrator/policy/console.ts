@@ -454,6 +454,23 @@ export function emptyPool(
   };
 }
 
+export function errorFrame(message: string, layout: Layout): Frame {
+  const { columns, rows } = layout;
+  return {
+    lines: centred(
+      [
+        "the console cannot draw",
+        ...wrap(message, Math.max(1, columns - 4), Math.max(1, columns - 4)),
+      ],
+      columns,
+      rows,
+    ),
+    bases: [],
+    hits: [],
+    news: null,
+  };
+}
+
 export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
   if (cells.length === 0) {
     throw new Error("console: the agents view is empty");

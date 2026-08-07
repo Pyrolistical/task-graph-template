@@ -52,9 +52,20 @@ One stdio server, calling `task.ts` and `state-machine.ts` in process.
 | `checks`         | `checks.json`                                                  |
 | `tasks`          | `tasks.json`                                                   |
 | `queue`          | `queue.json` — what the scheduler would dispatch next          |
+| `paths`          | where the graph, the pool, the prompts and the logs are        |
+| `error`          | why the server is not working, or `null`                       |
 | `workspace_path` | the path to `/tmp/task-graph-server/<repo>`, for file watchers |
 
-All six are the [views](runtime-directory.md#the-views), served as they sit on disk.
+The first five are the [views](runtime-directory.md#the-views), served as they sit on disk.
+
+## When the server cannot start
+
+A crash at startup is a crash loop: the client restarts the server, it reads the same broken `agents.json`, and it dies again. So it does not die.
+
+- a failure while wiring or starting is caught and kept
+- the process still serves the tool surface: every tool and every other resource comes back as an error carrying that message, rather than the connection dropping
+- `error` is where the manager reads it, and where a failure the server hits later — a tick, or publishing the views the console draws — shows up too
+- if serving that resource is itself what crashes, the process dies as any other program would, with the reason in `server.log`
 
 ## The manager owns what it holds
 

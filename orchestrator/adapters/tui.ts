@@ -19,6 +19,7 @@ import {
   type View,
   PaneLines,
   emptyPool,
+  errorFrame,
   halfPage,
   panes,
   queueHeader,
@@ -247,6 +248,18 @@ export function frame(
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
 }
 
+export function frameOrError(
+  runtime: Runtime,
+  sessions: Sessions,
+  layout: Layout,
+): Frame {
+  try {
+    return frame(runtime, sessions, layout);
+  } catch (err) {
+    return errorFrame((err as Error).message, layout);
+  }
+}
+
 export async function main(repo: string): Promise<void> {
   const runtime: Runtime = new Runtime(repo);
   if (!fs.existsSync(runtime.agentsView)) {
@@ -274,14 +287,10 @@ export async function main(repo: string): Promise<void> {
   const draw = () => {
     const columns = process.stdout.columns ?? 80;
     const rows = process.stdout.rows ?? 24;
+    const layout: Layout = { columns, rows, nowMs: Date.now(), scroll };
     let result: Frame;
     try {
-      result = frame(runtime, sessions, {
-        columns,
-        rows,
-        nowMs: Date.now(),
-        scroll,
-      });
+      result = frameOrError(runtime, sessions, layout);
     } catch (err) {
       restore();
       throw err;

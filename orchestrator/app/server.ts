@@ -37,6 +37,7 @@ export class Server {
   private watcher: { close(): void } | null = null;
   private scheduling = false;
   private dispatching = false;
+  private failure: string | null = null;
 
   constructor(
     readonly config: ServerConfig,
@@ -150,6 +151,15 @@ export class Server {
     return paths;
   }
 
+  get lastError(): string | null {
+    return this.failure;
+  }
+
+  fail(message: string): void {
+    this.failure = message;
+    this.publisher.log(message);
+  }
+
   get schedulerEnabled(): boolean {
     return this.scheduling;
   }
@@ -244,7 +254,7 @@ export class Server {
       return;
     }
     void this.writeViews().catch((err: Error) => {
-      this.publisher.log(`writing the views failed: ${err.message}`);
+      this.fail(`writing the views failed: ${err.message}`);
     });
   }
 

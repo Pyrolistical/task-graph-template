@@ -26,55 +26,55 @@ afterEach(async () => {
   }
 });
 
-describe("Feature: the tool surface the manager works through", () => {
-  async function connect(fixture: Fixture, cwd = fixture.repo) {
-    fs.mkdirSync(fixture.tasksDir, { recursive: true });
-    const agentsPath = path.join(fixture.tasksDir, "agents.json");
-    if (!fs.existsSync(agentsPath)) {
-      fs.writeFileSync(
-        agentsPath,
-        JSON.stringify({
-          agents: [{ type: "pi", provider: "fake", model: "fake", slots: 1 }],
-        }),
-      );
-    }
-    const client = new Client({ name: "test", version: "1.0.0" });
-    openClients.push(client);
-    await client.connect(
-      new StdioClientTransport({
-        command: "bun",
-        args: [path.join(import.meta.dir, "../../mcp.ts"), fixture.tasksDir],
-        cwd,
-        env: {
-          ...(process.env as Record<string, string>),
-          TASK_GRAPH_SERVER_ROOT: fixture.serverRoot,
-        },
+async function connect(fixture: Fixture, cwd = fixture.repo) {
+  fs.mkdirSync(fixture.tasksDir, { recursive: true });
+  const agentsPath = path.join(fixture.tasksDir, "agents.json");
+  if (!fs.existsSync(agentsPath)) {
+    fs.writeFileSync(
+      agentsPath,
+      JSON.stringify({
+        agents: [{ type: "pi", provider: "fake", model: "fake", slots: 1 }],
       }),
     );
-    return client;
   }
+  const client = new Client({ name: "test", version: "1.0.0" });
+  openClients.push(client);
+  await client.connect(
+    new StdioClientTransport({
+      command: "bun",
+      args: [path.join(import.meta.dir, "../../mcp.ts"), fixture.tasksDir],
+      cwd,
+      env: {
+        ...(process.env as Record<string, string>),
+        TASK_GRAPH_SERVER_ROOT: fixture.serverRoot,
+      },
+    }),
+  );
+  return client;
+}
 
-  function textOf(result: unknown): string {
-    return (result as { content: { text: string }[] }).content[0]!.text;
-  }
+function textOf(result: unknown): string {
+  return (result as { content: { text: string }[] }).content[0]!.text;
+}
 
-  async function resourceOf(client: Client, uri: string) {
-    const read = await client.readResource({ uri });
-    return JSON.parse((read.contents as { text: string }[])[0]!.text);
-  }
+async function resourceOf(client: Client, uri: string) {
+  const read = await client.readResource({ uri });
+  return JSON.parse((read.contents as { text: string }[])[0]!.text);
+}
 
-  async function schedulingBecomes(client: Client, wanted: boolean) {
-    let seen: unknown = null;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      seen = (await resourceOf(client, "orchestrator://queue")).scheduling;
-      if (seen === wanted) {
-        break;
-      }
-      await Bun.sleep(250);
+async function schedulingBecomes(client: Client, wanted: boolean) {
+  let seen: unknown = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    seen = (await resourceOf(client, "orchestrator://queue")).scheduling;
+    if (seen === wanted) {
+      break;
     }
-    return seen;
+    await Bun.sleep(250);
   }
+  return seen;
+}
 
+describe("Feature: the tool surface the manager works through", () => {
   testInTempDirs(
     "the manager gets one tool per judgement it can make, plus the views",
     async () => {
@@ -110,6 +110,7 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(resources).toEqual([
         "orchestrator://agents",
         "orchestrator://checks",
+        "orchestrator://error",
         "orchestrator://inbox",
         "orchestrator://paths",
         "orchestrator://queue",
@@ -711,6 +712,24 @@ describe("Feature: the tool surface the manager works through", () => {
     60000,
   );
 
+  testInTempDirs(
+    "the error resource is empty while the server is working",
+    async () => {
+      // Given a server that started cleanly
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+
+      // When the manager reads the error resource
+      const error = await resourceOf(client, "orchestrator://error");
+
+      // Then there is no error on it
+      expect(error.error).toBeNull();
+
+      await client.close();
+    },
+    60000,
+  );
+
   testInTempDirs("agent_abort refuses a slot that is idle", async () => {
     // Given a pool whose slots are all sitting idle
     const fixture = makeFixture();
@@ -750,5 +769,77 @@ describe("Feature: the tool surface the manager works through", () => {
 
       await client.close();
     },
+  );
+});
+
+describe("Feature: a server that could not start", () => {
+  function brokenPool(): Fixture {
+    const fixture = makeFixture();
+    fs.mkdirSync(fixture.tasksDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(fixture.tasksDir, "agents.json"),
+      '{ "agents": [{ "type": "pi" }] }',
+    );
+    return fixture;
+  }
+
+  testInTempDirs(
+    "the error resource says why the server did not start",
+    async () => {
+      // Given a project whose pool file the server refuses to load
+      const fixture = brokenPool();
+      const client = await connect(fixture);
+
+      // When the manager reads the error resource
+      const error = await resourceOf(client, "orchestrator://error");
+
+      // Then it says the server failed to start, and what the pool file lacks
+      expect(error.error).toContain("the server failed to start");
+      expect(error.error).toContain("agents[0].provider");
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "a tool fails with that error rather than killing the server",
+    async () => {
+      // Given a project whose pool file the server refuses to load
+      const fixture = brokenPool();
+      const client = await connect(fixture);
+
+      // When the manager creates a task
+      const result = await client.callTool({
+        name: "task_create",
+        arguments: { title: "a task" },
+      });
+
+      // Then the call comes back as an error, and the server is still answering
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("the server failed to start");
+      expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "a view resource fails with that error rather than reading nothing",
+    async () => {
+      // Given a project whose pool file the server refuses to load
+      const fixture = brokenPool();
+      const client = await connect(fixture);
+
+      // When the manager reads the agents view
+      const attempt = client.readResource({ uri: "orchestrator://agents" });
+
+      // Then it is refused with why the server did not start
+      await expect(attempt).rejects.toThrow(/the server failed to start/);
+
+      await client.close();
+    },
+    60000,
   );
 });

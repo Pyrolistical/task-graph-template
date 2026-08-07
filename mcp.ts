@@ -18,9 +18,15 @@ import type {
   TransitionName,
 } from "./orchestrator/domain/state-machine.ts";
 import { Server } from "./orchestrator/app/server.ts";
+import { Runtime } from "./orchestrator/adapters/runtime.ts";
 import { wire } from "./orchestrator/main/compose.ts";
 
 const TICK_MS = 500;
+
+export interface Startup {
+  server: Server | null;
+  error: string | null;
+}
 
 const taskId = z.string().refine(isValidId, {
   error: (issue) => `"${issue.input}" is not a six-digit task ID`,
@@ -34,14 +40,23 @@ function json(value: unknown) {
   return text(JSON.stringify(value, null, 2));
 }
 
-export function build(server: Server): McpServer {
+export function build(startup: Startup): McpServer {
   const mcp = new McpServer(
     { name: "task-graph-orchestrator", version: "1.0.0" },
     { capabilities: { tools: {}, resources: {} } },
   );
 
+  function live(): Server {
+    if (startup.server === null) {
+      throw new Error(
+        startup.error ?? "the server did not start, and said nothing about why",
+      );
+    }
+    return startup.server;
+  }
+
   async function applied(result: unknown) {
-    await server.writeViews();
+    await live().writeViews();
     return json(result);
   }
 
@@ -50,7 +65,7 @@ export function build(server: Server): McpServer {
     transition: TransitionName,
     args: TransitionArgs = {},
   ) {
-    return applied(server.transition(id, transition, args, "manager"));
+    return applied(live().transition(id, transition, args, "manager"));
   }
 
   mcp.registerTool(
@@ -62,11 +77,11 @@ export function build(server: Server): McpServer {
     },
     async ({ title }) => {
       const created = createTask(
-        server.tasksDir,
-        server.orchestratorDir,
+        live().tasksDir,
+        live().orchestratorDir,
         title,
       );
-      server.transitions.append({
+      live().transitions.append({
         task_id: created.id,
         transition: "create",
         from: "NEW",
@@ -85,7 +100,7 @@ export function build(server: Server): McpServer {
       inputSchema: z.object({ id: taskId, body: z.string().min(1) }),
     },
     async ({ id, body }) =>
-      applied({ filePath: writeTaskBody(server.tasksDir, id, body) }),
+      applied({ filePath: writeTaskBody(live().tasksDir, id, body) }),
   );
 
   mcp.registerTool(
@@ -96,10 +111,10 @@ export function build(server: Server): McpServer {
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => {
-      const tasks = server.tasks();
+      const tasks = live().tasks();
       const state = tasks.get(id)?.state;
       if (state === "MANAGER_REVIEW") {
-        return applied(await server.attemptMerge(id));
+        return applied(await live().attemptMerge(id));
       }
       if (detectCycles(tasks).includes(id)) {
         throw new Error(
@@ -121,7 +136,7 @@ export function build(server: Server): McpServer {
       }),
     },
     async ({ id, findings }) =>
-      applied(server.feedback(id, findings, "manager")),
+      applied(live().feedback(id, findings, "manager")),
   );
 
   mcp.registerTool(
@@ -151,14 +166,14 @@ export function build(server: Server): McpServer {
         "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => applied(server.attemptAbort(id)),
+    async ({ id }) => applied(live().attemptAbort(id)),
   );
 
   mcp.registerTool(
     "enable_scheduler",
     { description: "Begin dispatching queued work. Returns immediately." },
     async () => {
-      server.setSchedulerEnabled(true);
+      live().setSchedulerEnabled(true);
       return text("the scheduler is dispatching");
     },
   );
@@ -170,7 +185,7 @@ export function build(server: Server): McpServer {
         "Start nothing new. Running processes are still settled and their slots still released.",
     },
     async () => {
-      server.setSchedulerEnabled(false);
+      live().setSchedulerEnabled(false);
       return text("the scheduler is paused; running work still settles");
     },
   );
@@ -179,10 +194,10 @@ export function build(server: Server): McpServer {
     "reload_prompts",
     {
       description:
-        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
+        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the live(). Returns the absolute path of each file now cached.",
       inputSchema: z.object({}),
     },
-    async () => json(server.reloadPrompts()),
+    async () => json(live().reloadPrompts()),
   );
 
   mcp.registerTool(
@@ -192,7 +207,7 @@ export function build(server: Server): McpServer {
         "Let an agent be dispatched to again. Names an agent, not a slot: type-provider-model, without the trailing slot number.",
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
-    async ({ agent }) => applied(server.setAgentEnabled(agent, true)),
+    async ({ agent }) => applied(live().setAgentEnabled(agent, true)),
   );
 
   mcp.registerTool(
@@ -202,7 +217,7 @@ export function build(server: Server): McpServer {
         "Stop dispatching to every slot of an agent. Names an agent, not a slot: type-provider-model, without the trailing slot number. Slots running right now finish their task first; they read as still running with enabled false, and go DISABLED once released.",
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
-    async ({ agent }) => applied(server.setAgentEnabled(agent, false)),
+    async ({ agent }) => applied(live().setAgentEnabled(agent, false)),
   );
 
   mcp.registerTool(
@@ -212,7 +227,7 @@ export function build(server: Server): McpServer {
         "Abort whatever a slot is doing right now. Names a slot (with the trailing number), only works while the slot is doing something. The aborted turn ends the assignment and releases the slot.",
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
-    async ({ agent }) => applied(server.abortAgent(agent)),
+    async ({ agent }) => applied(live().abortAgent(agent)),
   );
 
   function resource(
@@ -248,31 +263,31 @@ export function build(server: Server): McpServer {
       "HELD_DESIGN/HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
       "NEW: author the task (edit the file: body, checks, dependencies), then task_submit.",
     ].join(" "),
-    () => server.runtime.inboxView,
+    () => live().runtime.inboxView,
   );
 
   view(
     "agents",
     "every agent slot, idle ones included",
-    () => server.runtime.agentsView,
+    () => live().runtime.agentsView,
   );
 
   view(
     "checks",
     "the check processes running right now",
-    () => server.runtime.checksView,
+    () => live().runtime.checksView,
   );
 
   view(
     "tasks",
     "the last 100 tasks to change state",
-    () => server.runtime.tasksView,
+    () => live().runtime.tasksView,
   );
 
   view(
     "queue",
     "the tasks waiting on a slot, in the order the scheduler will dispatch them",
-    () => server.runtime.queueView,
+    () => live().runtime.queueView,
   );
 
   resource(
@@ -283,26 +298,39 @@ export function build(server: Server): McpServer {
     () =>
       JSON.stringify(
         {
-          repo: server.repo,
-          tasks_dir: server.tasksDir,
-          agents_file: server.agentsPath,
-          overrides_prompts_dir: path.join(server.overridesDir, "prompts"),
+          repo: live().repo,
+          tasks_dir: live().tasksDir,
+          agents_file: live().agentsPath,
+          overrides_prompts_dir: path.join(live().overridesDir, "prompts"),
           orchestrator_prompts_dir: path.join(
-            server.orchestratorDir,
+            live().orchestratorDir,
             "prompts",
           ),
-          runtime_root: server.runtime.root,
-          server_log: server.runtime.serverLog,
-          transition_log: server.runtime.transitionLog,
-          console_command: server.runtime.consoleCommand,
+          runtime_root: live().runtime.root,
+          server_log: live().runtime.serverLog,
+          transition_log: live().runtime.transitionLog,
+          console_command: live().runtime.consoleCommand,
           views: {
-            agents: server.runtime.agentsView,
-            checks: server.runtime.checksView,
-            tasks: server.runtime.tasksView,
-            inbox: server.runtime.inboxView,
-            queue: server.runtime.queueView,
+            agents: live().runtime.agentsView,
+            checks: live().runtime.checksView,
+            tasks: live().runtime.tasksView,
+            inbox: live().runtime.inboxView,
+            queue: live().runtime.queueView,
           },
         },
+        null,
+        2,
+      ),
+  );
+
+  resource(
+    "error",
+    "orchestrator://error",
+    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Null when there is none. Every other tool and resource fails with this message while it is set.",
+    "application/json",
+    () =>
+      JSON.stringify(
+        { error: startup.error ?? startup.server?.lastError ?? null },
         null,
         2,
       ),
@@ -313,24 +341,52 @@ export function build(server: Server): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => server.runtime.root,
+    () => live().runtime.root,
   );
 
   return mcp;
 }
 
-async function main(): Promise<void> {
+async function start(): Promise<Startup> {
   const tasksDir =
     process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]);
-  const server = await wire({
-    repo: process.cwd(),
-    tasksDir,
-    serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
-  }).start();
+  try {
+    const server = await wire({
+      repo: process.cwd(),
+      tasksDir,
+      serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
+    }).start();
+    return { server, error: null };
+  } catch (err) {
+    return {
+      server: null,
+      error: `the server failed to start: ${(err as Error).message}`,
+    };
+  }
+}
 
+async function main(): Promise<void> {
+  const startup = await start();
+  const runtime: Runtime = new Runtime(
+    process.cwd(),
+    process.env.TASK_GRAPH_SERVER_ROOT,
+  );
+  const log = (line: string) => {
+    runtime.log(line);
+  };
+
+  if (startup.server === null) {
+    log(startup.error ?? "the server failed to start");
+    serveStdio(() => build(startup), {
+      onerror: (err) => log(`mcp failed: ${err.message}`),
+    });
+    return;
+  }
+
+  const server = startup.server;
   const ticker = setInterval(() => {
     void server.tick().catch((err: Error) => {
-      server.runtime.log(`tick failed: ${err.message}`);
+      server.fail(`tick failed: ${err.message}`);
     });
   }, TICK_MS);
 
@@ -342,11 +398,18 @@ async function main(): Promise<void> {
   process.on("SIGINT", detach);
   process.on("SIGTERM", detach);
 
-  serveStdio(() => build(server), {
-    onerror: (err) => server.runtime.log(`mcp failed: ${err.message}`),
+  serveStdio(() => build(startup), {
+    onerror: (err) => log(`mcp failed: ${err.message}`),
   });
 }
 
 if (import.meta.main) {
-  await main();
+  try {
+    await main();
+  } catch (err) {
+    new Runtime(process.cwd(), process.env.TASK_GRAPH_SERVER_ROOT).log(
+      `the server crashed: ${(err as Error).message}`,
+    );
+    throw err;
+  }
 }

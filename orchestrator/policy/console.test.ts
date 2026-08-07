@@ -23,6 +23,7 @@ import {
   PaneLines,
   QUEUE_LINES,
   emptyPool,
+  errorFrame,
   SWITCH_OFF,
   SWITCH_ON,
   abortButton,
@@ -619,6 +620,32 @@ describe("Feature: drawing the whole screen", () => {
       );
     return many;
   }
+
+  test("a console that cannot draw says why in the middle of the screen", () => {
+    // Given a failure that stopped the frame being drawn at all
+    const message = "no server state at /tmp/task-graph-server/-repo";
+
+    // When the screen is drawn from that failure
+    const { lines } = errorFrame(message, layoutOf());
+
+    // Then the message is centred, under a line saying the console cannot draw
+    expect(lines).toHaveLength(12);
+    expect(bare(lines[5]!).trim()).toBe("the console cannot draw");
+    expect(bare(lines[6]!).trim()).toBe(message);
+  });
+
+  test("a console that cannot draw offers nothing to click on", () => {
+    // Given a failure that stopped the frame being drawn at all
+    const message = "no server state at /tmp/task-graph-server/-repo";
+
+    // When the screen is drawn from that failure
+    const frame = errorFrame(message, layoutOf());
+
+    // Then there is no switch and nothing to scroll, because there is no pane
+    expect(frame.hits).toEqual([]);
+    expect(frame.bases).toEqual([]);
+    expect(frame.news).toBeNull();
+  });
 
   test("a pool with no agents says which file to add one to", () => {
     // Given a console whose server has no agent slots to draw
