@@ -24,6 +24,11 @@ import {
   isReviewState,
 } from "../domain/state-machine.ts";
 
+function reviewFailureReason(state: TaskState, findings: string[]): string {
+  const bullets = findings.map((finding) => `- ${finding}`).join("\n");
+  return `failed ${REVIEW_FAILURE_LIMIT} rounds of ${state} with:\n${bullets}`;
+}
+
 export interface Snapshot {
   tasks: Map<TaskId, TaskMeta>;
   blocking: Map<TaskId, number>;
@@ -155,7 +160,7 @@ export class TaskGraph {
         return this.transition(
           taskId,
           "hold",
-          { reason: `failed 2nd review with ${findings.join(", ")}` },
+          { reason: reviewFailureReason(state, findings) },
           by,
         );
       }

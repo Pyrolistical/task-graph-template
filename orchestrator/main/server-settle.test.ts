@@ -316,7 +316,9 @@ describe("Feature: a review that fails twice", () => {
       // Then the task is held with the second round's findings as the reason
       const task = server.tasks().get(id)!;
       expect(task.state).toBe("HELD_WORK");
-      expect(task.held_reason).toBe("failed 2nd review with finding two");
+      expect(task.held_reason).toBe(
+        "failed 2 rounds of WORK_REVIEW with:\n- finding two",
+      );
       expect(task.claimed_by).toBeNull();
 
       // Then only the first round's findings reached the body

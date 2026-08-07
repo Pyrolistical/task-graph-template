@@ -204,6 +204,22 @@ describe("Feature: reading and writing a task's fields", () => {
     expect(read).toEqual(titles);
   });
 
+  testInTempDirs("a hold reason spanning many lines survives", () => {
+    // Given the reason a review failure writes, one bulleted line per finding
+    const held_reason = "failed 2 rounds of DESIGN_REVIEW with:\n- one\n- two";
+
+    // When it is written into a document and read back
+    const document = rebuildDocument(baseMeta({ held_reason }), "\n");
+
+    // Then the newlines stay inside the one quoted field, and come back whole
+    expect(document).toContain(
+      'held_reason: "failed 2 rounds of DESIGN_REVIEW with:\\n- one\\n- two"',
+    );
+    expect(parseTaskMeta(parseDocument(document).raw).held_reason).toBe(
+      held_reason,
+    );
+  });
+
   testInTempDirs(
     "a field that is missing and one that is unknown both report",
     () => {
