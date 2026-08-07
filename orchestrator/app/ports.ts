@@ -41,7 +41,6 @@ export interface Tasks {
 }
 
 export interface Workspaces {
-  defaultBranch(): string;
   create(branch: string, worktree: string, base: string): void;
   remove(worktree: string): void;
   exists(worktree: string): boolean;
@@ -143,7 +142,6 @@ export interface JournalEntry {
 export interface Journal {
   readonly cursor: number;
   read(): JournalEntry[];
-  since(cursor: number): JournalEntry[];
   append(entry: {
     task_id: TaskId;
     transition: string;

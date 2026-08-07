@@ -165,10 +165,6 @@ export class FakeWorkspaces implements Workspaces {
   present = new Set<string>();
   branches = new Set<string>();
 
-  defaultBranch(): string {
-    return "master";
-  }
-
   create(branch: string, worktree: string): void {
     this.created.push(worktree);
     this.present.add(worktree);
@@ -230,10 +226,6 @@ export class FakeJournal implements Journal {
 
   read(): JournalEntry[] {
     return this.entries;
-  }
-
-  since(cursor: number): JournalEntry[] {
-    return this.entries.slice(cursor);
   }
 
   append(entry: Omit<JournalEntry, "seq" | "at">): void {

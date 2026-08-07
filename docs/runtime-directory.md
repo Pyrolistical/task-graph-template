@@ -240,7 +240,7 @@ It is a server file, not a graph file — ephemeral, rebuilt from nothing on res
 Caps:
 
 - the file keeps the **last 1000 lines**; `seq` keeps counting past them
-- a cursor older than the window reads back fewer entries than it asks for, which is the correct answer — the graph itself is the record, and a manager that has been away that long should read `tasks.json`, not a delta
+- a manager holding a cursor older than the window finds fewer entries than it expected, which is the correct answer — the graph itself is the record, and a manager that has been away that long should read `tasks.json`, not a delta
 - `server.log` is capped the same way, at **100 MB**, trimmed to whole lines from the end
 - both caps exist for the same reason: nothing under `/tmp` is worth losing a machine to, and the tail is the only part anyone reads
 

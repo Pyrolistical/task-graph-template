@@ -349,22 +349,29 @@ describe("Feature: the log of every transition applied", () => {
     },
   );
 
-  testInTempDirs("a reader is given only what it has not seen", () => {
-    // Given a log with three transitions in it
-    const log = new TransitionLog(
-      path.join(tempDir("orchestrator-"), "transitions.jsonl"),
-    );
-    for (const to of ["WORK", "CHECK", "WORK_REVIEW"] as const) {
-      log.append(entry(to));
-    }
+  testInTempDirs(
+    "a reader is given every transition in the order applied",
+    () => {
+      // Given a log with three transitions in it
+      const log = new TransitionLog(
+        path.join(tempDir("orchestrator-"), "transitions.jsonl"),
+      );
+      for (const to of ["WORK", "CHECK", "WORK_REVIEW"] as const) {
+        log.append(entry(to));
+      }
 
-    // When a reader asks for what has happened since its own cursor
-    const since = [log.since(1).map((one) => one.to), log.since(3)];
+      // When the log is read back
+      const entries = log.read();
 
-    // Then it gets the delta, and nothing at all once it has caught up
-    expect(since[0]).toEqual(["CHECK", "WORK_REVIEW"]);
-    expect(since[1]).toEqual([]);
-  });
+      // Then every entry is there, numbered so a reader can find its own place
+      expect(entries.map((one) => one.to)).toEqual([
+        "WORK",
+        "CHECK",
+        "WORK_REVIEW",
+      ]);
+      expect(entries.map((one) => one.seq)).toEqual([1, 2, 3]);
+    },
+  );
 
   testInTempDirs("a log nothing has been written to reads as empty", () => {
     // Given a log file that does not exist yet

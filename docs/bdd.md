@@ -935,11 +935,11 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 - **When** a new server opens the same log and appends to it
 - **Then** it picks up where the last one left off, so no number repeats
 
-#### a reader is given only what it has not seen
+#### a reader is given every transition in the order applied
 
 - **Given** a log with three transitions in it
-- **When** a reader asks for what has happened since its own cursor
-- **Then** it gets the delta, and nothing at all once it has caught up
+- **When** the log is read back
+- **Then** every entry is there, numbered so a reader can find its own place
 
 #### a log nothing has been written to reads as empty
 

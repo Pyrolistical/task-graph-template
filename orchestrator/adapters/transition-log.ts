@@ -57,10 +57,6 @@ export class TransitionLog {
       (line) => JSON.parse(line) as TransitionEntry,
     );
   }
-
-  since(cursor: number): TransitionEntry[] {
-    return this.read().filter((entry) => entry.seq > cursor);
-  }
 }
 
 function readLines(filePath: string): string[] {

@@ -129,7 +129,6 @@ export function wire(options: WiringOptions): Server {
   };
 
   const workspaces: Workspaces = {
-    defaultBranch: () => git.defaultBranch(repo),
     create: (branch, worktree, base) =>
       git.addWorkspace(repo, branch, worktree, base),
     remove: (worktree) => git.removeWorkspace(worktree),
