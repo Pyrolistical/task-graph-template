@@ -37,6 +37,11 @@ export const MIN_PANE_WIDTH = 24;
 export const SWITCH_ON = "[─●]";
 export const SWITCH_OFF = "[●─]";
 export const NEWS = " New messages ↓ ";
+export const HIDE = " hide disabled ";
+export const SHOW = ["  show  ", "disabled", " agents "];
+export const COLLAPSED_WIDTH = 8;
+
+export type Local = { command: "hide_disabled" } | { command: "show_disabled" };
 
 export interface View {
   agentsFile: string;
@@ -65,12 +70,15 @@ export function panes(view: View): Pane[] {
     }
   }
 
-  return view.agents.map((agent) => ({
-    agent,
-    task: agent.task_id === null ? null : (tasks.get(agent.task_id) ?? null),
-    check: agent.task_id === null ? null : (checks.get(agent.task_id) ?? null),
-    sinceMs: agent.started_at === null ? null : Date.parse(agent.started_at),
-  }));
+  return view.agents
+    .map((agent) => ({
+      agent,
+      task: agent.task_id === null ? null : (tasks.get(agent.task_id) ?? null),
+      check:
+        agent.task_id === null ? null : (checks.get(agent.task_id) ?? null),
+      sinceMs: agent.started_at === null ? null : Date.parse(agent.started_at),
+    }))
+    .sort((one, two) => Number(two.agent.enabled) - Number(one.agent.enabled));
 }
 
 export function clock(timestampMs: number): string {
@@ -94,7 +102,7 @@ export interface Region {
 }
 
 export interface Hit extends Region {
-  command: Command;
+  command: Command | Local;
 }
 
 export function toggle(on: boolean, label: string): Line {
@@ -367,6 +375,20 @@ export function body(
   return lines.slice(start, start + height);
 }
 
+export function hideButton(): Line {
+  return [{ text: HIDE, sgr: REVERSE }];
+}
+
+export function hideRegion(from: number, width: number, rows: number): Region {
+  const button = spanWidth(hideButton());
+  const left = from + Math.max(0, Math.floor((width - button) / 2));
+  return {
+    row: QUEUE_LINES + HEADER_LINES + Math.floor(bodyHeight(rows) / 2),
+    from: left,
+    to: left + button,
+  };
+}
+
 export function newsButton(): Line {
   return [{ text: NEWS, sgr: REVERSE }];
 }
@@ -471,15 +493,22 @@ export function errorFrame(message: string, layout: Layout): Frame {
   };
 }
 
-export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
-  if (cells.length === 0) {
+export function screen(
+  cells: Cell[],
+  queue: Line,
+  layout: Layout,
+  hidden = 0,
+): Frame {
+  if (cells.length === 0 && hidden === 0) {
     throw new Error("console: the agents view is empty");
   }
 
   const { columns, rows, nowMs, scroll } = layout;
-  const width = paneWidth(columns, cells.length);
-  if (width < MIN_PANE_WIDTH) {
-    const needed = MIN_PANE_WIDTH * cells.length + cells.length - 1;
+  const strip = hidden === 0 ? 0 : COLLAPSED_WIDTH + 1;
+  const width =
+    cells.length === 0 ? 0 : paneWidth(columns - strip, cells.length);
+  if (cells.length > 0 && width < MIN_PANE_WIDTH) {
+    const needed = MIN_PANE_WIDTH * cells.length + cells.length - 1 + strip;
     throw new Error(
       `console: ${cells.length} panes need ${needed} columns, terminal has ${columns}`,
     );
@@ -505,6 +534,10 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
         enabled: !pane.agent.enabled,
       },
     });
+    if (!pane.agent.enabled) {
+      const at = hideRegion(from, width, rows);
+      hits.push({ ...at, command: { command: "hide_disabled" } });
+    }
     const button = abortButton(pane);
     if (button.length > 0) {
       const buttonWidth = spanWidth(button);
@@ -532,6 +565,25 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
     }
     rule.push({ text: "─".repeat(width), sgr: DIM });
   });
+  if (strip > 0) {
+    if (rendered.length > 0) {
+      rule.push({ text: "┬", sgr: DIM });
+    }
+    rule.push({ text: "─".repeat(COLLAPSED_WIDTH), sgr: DIM });
+  }
+
+  const showAt =
+    QUEUE_LINES + Math.floor((rows - QUEUE_LINES - SHOW.length) / 2);
+  if (strip > 0) {
+    SHOW.forEach((_, index) => {
+      hits.push({
+        row: showAt + index,
+        from: columns - COLLAPSED_WIDTH,
+        to: columns,
+        command: { command: "show_disabled" },
+      });
+    });
+  }
 
   const news = unread ? newsRegion(columns, rows) : null;
   const out: string[] = [
@@ -550,11 +602,32 @@ export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {
       }
       line.push(...pad(lines[row] ?? [], width));
     });
+    if (strip > 0) {
+      if (rendered.length > 0) {
+        line.push({ text: row === HEADER_LINES ? "┤" : "│", sgr: DIM });
+      }
+      const label = SHOW[row + QUEUE_LINES - showAt];
+      line.push(
+        ...pad(
+          label === undefined ? [] : [{ text: label, sgr: REVERSE }],
+          COLLAPSED_WIDTH,
+        ),
+      );
+    }
+    const hides = hits.filter(
+      (hit) =>
+        hit.command.command === "hide_disabled" &&
+        hit.row === row + QUEUE_LINES,
+    );
+    const withHides = hides.reduce(
+      (drawn, at) => overlay(drawn, hideButton(), at),
+      line,
+    );
     out.push(
       renderLine(
         news !== null && row + QUEUE_LINES === news.row
-          ? overlay(line, newsButton(), news)
-          : line,
+          ? overlay(withHides, newsButton(), news)
+          : withHides,
       ),
     );
   }

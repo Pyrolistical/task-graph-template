@@ -1,5 +1,5 @@
 import type { Command } from "../domain/command.ts";
-import type { Hit, Region } from "./console.ts";
+import type { Hit, Local, Region } from "./console.ts";
 
 export function keys(chunk: string): string[] {
   const found: string[] = [];
@@ -50,7 +50,7 @@ export function within(region: Region, event: Mouse): boolean {
   );
 }
 
-export function hitAt(hits: Hit[], event: Mouse): Command | null {
+export function hitAt(hits: Hit[], event: Mouse): Command | Local | null {
   const hit = hits.find((candidate) => within(candidate, event));
   return hit === undefined ? null : hit.command;
 }

@@ -22,8 +22,12 @@ import {
   NEWS,
   PaneLines,
   QUEUE_LINES,
+  COLLAPSED_WIDTH,
+  HIDE,
+  SHOW,
   emptyPool,
   errorFrame,
+  panes,
   SWITCH_OFF,
   SWITCH_ON,
   abortButton,
@@ -101,6 +105,20 @@ describe("Feature: joining a slot to the task it is running", () => {
 
     // Then the running check is what the pane says the agent is doing
     expect(activityLine(pane)).toBe("check 1: bun test");
+  });
+
+  test("a disabled slot's pane is drawn to the right of a running one", () => {
+    // Given a view whose first slot is disabled and whose second is running
+    const view = {
+      agents: [idleRow(SLOTS[0]!, false), busyRow({ ...SLOTS[1]! })],
+    };
+
+    // When the view is joined into one pane per slot
+    const drawn = panes(viewOf(view));
+
+    // Then the running slot comes first, so the disabled ones group at the right
+    expect(drawn.map((pane) => pane.agent.enabled)).toEqual([true, false]);
+    expect(drawn[0]!.agent.name).toBe(SLOTS[1]!.name);
   });
 
   test("an idle slot shows no task, no check and no clock", () => {
@@ -620,6 +638,70 @@ describe("Feature: drawing the whole screen", () => {
       );
     return many;
   }
+
+  function disabledCell(index: number) {
+    return {
+      pane: paneOf({ agents: [idleRow(SLOTS[index]!, false)] }),
+      rate: null,
+      lines: (width: number) => new PaneLines().update([], width),
+    };
+  }
+
+  test("a disabled pane carries a button to hide every disabled agent", () => {
+    // Given one running slot and one whose agent has been turned off
+    const panes = [cells(1)[0]!, disabledCell(1)];
+
+    // When the screen is drawn
+    const { lines, hits } = screen(panes, [], layoutOf());
+
+    // Then the button sits in the middle of the disabled pane, and is a target
+    const hide = hits.filter((hit) => hit.command.command === "hide_disabled");
+    expect(hide).toHaveLength(1);
+    expect(bare(lines[hide[0]!.row]!)).toContain(HIDE.trim());
+    expect(hide[0]!.from).toBeGreaterThan(paneWidth(100, 2));
+  });
+
+  test("a running pane carries no button to hide anything", () => {
+    // Given two slots that are both running
+    const panes = cells(2);
+
+    // When the screen is drawn
+    const { lines, hits } = screen(panes, [], layoutOf());
+
+    // Then nothing offers to hide, because there is nothing disabled to hide
+    expect(
+      hits.filter((hit) => hit.command.command === "hide_disabled"),
+    ).toEqual([]);
+    expect(lines.join("\n")).not.toContain(HIDE.trim());
+  });
+
+  test("hidden agents collapse to one column at the right of the screen", () => {
+    // Given one running slot, and two disabled agents hidden away
+    const panes = cells(1);
+
+    // When the screen is drawn with them hidden
+    const { lines } = screen(panes, [], layoutOf(), 2);
+
+    // Then the column is eight columns wide, and the pane takes the rest
+    const row = bare(lines[QUEUE_LINES]!);
+    expect(row).toHaveLength(100);
+    expect(row.indexOf("│")).toBe(100 - COLLAPSED_WIDTH - 1);
+  });
+
+  test("the collapsed column says how to show the agents again", () => {
+    // Given one running slot, and two disabled agents hidden away
+    const panes = cells(1);
+
+    // When the screen is drawn with them hidden
+    const { lines, hits } = screen(panes, [], layoutOf(), 2);
+
+    // Then the button reads down three lines, each of them a target
+    const show = hits.filter((hit) => hit.command.command === "show_disabled");
+    expect(show).toHaveLength(SHOW.length);
+    expect(
+      show.map((hit) => bare(lines[hit.row]!).slice(hit.from, hit.to)),
+    ).toEqual(SHOW);
+  });
 
   test("a console that cannot draw says why in the middle of the screen", () => {
     // Given a failure that stopped the frame being drawn at all

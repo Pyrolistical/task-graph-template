@@ -220,9 +220,12 @@ export function frame(
   runtime: Runtime,
   sessions: Sessions,
   layout: Layout,
+  collapsed = false,
 ): Frame {
   const view = readView(runtime);
-  const cells = panes(view).map((pane) => {
+  const all = panes(view);
+  const shown = collapsed ? all.filter((pane) => pane.agent.enabled) : all;
+  const cells = shown.map((pane) => {
     const session = pane.agent.session;
     sessions.entries(session);
     return {
@@ -241,10 +244,11 @@ export function frame(
   );
 
   const queue = queueHeader(view, layout.columns);
+  const hidden = all.length - shown.length;
   const rendered =
-    cells.length === 0
+    all.length === 0
       ? emptyPool(queue.line, layout, view.agentsFile)
-      : screen(cells, queue.line, layout);
+      : screen(cells, queue.line, layout, hidden);
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
 }
 
@@ -252,9 +256,10 @@ export function frameOrError(
   runtime: Runtime,
   sessions: Sessions,
   layout: Layout,
+  collapsed = false,
 ): Frame {
   try {
-    return frame(runtime, sessions, layout);
+    return frame(runtime, sessions, layout, collapsed);
   } catch (err) {
     return errorFrame((err as Error).message, layout);
   }
@@ -275,6 +280,7 @@ export async function main(repo: string): Promise<void> {
   let bottoms: number[] = [];
   let news: Region | null = null;
   let scheduled = false;
+  let collapsed = false;
 
   const restore = () => {
     clearInterval(timer);
@@ -290,7 +296,7 @@ export async function main(repo: string): Promise<void> {
     const layout: Layout = { columns, rows, nowMs: Date.now(), scroll };
     let result: Frame;
     try {
-      result = frameOrError(runtime, sessions, layout);
+      result = frameOrError(runtime, sessions, layout, collapsed);
     } catch (err) {
       restore();
       throw err;
@@ -388,6 +394,16 @@ export async function main(repo: string): Promise<void> {
               const command = hitAt(hits, event);
               if (command === null) {
                 continue;
+              }
+              if (command.command === "hide_disabled") {
+                collapsed = true;
+                scroll.bases = null;
+                break;
+              }
+              if (command.command === "show_disabled") {
+                collapsed = false;
+                scroll.bases = null;
+                break;
               }
               writeCommand(runtime, command);
             } else {
