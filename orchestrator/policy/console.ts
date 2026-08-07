@@ -383,7 +383,8 @@ export function hideRegion(from: number, width: number, rows: number): Region {
   const button = spanWidth(hideButton());
   const left = from + Math.max(0, Math.floor((width - button) / 2));
   return {
-    row: QUEUE_LINES + HEADER_LINES + Math.floor(bodyHeight(rows) / 2),
+    row:
+      QUEUE_LINES + HEADER_LINES + 1 + Math.floor((bodyHeight(rows) - 1) / 2),
     from: left,
     to: left + button,
   };
@@ -565,10 +566,11 @@ export function screen(
     }
     rule.push({ text: "─".repeat(width), sgr: DIM });
   });
+  const drawn = cells.length === 0 ? 0 : cells.length * (width + 1) - 1;
+  const slack = columns - strip - drawn;
   if (strip > 0) {
-    if (rendered.length > 0) {
-      rule.push({ text: "┬", sgr: DIM });
-    }
+    rule.push({ text: "─".repeat(slack), sgr: DIM });
+    rule.push({ text: "┬", sgr: DIM });
     rule.push({ text: "─".repeat(COLLAPSED_WIDTH), sgr: DIM });
   }
 
@@ -603,9 +605,8 @@ export function screen(
       line.push(...pad(lines[row] ?? [], width));
     });
     if (strip > 0) {
-      if (rendered.length > 0) {
-        line.push({ text: row === HEADER_LINES ? "┤" : "│", sgr: DIM });
-      }
+      line.push({ text: " ".repeat(slack) });
+      line.push({ text: row === HEADER_LINES ? "┤" : "│", sgr: DIM });
       const label = SHOW[row + QUEUE_LINES - showAt];
       line.push(
         ...pad(

@@ -688,6 +688,22 @@ describe("Feature: drawing the whole screen", () => {
     expect(row.indexOf("│")).toBe(100 - COLLAPSED_WIDTH - 1);
   });
 
+  test("the collapsed column is flush right whatever the panes leave over", () => {
+    // Given three running slots, whose widths do not divide the terminal evenly
+    const panes = cells(3);
+
+    // When the screen is drawn with two agents hidden away
+    const { lines, hits } = screen(panes, [], layoutOf(), 2);
+
+    // Then the column still ends at the last column, and its targets sit on it
+    const show = hits.filter((hit) => hit.command.command === "show_disabled");
+    expect(bare(lines[QUEUE_LINES]!)).toHaveLength(100);
+    expect(bare(lines[1]!).lastIndexOf("┬")).toBe(100 - COLLAPSED_WIDTH - 1);
+    expect(bare(lines[show[0]!.row]!).slice(show[0]!.from, show[0]!.to)).toBe(
+      SHOW[0]!,
+    );
+  });
+
   test("the collapsed column says how to show the agents again", () => {
     // Given one running slot, and two disabled agents hidden away
     const panes = cells(1);
