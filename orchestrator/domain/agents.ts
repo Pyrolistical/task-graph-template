@@ -15,22 +15,20 @@ function poolSchema(defaultWrite: string[]) {
     roles: z.array(z.enum(ALL_ROLES)).default(() => [...ALL_ROLES]),
   });
 
-  return z
-    .strictObject({ agents: z.array(Entry).min(1) })
-    .superRefine((pool, ctx) => {
-      const seen = new Set<string>();
-      pool.agents.forEach((entry, i) => {
-        const triple = `${entry.type}/${entry.provider}/${entry.model}`;
-        if (seen.has(triple)) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["agents", i],
-            message: `repeats type+provider+model "${triple}"`,
-          });
-        }
-        seen.add(triple);
-      });
+  return z.strictObject({ agents: z.array(Entry) }).superRefine((pool, ctx) => {
+    const seen = new Set<string>();
+    pool.agents.forEach((entry, i) => {
+      const triple = `${entry.type}/${entry.provider}/${entry.model}`;
+      if (seen.has(triple)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["agents", i],
+          message: `repeats type+provider+model "${triple}"`,
+        });
+      }
+      seen.add(triple);
     });
+  });
 }
 
 export interface AgentEntry {

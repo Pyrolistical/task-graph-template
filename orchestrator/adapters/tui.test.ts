@@ -279,10 +279,15 @@ describe("Feature: the command channel between console and server", () => {
   );
 });
 
+const AGENTS_FILE = "/tmp/tasks/agents.json";
+
 describe("Feature: reading the views the server publishes", () => {
   function seed(root: string): Runtime {
     const runtime: Runtime = new Runtime(path.join(root, "repo"), root);
-    writeAtomic(runtime.agentsView, snapshot(1, "agents", [busyRow()]));
+    writeAtomic(
+      runtime.agentsView,
+      snapshot(1, "agents", [busyRow()], { agents_file: AGENTS_FILE }),
+    );
     writeAtomic(runtime.tasksView, snapshot(1, "tasks", [taskRowOf()]));
     writeAtomic(runtime.checksView, snapshot(1, "checks", []));
     writeAtomic(
@@ -353,7 +358,9 @@ describe("Feature: reading the views the server publishes", () => {
     write(session, [assistant("hi")]);
     writeAtomic(
       runtime.agentsView,
-      snapshot(1, "agents", [busyRow({ session })]),
+      snapshot(1, "agents", [busyRow({ session })], {
+        agents_file: AGENTS_FILE,
+      }),
     );
     writeAtomic(runtime.tasksView, snapshot(1, "tasks", [taskRowOf()]));
     writeAtomic(runtime.checksView, snapshot(1, "checks", []));

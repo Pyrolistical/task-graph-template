@@ -18,6 +18,7 @@ import {
   type Scroll,
   type View,
   PaneLines,
+  emptyPool,
   halfPage,
   panes,
   queueHeader,
@@ -199,8 +200,14 @@ export function readView(runtime: Runtime): View {
     throw new Error(`${runtime.queueView} has no "scheduling" flag`);
   }
 
+  const agents = readEnvelope(runtime.agentsView);
+  if (typeof agents.agents_file !== "string") {
+    throw new Error(`${runtime.agentsView} has no "agents_file" path`);
+  }
+
   return {
-    agents: readRows<AgentRow>(runtime.agentsView, "agents"),
+    agentsFile: agents.agents_file,
+    agents: rowsOf<AgentRow>(agents, runtime.agentsView, "agents"),
     tasks: readRows<TaskRow>(runtime.tasksView, "tasks"),
     checks: readRows<RunningCheck>(runtime.checksView, "checks"),
     queue: rowsOf<Candidate>(queue, runtime.queueView, "queue"),
@@ -233,7 +240,10 @@ export function frame(
   );
 
   const queue = queueHeader(view, layout.columns);
-  const rendered = screen(cells, queue.line, layout);
+  const rendered =
+    cells.length === 0
+      ? emptyPool(queue.line, layout, view.agentsFile)
+      : screen(cells, queue.line, layout);
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
 }
 

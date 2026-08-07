@@ -245,7 +245,9 @@ export function wire(options: WiringOptions): Server {
     publish: (views) => {
       writeAtomic(
         runtime.agentsView,
-        snapshot(views.seq, "agents", views.agents),
+        snapshot(views.seq, "agents", views.agents, {
+          agents_file: views.agentsFile,
+        }),
       );
       writeAtomic(
         runtime.checksView,

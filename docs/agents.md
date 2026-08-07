@@ -53,6 +53,12 @@ Rejected on load, not at spawn time:
 
 A config that would fail on the tenth dispatch should fail on startup.
 
+A pool with no agents in it is not one of those:
+
+- it loads, so the manager can still author tasks and queue them
+- starting the scheduler is refused, naming the pool file to add an agent to
+- the console draws that same path where the panes would be
+
 ## Which roles an agent may take
 
 - `roles` defaults to all four — `worker`, `reviewer`, `planner`, `designer` — and is the only knob on what a slot may be handed

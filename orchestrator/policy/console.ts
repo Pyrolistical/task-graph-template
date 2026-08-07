@@ -39,6 +39,7 @@ export const SWITCH_OFF = "[●─]";
 export const NEWS = " New messages ↓ ";
 
 export interface View {
+  agentsFile: string;
   agents: AgentRow[];
   tasks: TaskRow[];
   checks: RunningCheck[];
@@ -406,6 +407,51 @@ export interface Frame {
   bases: number[];
   hits: Hit[];
   news: Region | null;
+}
+
+export function centred(
+  text: string[],
+  columns: number,
+  rows: number,
+): string[] {
+  const top = Math.max(0, Math.floor((rows - text.length) / 2));
+  const out: string[] = [];
+  for (let row = 0; row < rows; row++) {
+    const line = text[row - top];
+    if (line === undefined) {
+      out.push(renderLine(pad([], columns)));
+      continue;
+    }
+    const left = Math.max(0, Math.floor((columns - textWidth(line)) / 2));
+    out.push(
+      renderLine(
+        pad([{ text: `${" ".repeat(left)}${line}`, sgr: DIM }], columns),
+      ),
+    );
+  }
+  return out;
+}
+
+export function emptyPool(
+  queue: Line,
+  layout: Layout,
+  agentsFile: string,
+): Frame {
+  const { columns, rows } = layout;
+  return {
+    lines: [
+      renderLine(pad(queue, columns)),
+      renderLine([{ text: "─".repeat(columns), sgr: DIM }]),
+      ...centred(
+        ["the pool has no agents", `add one to ${agentsFile}`],
+        columns,
+        rows - QUEUE_LINES,
+      ),
+    ],
+    bases: [],
+    hits: [],
+    news: null,
+  };
 }
 
 export function screen(cells: Cell[], queue: Line, layout: Layout): Frame {

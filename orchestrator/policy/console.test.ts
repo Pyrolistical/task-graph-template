@@ -22,6 +22,7 @@ import {
   NEWS,
   PaneLines,
   QUEUE_LINES,
+  emptyPool,
   SWITCH_OFF,
   SWITCH_ON,
   abortButton,
@@ -618,6 +619,37 @@ describe("Feature: drawing the whole screen", () => {
       );
     return many;
   }
+
+  test("a pool with no agents says which file to add one to", () => {
+    // Given a console whose server has no agent slots to draw
+    const agentsFile = "/home/model/task-graph/project/agents.json";
+
+    // When the screen is drawn
+    const { lines } = emptyPool(
+      [{ text: "the queue" }],
+      layoutOf(),
+      agentsFile,
+    );
+
+    // Then the queue stays on top and the file to edit is centred below it
+    expect(lines).toHaveLength(12);
+    expect(lines[0]).toContain("the queue");
+    expect(bare(lines[6]!)).toContain("the pool has no agents");
+    expect(bare(lines[7]!)).toContain(`add one to ${agentsFile}`);
+  });
+
+  test("a pool with no agents offers no pane to click on", () => {
+    // Given a console whose server has no agent slots to draw
+    const agentsFile = "/home/model/task-graph/project/agents.json";
+
+    // When the screen is drawn
+    const frame = emptyPool([{ text: "the queue" }], layoutOf(), agentsFile);
+
+    // Then there is no switch and nothing to scroll, because there is no pane
+    expect(frame.hits).toEqual([]);
+    expect(frame.bases).toEqual([]);
+    expect(frame.news).toBeNull();
+  });
 
   test("the screen is exactly one line per row of the terminal", () => {
     // Given two panes on a terminal twelve rows tall

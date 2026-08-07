@@ -58,6 +58,7 @@ export function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
 
 export function viewOf(overrides: Partial<View> = {}): View {
   return {
+    agentsFile: "/tmp/tasks/agents.json",
     agents: [busyRow()],
     tasks: [taskRowOf()],
     checks: [],

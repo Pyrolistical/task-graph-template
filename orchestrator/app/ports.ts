@@ -153,6 +153,7 @@ export interface Journal {
 
 export interface Views {
   seq: number;
+  agentsFile: string;
   agents: AgentRow[];
   checks: RunningCheck[];
   tasks: TaskRow[];

@@ -38,6 +38,7 @@ tool: bash — bun test │ thinking (12s)        │
 - four header lines per pane: identity and state, task detail, current activity, token rate and context — `xN` after the context percentage counts how many times this agent has compacted on its current task
 - then the transcript, scrolling
 - panes divide the terminal evenly; below `MIN_PANE_WIDTH` (24 columns each) the console refuses to draw and says how many columns it needs, rather than rendering something unreadable
+- with no agents in the pool there are no panes: the queue line stays and the path of the pool file is centred below it, so a person knows which file to edit
 
 Each pane joins three sources by slot:
 

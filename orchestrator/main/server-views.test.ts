@@ -193,6 +193,81 @@ describe("Feature: the queue view", () => {
   );
 });
 
+describe("Feature: a pool with no agents in it", () => {
+  function emptyPoolFixture(): ReturnType<typeof makeFixture> {
+    const fixture = makeFixture();
+    fs.writeFileSync(fixture.agentsPath, JSON.stringify({ agents: [] }));
+    return fixture;
+  }
+
+  testInTempDirs(
+    "starting the scheduler is refused, naming the file to add an agent to",
+    async () => {
+      // Given a server whose pool file declares no agents
+      const fixture = emptyPoolFixture();
+      const server = await serverFor(fixture);
+
+      // When the scheduler is started
+      const attempt = () => server.setSchedulerEnabled(true);
+
+      // Then it is refused, naming the pool file a person can add an agent to
+      expect(attempt).toThrow(`add one to ${fixture.agentsPath}`);
+      expect(server.schedulerEnabled).toBe(false);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "a task authored with no agents still reaches the queue",
+    async () => {
+      // Given a server whose pool file declares no agents
+      const fixture = emptyPoolFixture();
+      const id = readyTask(fixture, "Do a thing");
+      const server = await serverFor(fixture);
+
+      // When the views are published
+      await server.writeViews();
+
+      // Then the task is queued, waiting for an agent to be added
+      const view = JSON.parse(
+        fs.readFileSync(server.runtime.queueView, "utf-8"),
+      );
+      expect(view.queue.map((one: { task_id: string }) => one.task_id)).toEqual(
+        [id],
+      );
+      expect(
+        JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8")).agents,
+      ).toEqual([]);
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "the agents view names the pool file the console tells a person to edit",
+    async () => {
+      // Given a server whose pool file declares no agents
+      const fixture = emptyPoolFixture();
+      const server = await serverFor(fixture);
+
+      // When the views are published
+      await server.writeViews();
+
+      // Then the agents view carries the path of that file
+      expect(
+        JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8"))
+          .agents_file,
+      ).toBe(fixture.agentsPath);
+
+      server.shutdown();
+    },
+    30000,
+  );
+});
+
 describe("Feature: what the agents view says about a running agent", () => {
   testInTempDirs(
     "tokens, context and the session file reach the view",

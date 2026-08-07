@@ -155,6 +155,11 @@ export class Server {
   }
 
   setSchedulerEnabled(enabled: boolean): void {
+    if (enabled && this.pool.slots.length === 0) {
+      throw new Error(
+        `no agents to dispatch to; add one to ${this.config.agentsPath}`,
+      );
+    }
     this.scheduling = enabled;
     this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
   }
@@ -200,6 +205,7 @@ export class Server {
 
     this.publisher.publish({
       seq: this.journal.cursor,
+      agentsFile: this.config.agentsPath,
       agents: this.pool.rows(),
       checks: this.checker.view,
       tasks: this.graph.rows(snapshot),

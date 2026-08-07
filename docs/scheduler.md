@@ -40,6 +40,7 @@ every tick, while the scheduler is running:
 - ten tasks at 90% are worth less than nine closed and one started
 - there is no rank for held tasks and no rule that skips them: `HELD_DESIGN`, `HELD_PLAN` and `HELD_WORK` are not stages with a role, so the dispatcher never sees one
 - `claimed_by` is the first thing `rankOf` reads: a task an agent holds is not a candidate
+- a pool with no slots at all cannot be started: the switch is refused with the path of the pool file, because a running scheduler with nothing to dispatch to is a queue that never moves
 
 ## Which free slot, when several will do
 

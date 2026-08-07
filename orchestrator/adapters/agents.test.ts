@@ -385,15 +385,15 @@ describe("Feature: loading the pool of agents", () => {
     );
   });
 
-  testInTempDirs("a pool with no agents at all is refused", () => {
+  testInTempDirs("a pool with no agents at all loads as no slots", () => {
     // Given a pool file with an empty list of agents
     const pool = { agents: [] };
 
     // When the pool is loaded
-    const attempt = () => parsePool(pool);
+    const slots = parsePool(pool);
 
-    // Then it is refused, because a server with no slots can do nothing
-    expect(attempt).toThrow(/agents/);
+    // Then it holds no slots, so the manager can still author tasks with it
+    expect(slots).toEqual([]);
   });
 
   testInTempDirs("the pool a project is seeded with ships turned off", () => {
