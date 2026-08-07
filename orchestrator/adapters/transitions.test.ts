@@ -31,8 +31,10 @@ import {
   toAgentReview,
   toChecking,
   toDesign,
+  toDesignReview,
   toManagerReview,
   toPlan,
+  toPlanReview,
   toWorking,
   unclaim,
   writeTask,
@@ -227,46 +229,54 @@ describe("Feature: taking and clearing a claim", () => {
     expect(metaOf(dir, id).claimed_by).toBeNull();
   });
 
-  testInTempDirs.each([
-    ["  ", 12, '"agentName" must be a non-empty string'],
-    ["a", 0, '"pid" must be a positive integer'],
-    ["a", 1.5, '"pid" must be a positive integer'],
-  ])("a claim by %p with the pid %p is refused", (agent, pid, refusal) => {
+  testInTempDirs(
+    "a claim by an agent named only with spaces is refused",
+    () => {
+      // Given a task ready to be claimed
+      const { dir, id } = newTask();
+      run(dir, id, "submit");
+
+      // When a claim is made under a name of two spaces, with the process 12
+      const attempt = () => claim(dir, id, "  ", 12);
+
+      // Then it is refused for the empty name, and the task is left unclaimed in DESIGN
+      expect(attempt).toThrow('"agentName" must be a non-empty string');
+      const meta = metaOf(dir, id);
+      expect(meta.state).toBe("DESIGN");
+      expect(meta.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs("a claim carrying the process zero is refused", () => {
     // Given a task ready to be claimed
     const { dir, id } = newTask();
     run(dir, id, "submit");
 
-    // When the claim is made
-    const attempt = () => claim(dir, id, agent, pid);
+    // When the agent a claims it with the process 0
+    const attempt = () => claim(dir, id, "a", 0);
 
-    // Then it is refused, and the task is left unclaimed where it stood
-    expect(attempt).toThrow(refusal);
+    // Then it is refused for the process, and the task is left unclaimed in DESIGN
+    expect(attempt).toThrow('"pid" must be a positive integer');
+    const meta = metaOf(dir, id);
+    expect(meta.state).toBe("DESIGN");
+    expect(meta.claimed_by).toBeNull();
+  });
+
+  testInTempDirs("a claim carrying a fractional process is refused", () => {
+    // Given a task ready to be claimed
+    const { dir, id } = newTask();
+    run(dir, id, "submit");
+
+    // When the agent a claims it with the process 1.5
+    const attempt = () => claim(dir, id, "a", 1.5);
+
+    // Then it is refused for the process, and the task is left unclaimed in DESIGN
+    expect(attempt).toThrow('"pid" must be a positive integer');
     const meta = metaOf(dir, id);
     expect(meta.state).toBe("DESIGN");
     expect(meta.claimed_by).toBeNull();
   });
 });
-
-function handingIn(state: string): { dir: string; id: string } {
-  const stages: Record<string, () => { dir: string; id: string }> = {
-    WORK: () => toWorking(),
-    PLAN_REVIEW: () => {
-      const task = toPlan();
-      claim(task.dir, task.id, "p");
-      run(task.dir, task.id, "submit");
-      claim(task.dir, task.id, "pr");
-      return task;
-    },
-    DESIGN_REVIEW: () => {
-      const task = toDesign();
-      claim(task.dir, task.id, "d");
-      run(task.dir, task.id, "submit");
-      claim(task.dir, task.id, "dr");
-      return task;
-    },
-  };
-  return stages[state]!();
-}
 
 describe("Feature: what a review writes into the task body", () => {
   testInTempDirs(
@@ -391,19 +401,38 @@ describe("Feature: what a review writes into the task body", () => {
     expect(bodyOf(path.join(dir, `${id}.md`))).toBe(accepted);
   });
 
-  testInTempDirs.each([["WORK"], ["PLAN_REVIEW"], ["DESIGN_REVIEW"]])(
-    "a task in %p cannot submit without a body",
-    (state) => {
-      // Given a task waiting in a stage that hands in a body
-      const { dir, id } = handingIn(state);
+  testInTempDirs("a task in WORK cannot submit without a body", () => {
+    // Given a task an agent is working on, which hands in the work it wrote
+    const { dir, id } = toWorking();
 
-      // When it submits with no body
-      const attempt = () => apply(dir, id, "submit", {});
+    // When it submits with no body
+    const attempt = () => apply(dir, id, "submit", {});
 
-      // Then it is refused for the missing body
-      expect(attempt).toThrow(/body/);
-    },
-  );
+    // Then it is refused for the missing body
+    expect(attempt).toThrow(/body/);
+  });
+
+  testInTempDirs("a task in PLAN_REVIEW cannot submit without a body", () => {
+    // Given a task under plan review, which hands in the plan it accepted
+    const { dir, id } = toPlanReview();
+
+    // When it submits with no body
+    const attempt = () => apply(dir, id, "submit", {});
+
+    // Then it is refused for the missing body
+    expect(attempt).toThrow(/body/);
+  });
+
+  testInTempDirs("a task in DESIGN_REVIEW cannot submit without a body", () => {
+    // Given a task under design review, which hands in the design it accepted
+    const { dir, id } = toDesignReview();
+
+    // When it submits with no body
+    const attempt = () => apply(dir, id, "submit", {});
+
+    // Then it is refused for the missing body
+    expect(attempt).toThrow(/body/);
+  });
 
   testInTempDirs(
     "findings written into the body survive to the closed file",

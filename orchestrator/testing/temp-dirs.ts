@@ -59,21 +59,3 @@ export function testInTempDirs(
 ): void {
   test(name, inTempDirs(fn), timeout);
 }
-
-type Args<Row> = Row extends readonly [...infer Cells] ? Cells : never;
-
-testInTempDirs.each = <const Rows extends readonly (readonly unknown[])[]>(
-  rows: Rows,
-) => {
-  return (
-    name: string,
-    fn: (...args: Args<Rows[number]>) => void | Promise<void>,
-    timeout?: number,
-  ): void => {
-    test.each(rows as unknown as unknown[][])(
-      name,
-      inTempDirs(fn as (...args: unknown[]) => void | Promise<void>),
-      timeout,
-    );
-  };
-};

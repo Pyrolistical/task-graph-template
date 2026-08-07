@@ -32,11 +32,7 @@ function suites(): string[] {
 
 function cases(file: string): Case[] {
   const source = fs.readFileSync(path.join(ROOT, file), "utf-8");
-  const blocks = source
-    .split(
-      /^ {2}(?:test|testInTempDirs)(?:\.each(?:<[^>]*>)?\([\s\S]*?\))?\(\s*/m,
-    )
-    .slice(1);
+  const blocks = source.split(/^ {2}(?:test|testInTempDirs)\(\s*/m).slice(1);
 
   return blocks.map((block) => {
     const name = /^"([^"]*)"/.exec(block)?.[1] ?? "(unnamed)";
@@ -120,6 +116,21 @@ describe("Feature: behaviour tests are written as Given, When, Then", () => {
 
     // Then every one of them is prose describing behaviour
     expect(terse).toEqual([]);
+  });
+
+  test("no test stands for a table of rows", () => {
+    // Given every test file on disk
+    const files = suites();
+
+    // When the suites declaring their tests from a table are collected
+    const tabled = files.filter((file) =>
+      /(?:test|testInTempDirs)\.each/.test(
+        fs.readFileSync(path.join(ROOT, file), "utf-8"),
+      ),
+    );
+
+    // Then none of them does, because a row leaves the Given, When and Then abstract
+    expect(tabled).toEqual([]);
   });
 
   test("every suite names the feature it covers", () => {

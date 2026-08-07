@@ -5,8 +5,7 @@ const ORCHESTRATOR = path.join(import.meta.dir, "..");
 const REPO_ROOT = path.join(ORCHESTRATOR, "..");
 const DEFAULT_OUT = path.join(REPO_ROOT, "docs", "bdd.md");
 
-const TEST_START =
-  /^ {2}(?:test|testInTempDirs)(?:\.each(?:<[^>]*>)?\([\s\S]*?\))?\(\s*"((?:[^"\\]|\\.)*)"/gm;
+const TEST_START = /^ {2}(?:test|testInTempDirs)\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const DESCRIBE_START = /^describe\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const STEP = /^\s*\/\/ (Given|When|Then) (.+)$/gm;
 

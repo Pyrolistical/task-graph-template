@@ -321,11 +321,39 @@ describe("Feature: the issues an agent is sent back for", () => {
 });
 
 describe("Feature: what an agent's result tool call means", () => {
-  testInTempDirs.each([["WORK"], ["PLAN"], ["DESIGN"]] as const)(
-    "a submit from %p, which writes rather than reviews, carries nothing else",
-    (state) => {
-      // Given a state an agent works in rather than reviews in
-      const writing = state;
+  testInTempDirs(
+    "a submit from WORK, which writes rather than reviews, carries nothing else",
+    () => {
+      // Given WORK, the state an agent writes the work in
+      const writing = "WORK";
+
+      // When an agent in that state submits its work
+      const result = resultFromCall(writing, { tool: "submit", args: {} });
+
+      // Then it is a plain submit, carrying no findings
+      expect(result).toEqual({ type: "submit", findings: [] });
+    },
+  );
+
+  testInTempDirs(
+    "a submit from PLAN, which writes rather than reviews, carries nothing else",
+    () => {
+      // Given PLAN, the state an agent writes the plan in
+      const writing = "PLAN";
+
+      // When an agent in that state submits its work
+      const result = resultFromCall(writing, { tool: "submit", args: {} });
+
+      // Then it is a plain submit, carrying no findings
+      expect(result).toEqual({ type: "submit", findings: [] });
+    },
+  );
+
+  testInTempDirs(
+    "a submit from DESIGN, which writes rather than reviews, carries nothing else",
+    () => {
+      // Given DESIGN, the state an agent writes the design in
+      const writing = "DESIGN";
 
       // When an agent in that state submits its work
       const result = resultFromCall(writing, { tool: "submit", args: {} });

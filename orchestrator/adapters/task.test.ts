@@ -39,54 +39,116 @@ function issuesOf(meta: Record<string, unknown>): string[] {
 }
 
 describe("Feature: the id a task is known by", () => {
-  testInTempDirs.each([
-    [1, "000001"],
-    [42, "000042"],
-    [999999, "999999"],
-  ])("the task number %p is written as the id %p", (number, id) => {
-    // Given the number of a task a project holds
-    const counted = number;
+  testInTempDirs(
+    "the first task of a project is written as the id 000001",
+    () => {
+      // Given the number one, the first task a project holds
+      const counted = 1;
+
+      // When the number is written as an id
+      const written = formatId(counted);
+
+      // Then it is padded to six digits, so ids sort as they were created
+      expect(written).toBe("000001");
+    },
+  );
+
+  testInTempDirs("the forty-second task is written as the id 000042", () => {
+    // Given the number forty-two, a task part way into a project
+    const counted = 42;
 
     // When the number is written as an id
     const written = formatId(counted);
 
     // Then it is padded to six digits, so ids sort as they were created
-    expect(written).toBe(id);
+    expect(written).toBe("000042");
   });
 
-  testInTempDirs.each([["000001"], ["999999"]])(
-    "the candidate %p is a task id",
-    (candidate) => {
-      // Given a string of exactly six digits
-      const written = candidate;
+  testInTempDirs(
+    "the last task six digits can hold keeps its own digits",
+    () => {
+      // Given the number nine hundred and ninety-nine thousand, nine hundred and ninety-nine
+      const counted = 999999;
 
-      // When the candidate is checked
-      const isId = isValidId(written);
+      // When the number is written as an id
+      const written = formatId(counted);
 
-      // Then it is a task id
-      expect(isId).toBe(true);
+      // Then it is written as it stands, because it already fills six digits
+      expect(written).toBe("999999");
     },
   );
 
-  testInTempDirs.each([["1"], ["00001"], ["0000001"], ["abc123"]])(
-    "the candidate %p is not a task id",
-    (candidate) => {
-      // Given a string a hand-edited document might carry in place of an id
-      const written = candidate;
+  testInTempDirs("a padded six digit string is a task id", () => {
+    // Given the string 000001, as the first task of a project is written
+    const written = "000001";
 
-      // When the candidate is checked
-      const isId = isValidId(written);
+    // When the candidate is checked
+    const isId = isValidId(written);
 
-      // Then it is refused as an id, because an id is six digits and nothing else
-      expect(isId).toBe(false);
-    },
-  );
+    // Then it is a task id
+    expect(isId).toBe(true);
+  });
 
-  testInTempDirs.each([[42], [null]])(
-    "the value %p YAML produces for an unquoted or missing id is never an id",
-    (candidate) => {
-      // Given a value YAML produces for an id nobody quoted
-      const read = candidate;
+  testInTempDirs("a six digit string with no padding is a task id", () => {
+    // Given the string 999999, as the last task six digits can hold is written
+    const written = "999999";
+
+    // When the candidate is checked
+    const isId = isValidId(written);
+
+    // Then it is a task id
+    expect(isId).toBe(true);
+  });
+
+  testInTempDirs("a single digit is not a task id", () => {
+    // Given the string 1, as a person writing an id by hand might shorten it
+    const written = "1";
+
+    // When the candidate is checked
+    const isId = isValidId(written);
+
+    // Then it is refused as an id, because an id is six digits and nothing else
+    expect(isId).toBe(false);
+  });
+
+  testInTempDirs("a string of five digits is not a task id", () => {
+    // Given the string 00001, one digit short of an id
+    const written = "00001";
+
+    // When the candidate is checked
+    const isId = isValidId(written);
+
+    // Then it is refused as an id, because an id is six digits and nothing else
+    expect(isId).toBe(false);
+  });
+
+  testInTempDirs("a string of seven digits is not a task id", () => {
+    // Given the string 0000001, one digit past an id
+    const written = "0000001";
+
+    // When the candidate is checked
+    const isId = isValidId(written);
+
+    // Then it is refused as an id, because an id is six digits and nothing else
+    expect(isId).toBe(false);
+  });
+
+  testInTempDirs("a string carrying letters is not a task id", () => {
+    // Given the string abc123, as a hand-edited document might carry in place of an id
+    const written = "abc123";
+
+    // When the candidate is checked
+    const isId = isValidId(written);
+
+    // Then it is refused as an id, because an id is six digits and nothing else
+    expect(isId).toBe(false);
+  });
+
+  testInTempDirs(
+    "the number YAML reads from an unquoted id is not an id",
+    () => {
+      // Given the number forty-two, as YAML reads an id nobody quoted
+      const read = 42;
 
       // When the candidate is checked
       const isId = isValidId(read);
@@ -95,6 +157,17 @@ describe("Feature: the id a task is known by", () => {
       expect(isId).toBe(false);
     },
   );
+
+  testInTempDirs("the null YAML reads from a missing id is not an id", () => {
+    // Given the null YAML reads where a document carries no id at all
+    const read = null;
+
+    // When the candidate is checked
+    const isId = isValidId(read);
+
+    // Then it is not an id, because an id is a quoted string
+    expect(isId).toBe(false);
+  });
 });
 
 describe("Feature: splitting a task document", () => {
@@ -208,22 +281,82 @@ describe("Feature: reading and writing a task's fields", () => {
     expect(attempt).toThrow(SchemaError);
   });
 
-  testInTempDirs.each([
-    ["Add: colon"],
-    ["fix #hash"],
-    ['quote " and \\ backslash'],
-    ["- dash"],
-    ["123"],
-    ["null"],
-  ])("the title %p survives being written and read", (title) => {
-    // Given a title carrying a character YAML gives a meaning to
-    const typed = title;
+  testInTempDirs(
+    "a title carrying a colon survives being written and read",
+    () => {
+      // Given the title Add: colon, whose colon YAML reads as a key
+      const typed = "Add: colon";
+
+      // When it is written into a document and read back
+      const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+
+      // Then it comes back as the person typed it
+      expect(read).toBe("Add: colon");
+    },
+  );
+
+  testInTempDirs(
+    "a title carrying a hash survives being written and read",
+    () => {
+      // Given the title fix #hash, whose hash YAML reads as a comment
+      const typed = "fix #hash";
+
+      // When it is written into a document and read back
+      const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+
+      // Then it comes back as the person typed it
+      expect(read).toBe("fix #hash");
+    },
+  );
+
+  testInTempDirs(
+    "a title carrying a quote and a backslash survives being written and read",
+    () => {
+      // Given a title carrying both the quote and the backslash a quoted field escapes
+      const typed = 'quote " and \\ backslash';
+
+      // When it is written into a document and read back
+      const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+
+      // Then it comes back as the person typed it
+      expect(read).toBe('quote " and \\ backslash');
+    },
+  );
+
+  testInTempDirs(
+    "a title opening with a dash survives being written and read",
+    () => {
+      // Given the title - dash, whose leading dash YAML reads as a list entry
+      const typed = "- dash";
+
+      // When it is written into a document and read back
+      const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+
+      // Then it comes back as the person typed it
+      expect(read).toBe("- dash");
+    },
+  );
+
+  testInTempDirs("a title of digits survives being written and read", () => {
+    // Given the title 123, which YAML would otherwise read as a number
+    const typed = "123";
 
     // When it is written into a document and read back
     const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
 
-    // Then it comes back as the person typed it
-    expect(read).toBe(typed);
+    // Then it comes back as the person typed it, still a string
+    expect(read).toBe("123");
+  });
+
+  testInTempDirs("a title reading null survives being written and read", () => {
+    // Given the title null, which YAML would otherwise read as nothing
+    const typed = "null";
+
+    // When it is written into a document and read back
+    const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+
+    // Then it comes back as the person typed it, still a string
+    expect(read).toBe("null");
   });
 
   testInTempDirs("a hold reason spanning many lines survives", () => {
@@ -280,33 +413,55 @@ describe("Feature: reading and writing a task's fields", () => {
     },
   );
 
-  testInTempDirs.each([
-    [{ claimed_by: "a", claimed_pid: null }],
-    [{ claimed_by: null, claimed_pid: 12 }],
-  ])("the half claim %p is refused", (half) => {
-    // Given a claim missing one of its two halves
-    const document = raw(baseMeta(half));
+  testInTempDirs(
+    "a task claimed by an agent with no process is refused",
+    () => {
+      // Given a claim naming the agent a but carrying no process
+      const document = raw(baseMeta({ claimed_by: "a", claimed_pid: null }));
+
+      // When it is parsed as a task
+      const issues = issuesOf(document);
+
+      // Then it is refused, because a claim without a process cannot be reaped
+      expect(issues).not.toEqual([]);
+    },
+  );
+
+  testInTempDirs("a task holding a process but no agent is refused", () => {
+    // Given a claim carrying the process 12 but naming no agent
+    const document = raw(baseMeta({ claimed_by: null, claimed_pid: 12 }));
 
     // When it is parsed as a task
     const issues = issuesOf(document);
 
-    // Then it is refused, because a claim without a process cannot be reaped
+    // Then it is refused, because a process nobody owns cannot be reaped
     expect(issues).not.toEqual([]);
   });
 
-  testInTempDirs.each([
-    ["", "checks[0]: Too small"],
-    [{ command: "bun test" }, "checks[0]: Invalid input: expected string"],
-  ])("the check %p is refused with %p", (check, issue) => {
-    // Given a check that is not a command line
-    const document = { ...baseMeta(), checks: [check] };
+  testInTempDirs("a check with an empty command line is refused", () => {
+    // Given a task whose first check is an empty string
+    const document = { ...baseMeta(), checks: [""] };
 
     // When it is parsed as a task
     const issues = issuesOf(document);
 
-    // Then it is refused, naming the entry that is wrong
-    expect(issues[0]).toContain(issue);
+    // Then it is refused as too small, naming the entry that is wrong
+    expect(issues[0]).toContain("checks[0]: Too small");
   });
+
+  testInTempDirs(
+    "a check written as a mapping rather than a command line is refused",
+    () => {
+      // Given a task whose first check is a mapping of a command
+      const document = { ...baseMeta(), checks: [{ command: "bun test" }] };
+
+      // When it is parsed as a task
+      const issues = issuesOf(document);
+
+      // Then it is refused as not a string, naming the entry that is wrong
+      expect(issues[0]).toContain("checks[0]: Invalid input: expected string");
+    },
+  );
 
   testInTempDirs(
     "an empty list is written as such, and reads back empty",
@@ -438,33 +593,68 @@ describe("Feature: creating a task", () => {
     },
   );
 
-  testInTempDirs.each([
-    ["Fix $& and $` and $' handling"],
-    ['Add: colon, #hash and a "quote"'],
-  ])("the title %p is stored verbatim", (title) => {
-    // Given a title carrying characters a shell and YAML both give meaning to
+  testInTempDirs(
+    "a title carrying replacement patterns is stored verbatim",
+    () => {
+      // Given an empty task directory
+      const dir = makeTasksDir();
+
+      // Given the title Fix $& and $` and $' handling, whose patterns a replacement would expand
+      const title = "Fix $& and $` and $' handling";
+
+      // When a task is created with it
+      const created = createTask(dir, ORCHESTRATOR_DIR, title);
+
+      // Then it comes back exactly as it was typed
+      expect(readTaskFile(created.filePath).meta.title).toBe(
+        "Fix $& and $` and $' handling",
+      );
+    },
+  );
+
+  testInTempDirs("a title carrying YAML punctuation is stored verbatim", () => {
+    // Given an empty task directory
     const dir = makeTasksDir();
+
+    // Given the title Add: colon, #hash and a "quote", whose punctuation YAML gives meaning to
+    const title = 'Add: colon, #hash and a "quote"';
 
     // When a task is created with it
     const created = createTask(dir, ORCHESTRATOR_DIR, title);
 
     // Then it comes back exactly as it was typed
-    expect(readTaskFile(created.filePath).meta.title).toBe(title);
+    expect(readTaskFile(created.filePath).meta.title).toBe(
+      'Add: colon, #hash and a "quote"',
+    );
   });
 
-  testInTempDirs.each([[""], ["   "]])(
-    "a task titled %p is refused",
-    (title) => {
-      // Given a title with nothing in it a person could read
-      const dir = makeTasksDir();
+  testInTempDirs("a task with an empty title is refused", () => {
+    // Given an empty task directory
+    const dir = makeTasksDir();
 
-      // When a task is created with it
-      const attempt = () => createTask(dir, ORCHESTRATOR_DIR, title);
+    // Given a title with no characters in it at all
+    const title = "";
 
-      // Then it is refused, because a task nobody named cannot be worked on
-      expect(attempt).toThrow(/title is required/);
-    },
-  );
+    // When a task is created with it
+    const attempt = () => createTask(dir, ORCHESTRATOR_DIR, title);
+
+    // Then it is refused, because a task nobody named cannot be worked on
+    expect(attempt).toThrow(/title is required/);
+  });
+
+  testInTempDirs("a task titled with only spaces is refused", () => {
+    // Given an empty task directory
+    const dir = makeTasksDir();
+
+    // Given a title of three spaces, with nothing in it a person could read
+    const title = "   ";
+
+    // When a task is created with it
+    const attempt = () => createTask(dir, ORCHESTRATOR_DIR, title);
+
+    // Then it is refused, because a task nobody named cannot be worked on
+    expect(attempt).toThrow(/title is required/);
+  });
 
   testInTempDirs("ids are handed out in order and never repeat", () => {
     // Given an empty task directory

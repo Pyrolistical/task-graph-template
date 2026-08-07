@@ -161,11 +161,16 @@ export function toDesign(): { dir: string; id: string } {
   return { dir, id };
 }
 
-export function designThrough(): { dir: string; id: string } {
+export function toDesignReview(): { dir: string; id: string } {
   const { dir, id } = toDesign();
   claim(dir, id, "designer");
   run(dir, id, "submit");
   claim(dir, id, "design-reviewer");
+  return { dir, id };
+}
+
+export function designThrough(): { dir: string; id: string } {
+  const { dir, id } = toDesignReview();
   run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
   return { dir, id };
 }
@@ -175,11 +180,16 @@ export function toPlan(): { dir: string; id: string } {
   return { dir, id };
 }
 
-export function planThrough(): { dir: string; id: string } {
+export function toPlanReview(): { dir: string; id: string } {
   const { dir, id } = toPlan();
   claim(dir, id, "planner");
   run(dir, id, "submit");
   claim(dir, id, "plan-reviewer");
+  return { dir, id };
+}
+
+export function planThrough(): { dir: string; id: string } {
+  const { dir, id } = toPlanReview();
   run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
   return { dir, id };
 }

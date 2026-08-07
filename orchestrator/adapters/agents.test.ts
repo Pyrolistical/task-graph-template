@@ -95,19 +95,33 @@ describe("Feature: loading the pool of agents", () => {
     },
   );
 
-  testInTempDirs.each([
-    ["pi-anthropic-claude-sonnet-4-5-2", "pi-anthropic-claude-sonnet-4-5"],
-    ["pi-llama.cpp-rocm-rocm-1", "pi-llama.cpp-rocm-rocm"],
-  ])("the slot %p belongs to the agent %p", (name, key) => {
-    // Given a slot name whose model carries dashes and dots of its own
-    const slot = name;
+  testInTempDirs(
+    "a slot of a model whose name carries dashes belongs to that model's agent",
+    () => {
+      // Given the second slot of the model claude-sonnet-4-5, whose name carries dashes of its own
+      const slot = "pi-anthropic-claude-sonnet-4-5-2";
 
-    // When it is reduced to the agent it belongs to
-    const reduced = agentModelKey(slot);
+      // When it is reduced to the agent it belongs to
+      const reduced = agentModelKey(slot);
 
-    // Then only the trailing slot number is dropped
-    expect(reduced).toBe(key);
-  });
+      // Then only the trailing slot number is dropped
+      expect(reduced).toBe("pi-anthropic-claude-sonnet-4-5");
+    },
+  );
+
+  testInTempDirs(
+    "a slot of a provider whose name carries a dot belongs to that provider's agent",
+    () => {
+      // Given the first slot of the provider llama.cpp-rocm, whose name carries a dot
+      const slot = "pi-llama.cpp-rocm-rocm-1";
+
+      // When it is reduced to the agent it belongs to
+      const reduced = agentModelKey(slot);
+
+      // Then only the trailing slot number is dropped
+      expect(reduced).toBe("pi-llama.cpp-rocm-rocm");
+    },
+  );
 
   testInTempDirs("an agent is enabled unless the pool says otherwise", () => {
     // Given a pool with one agent left as the file found it
@@ -185,11 +199,8 @@ describe("Feature: loading the pool of agents", () => {
     expect(attempt).toThrow(/Invalid option/);
   });
 
-  testInTempDirs.each([
-    ["retries", 3],
-    ["thinking", "high"],
-  ])("a pool entry carrying a %p key is refused on load", (key, value) => {
-    // Given a pool entry carrying a setting the server does not read
+  testInTempDirs("a pool entry asking for retries is refused on load", () => {
+    // Given a pool entry asking for 3 retries, a setting the server does not read
     const pool = {
       agents: [
         {
@@ -197,7 +208,7 @@ describe("Feature: loading the pool of agents", () => {
           provider: "anthropic",
           model: "m",
           slots: 1,
-          [key]: value,
+          retries: 3,
         },
       ],
     };
@@ -206,7 +217,28 @@ describe("Feature: loading the pool of agents", () => {
     const attempt = () => parsePool(pool);
 
     // Then it is refused by name, so a setting that would do nothing is never believed
-    expect(attempt).toThrow(`Unrecognized key: "${key}"`);
+    expect(attempt).toThrow('Unrecognized key: "retries"');
+  });
+
+  testInTempDirs("a pool entry asking for thinking is refused on load", () => {
+    // Given a pool entry asking for high thinking, a setting the server does not read
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          slots: 1,
+          thinking: "high",
+        },
+      ],
+    };
+
+    // When the pool is loaded
+    const attempt = () => parsePool(pool);
+
+    // Then it is refused by name, so a setting that would do nothing is never believed
+    expect(attempt).toThrow('Unrecognized key: "thinking"');
   });
 
   testInTempDirs(
@@ -580,19 +612,43 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     expect(mounted).toEqual([]);
   });
 
-  testInTempDirs.each([
-    ["~", os.homedir()],
-    ["~/.cache", path.join(os.homedir(), ".cache")],
-    ["/abs/path", "/abs/path"],
-  ])("the write path %p is expanded to %p", (declared, full) => {
-    // Given a write path a pool entry declared
-    const written = declared;
+  testInTempDirs(
+    "a write path of the home shorthand alone becomes the home directory",
+    () => {
+      // Given a pool entry declaring the write path as the tilde alone
+      const written = "~";
+
+      // When the declared path is expanded
+      const expanded = expandHome(written);
+
+      // Then it becomes the real home directory
+      expect(expanded).toBe(os.homedir());
+    },
+  );
+
+  testInTempDirs(
+    "a write path under the home shorthand keeps what follows it",
+    () => {
+      // Given a pool entry declaring the write path as the cache below the tilde
+      const written = "~/.cache";
+
+      // When the declared path is expanded
+      const expanded = expandHome(written);
+
+      // Then it becomes the cache below the real home directory
+      expect(expanded).toBe(path.join(os.homedir(), ".cache"));
+    },
+  );
+
+  testInTempDirs("a write path written in full is left as it stands", () => {
+    // Given a pool entry declaring the absolute write path of a directory
+    const written = "/abs/path";
 
     // When the declared path is expanded
     const expanded = expandHome(written);
 
-    // Then the shorthand becomes the real home and an absolute path is untouched
-    expect(expanded).toBe(full);
+    // Then it is untouched, because there is no shorthand in it
+    expect(expanded).toBe("/abs/path");
   });
 
   testInTempDirs("a path declared twice is mounted once", () => {

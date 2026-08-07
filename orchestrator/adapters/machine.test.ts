@@ -545,14 +545,30 @@ describe("Feature: parking a task on a person", () => {
     expect(metaOf(dir, id).state).toBe("WORK");
   });
 
-  testInTempDirs.each([["resume"], ["abort"]] as const)(
-    "answering a hold with %p clears the reason",
-    (exit) => {
-      // Given a held task, and the way the manager answers it
+  testInTempDirs(
+    "resuming a held task clears the reason it was held for",
+    () => {
+      // Given a held task, carrying the reason the agent gave for holding it
       const { dir, id } = toHeld();
 
-      // When that exit is taken
-      const result = run(dir, id, exit);
+      // When the manager resumes it
+      const result = run(dir, id, "resume");
+
+      // Then the document it lands on carries no stale reason
+      expect(readTaskFile(documentOf(dir, id, result)).meta.held_reason).toBe(
+        null,
+      );
+    },
+  );
+
+  testInTempDirs(
+    "aborting a held task clears the reason it was held for",
+    () => {
+      // Given a held task, carrying the reason the agent gave for holding it
+      const { dir, id } = toHeld();
+
+      // When the manager aborts it
+      const result = run(dir, id, "abort");
 
       // Then the document it lands on carries no stale reason
       expect(readTaskFile(documentOf(dir, id, result)).meta.held_reason).toBe(

@@ -648,21 +648,36 @@ describe("Feature: turning an agent off and on", () => {
     30000,
   );
 
-  testInTempDirs.each([
-    ["pi-fake-fake-1", 'no agent named "pi-fake-fake-1"'],
-    ["nope", "the pool has pi-fake-fake"],
-  ])(
-    "the name %p, which is not an agent in the pool, is refused",
-    async (name, refusal) => {
-      // Given a server whose pool holds one agent
+  testInTempDirs(
+    "a slot name passed where an agent belongs is refused",
+    async () => {
+      // Given a server whose pool holds the one agent pi-fake-fake
       const fixture = makeFixture();
       const server = await serverFor(fixture);
 
-      // When a name the pool does not hold is passed where an agent belongs
-      const attempt = () => server.setAgentEnabled(name, false);
+      // When the name of that agent's first slot is passed where an agent belongs
+      const attempt = () => server.setAgentEnabled("pi-fake-fake-1", false);
+
+      // Then it is refused as no agent of that name
+      expect(attempt).toThrow('no agent named "pi-fake-fake-1"');
+
+      server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "a name the pool never held is refused with the agents it does hold",
+    async () => {
+      // Given a server whose pool holds the one agent pi-fake-fake
+      const fixture = makeFixture();
+      const server = await serverFor(fixture);
+
+      // When the name nope is passed where an agent belongs
+      const attempt = () => server.setAgentEnabled("nope", false);
 
       // Then it is refused, and the pool it does have is named
-      expect(attempt).toThrow(refusal);
+      expect(attempt).toThrow("the pool has pi-fake-fake");
 
       server.shutdown();
     },

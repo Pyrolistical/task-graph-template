@@ -169,32 +169,66 @@ describe("Feature: where a project's runtime state lives", () => {
 });
 
 describe("Feature: where a project's task graph lives", () => {
-  testInTempDirs.each([
-    ["/home/model/project", "project"],
-    ["/home/model/a/b", "a-b"],
-  ])("the project %p under home is keyed by %p", (project, key) => {
-    // Given the path of a project below the user's home directory
+  testInTempDirs(
+    "a project directly under home is keyed by its own name",
+    () => {
+      // Given the home directory of the user
+      const home = "/home/model";
+
+      // Given a project sitting directly below it, named project
+      const project = "/home/model/project";
+
+      // When the graph key of it is worked out
+      const worked = graphKey(project, home);
+
+      // Then the key is its name below home
+      expect(worked).toBe("project");
+    },
+  );
+
+  testInTempDirs(
+    "a project nested under home is keyed by the names it sits below",
+    () => {
+      // Given the home directory of the user
+      const home = "/home/model";
+
+      // Given a project two directories below it, at a then b
+      const project = "/home/model/a/b";
+
+      // When the graph key of it is worked out
+      const worked = graphKey(project, home);
+
+      // Then the key is its path below home, flattened into one name
+      expect(worked).toBe("a-b");
+    },
+  );
+
+  testInTempDirs("the home directory itself is keyed by its whole path", () => {
+    // Given the home directory of the user
     const home = "/home/model";
 
-    // When the graph key of it is worked out
-    const worked = graphKey(project, home);
-
-    // Then the key is its path below home, flattened into one name
-    expect(worked).toBe(key);
-  });
-
-  testInTempDirs.each([
-    ["/home/model", "-home-model"],
-    ["/tmp/other", "-tmp-other"],
-  ])("the project %p outside home is keyed by %p", (project, key) => {
-    // Given the path of a project that is not below the user's home directory
-    const home = "/home/model";
+    // Given the home directory is the project being worked in
+    const project = "/home/model";
 
     // When the graph key of it is worked out
     const worked = graphKey(project, home);
 
     // Then the key is its whole path, flattened into one name
-    expect(worked).toBe(key);
+    expect(worked).toBe("-home-model");
+  });
+
+  testInTempDirs("a project outside home is keyed by its whole path", () => {
+    // Given the home directory of the user
+    const home = "/home/model";
+
+    // Given a project in the temporary directory, outside home altogether
+    const project = "/tmp/other";
+
+    // When the graph key of it is worked out
+    const worked = graphKey(project, home);
+
+    // Then the key is its whole path, flattened into one name
+    expect(worked).toBe("-tmp-other");
   });
 
   testInTempDirs(

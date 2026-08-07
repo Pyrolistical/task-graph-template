@@ -16,7 +16,7 @@ Write Bun tests using **Given / When / Then** comments. Each comment must be a c
 10. A `Then` describes the system, never the test, the suite or the rig.
 11. No `or` in a `Given`, `When` or `Then`. Alternatives are separate tests.
 12. **No conditionals in a test**, conditionals means they are separate tests.
-13. Use `test.each` instead of mapping over values within a test.
+13. **No `test.each`**. A table hides its values behind placeholders, leaving the Given/When/Then abstract. Write one test per row, each naming the value it covers.
 14. If a test needs a second `When`, it means it either is two tests or the first When is setting up state, in which case the test jig should be created to turn it into a Given.
 
 ## Example
@@ -44,21 +44,29 @@ describe("Feature: Account withdrawal", () => {
 });
 ```
 
-A table reads the same way, once per row.
+Values that would have been rows of a table are separate tests, each naming what
+its own value shows.
 
 ```ts
-test.each([
-  [999, "999"],
-  [12_345, "12.3k"],
-])("a count of %p tokens reads as %p", (count, reads) => {
-  // Given a count of tokens measured for a header
-  const used = count;
+test("a token count below a thousand is written out in full", () => {
+  // Given a count of 999 tokens measured for a header
+  const used = 999;
 
   // When it is written for a header
   const written = thousands(used);
 
-  // Then it is written as the console shows it
-  expect(written).toBe(reads);
+  // Then it is written out in full
+  expect(written).toBe("999");
+});
+
+test("a token count past a thousand is written in thousands", () => {
+  // Given a count of 12,345 tokens measured for a header
+  const used = 12_345;
+
+  // When it is written for a header
+  const written = thousands(used);
+
+  // Then it is written to one decimal place in thousands
+  expect(written).toBe("12.3k");
 });
 ```
-

@@ -191,19 +191,37 @@ describe("Feature: the numbers on a pane header", () => {
     expect(stats).toBe("ctx 42% x3");
   });
 
-  test.each([
-    [5_400, "5s"],
-    [95_000, "1m35s"],
-    [3_780_000, "1h03m"],
-  ])("a duration of %p milliseconds reads as %p", (duration, reads) => {
-    // Given a duration a slot has been running for
-    const measured = duration;
+  test("a duration of seconds reads as whole seconds", () => {
+    // Given a slot that has been running for five and a half seconds
+    const measured = 5_400;
 
     // When it is written for a header
     const written = elapsed(measured);
 
-    // Then it reads in the largest unit that fits it
-    expect(written).toBe(reads);
+    // Then it reads as five seconds, the largest unit that fits it
+    expect(written).toBe("5s");
+  });
+
+  test("a duration past a minute reads as minutes and seconds", () => {
+    // Given a slot that has been running for ninety-five seconds
+    const measured = 95_000;
+
+    // When it is written for a header
+    const written = elapsed(measured);
+
+    // Then it reads as one minute and thirty-five seconds
+    expect(written).toBe("1m35s");
+  });
+
+  test("a duration past an hour reads as hours and minutes", () => {
+    // Given a slot that has been running for an hour and three minutes
+    const measured = 3_780_000;
+
+    // When it is written for a header
+    const written = elapsed(measured);
+
+    // Then it reads as one hour and three minutes, dropping the seconds
+    expect(written).toBe("1h03m");
   });
 
   test("a duration that ran backwards reads as no time at all", () => {
@@ -1119,12 +1137,42 @@ describe("Feature: the abort button on a pane", () => {
     expect(drawn).toBe("[abort]");
   });
 
-  test.each<[Activity]>([
-    [{ kind: "thinking", started_at: NOW }],
-    [{ kind: "compacting", reason: "overflow", started_at: NOW }],
-    [{ kind: "tool-call", tool: "read", target: "a.txt", started_at: NOW }],
-  ])("a slot that is %p offers no button", (activity) => {
-    // Given a slot busy in a way that is not a bash call
+  test("a slot that is thinking offers no button", () => {
+    // Given a slot that is thinking rather than inside a bash call
+    const activity: Activity = { kind: "thinking", started_at: NOW };
+    const pane = paneOf({ agents: [busyRow({ activity })] });
+
+    // When the button is drawn
+    const drawn = plain(abortButton(pane));
+
+    // Then there is none, because only a command can be killed
+    expect(drawn).toBe("");
+  });
+
+  test("a slot that is compacting offers no button", () => {
+    // Given a slot compacting an overflowing context rather than inside a bash call
+    const activity: Activity = {
+      kind: "compacting",
+      reason: "overflow",
+      started_at: NOW,
+    };
+    const pane = paneOf({ agents: [busyRow({ activity })] });
+
+    // When the button is drawn
+    const drawn = plain(abortButton(pane));
+
+    // Then there is none, because only a command can be killed
+    expect(drawn).toBe("");
+  });
+
+  test("a slot inside a read call offers no button", () => {
+    // Given a slot reading a file rather than inside a bash call
+    const activity: Activity = {
+      kind: "tool-call",
+      tool: "read",
+      target: "a.txt",
+      started_at: NOW,
+    };
     const pane = paneOf({ agents: [busyRow({ activity })] });
 
     // When the button is drawn
