@@ -3,6 +3,7 @@
 ```bash
 bun test          # the suite
 bun run typecheck # tsc --noEmit
+bun run bdd       # regenerate docs/bdd.md from the suite
 ```
 
 - nothing in the suite calls a model
@@ -102,6 +103,12 @@ repository, a task directory or a subprocess belongs further out.
 comments per test, one `When`, prose rather than code, and a `Feature:` name on
 every `describe`. It also checks that it can read every suite, so a test file it
 cannot parse fails the check rather than passing it by default.
+
+Because the rules hold, the suite reads as a specification without being one:
+`bun run bdd` walks every suite and writes [every Given, When and Then](bdd.md)
+to `docs/bdd.md`, keeping the file, `Feature:` and test nesting. It is generated
+from the tests, so it cannot drift from what is actually asserted — regenerate
+it rather than editing it.
 
 The console is the most-formatted code in the repo, and it is tested where each
 part of it lives: `domain/text.test.ts` for grapheme segmentation, east-asian

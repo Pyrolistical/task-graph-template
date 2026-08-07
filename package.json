@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "bun test",
+    "bdd": "bun orchestrator/testing/bdd-doc.ts",
     "typecheck": "tsc --noEmit",
     "fmt": "prettier --write ."
   },
