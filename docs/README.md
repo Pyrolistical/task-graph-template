@@ -73,6 +73,7 @@ An MCP server that turns the task graph into a work queue for `pi` agents.
 | [Testing](testing.md)           | the fake `pi`, the jigs, the schema jig, and the Given/When/Then style |
 | [Behaviour tests](bdd-tests.md) | how a test is written here                                             |
 | [Behaviour](bdd.md)             | every Given, When and Then in the suite, generated from it             |
+| [Coverage](coverage.md)         | what the suite holds down, and where it does not reach                 |
 
 ## Where to start
 
