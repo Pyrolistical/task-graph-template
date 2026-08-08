@@ -3,9 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import type { ViewName } from "../app/ports.ts";
 import type { TaskId } from "../domain/task.ts";
-import { ALL_ROLES, type Role } from "../domain/state-machine.ts";
+import {
+  type ClaimState,
+  type Role,
+  ALL_ROLES,
+} from "../domain/state-machine.ts";
 import { isProcessAlive } from "./task-store.ts";
-import { queueDir } from "./queue.ts";
 
 export const SERVER_ROOT = "/tmp/task-graph-server";
 
@@ -206,7 +209,11 @@ export class Runtime {
   }
 
   queueDir(id: TaskId): string {
-    return queueDir(this.taskDir(id));
+    return path.join(this.taskDir(id), "queue");
+  }
+
+  queueFile(id: TaskId, state: ClaimState): string {
+    return path.join(this.queueDir(id), `${state}.md`);
   }
 
   prepare(id: TaskId): void {

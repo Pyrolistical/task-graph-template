@@ -8,8 +8,8 @@ import {
   withLock,
   writeTaskFile,
 } from "../adapters/task-store.ts";
-import { applyTransition } from "../adapters/transition-store.ts";
-import { takeClaim } from "../adapters/claim.ts";
+import { applyTransition } from "../adapters/task-documents.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import { git, gitOrThrow } from "../adapters/git.ts";
 import { tempDir } from "./temp-dirs.ts";
 import type { ClaimState } from "../domain/state-machine.ts";

@@ -6,6 +6,7 @@ import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
 import { Prompts } from "../adapters/prompts.ts";
 import { Runtime } from "../adapters/runtime.ts";
+import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 import { wire } from "../main/compose.ts";
@@ -54,6 +55,10 @@ export function journalOf(server: Server): TransitionLog {
 
 export function runtimeOf(fixture: Fixture): Runtime {
   return new Runtime(fixture.repo, fixture.serverRoot);
+}
+
+export function filesOf(fixture: Fixture): TaskFiles {
+  return new TaskFiles(runtimeOf(fixture));
 }
 
 export function serverFor(fixture: Fixture): Promise<Server> {
@@ -182,9 +187,7 @@ export function compactionsOf(server: Server, id: string): number | null {
   if (!fs.existsSync(pathsOf(server).agentsView)) {
     return null;
   }
-  const view = JSON.parse(
-    fs.readFileSync(pathsOf(server).agentsView, "utf-8"),
-  );
+  const view = JSON.parse(fs.readFileSync(pathsOf(server).agentsView, "utf-8"));
   const busy = view.agents.find(
     (agent: { task_id: string | null }) => agent.task_id === id,
   );

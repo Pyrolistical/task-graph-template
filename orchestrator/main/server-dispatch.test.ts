@@ -6,8 +6,8 @@ import {
 } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { applyTransition } from "../adapters/transition-store.ts";
-import { takeClaim } from "../adapters/claim.ts";
+import { applyTransition } from "../adapters/task-documents.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import { branchName } from "../domain/workspace.ts";
 import {
   activeTaskPath,
@@ -17,7 +17,6 @@ import {
   readTaskFile,
   writeTaskBody,
 } from "../adapters/task-store.ts";
-import { queueFile } from "../adapters/queue.ts";
 import { readView } from "../adapters/tui.ts";
 import { defaultTasksDir } from "../adapters/runtime.ts";
 import * as git from "../adapters/git.ts";
@@ -355,9 +354,9 @@ describe("Feature: the design and planning phases", () => {
       );
       expect(assignment).not.toContain("the design misses the farewell");
 
-      expect(
-        fs.existsSync(queueFile(pathsOf(server).taskDir(id), "DESIGN")),
-      ).toBe(false);
+      expect(fs.existsSync(pathsOf(server).queueFile(id, "DESIGN"))).toBe(
+        false,
+      );
       expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
 
       server.shutdown();
@@ -429,9 +428,9 @@ describe("Feature: the design and planning phases", () => {
         "the designer submitted without appending a design section",
       );
       expect(task.state).toBe("HELD_DESIGN");
-      expect(promptsTo(pathsOf(server).sessionDir(id, "designer"))).toHaveLength(
-        ISSUES["missing-design"].attempts + 1,
-      );
+      expect(
+        promptsTo(pathsOf(server).sessionDir(id, "designer")),
+      ).toHaveLength(ISSUES["missing-design"].attempts + 1);
 
       server.shutdown();
     },
@@ -463,9 +462,9 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
-      expect(promptsTo(pathsOf(server).sessionDir(id, "reviewer"))).toHaveLength(
-        3,
-      );
+      expect(
+        promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+      ).toHaveLength(3);
 
       server.shutdown();
       await server.drain();
@@ -692,9 +691,9 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
-      expect(promptsTo(pathsOf(server).sessionDir(id, "reviewer"))).toHaveLength(
-        3,
-      );
+      expect(
+        promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+      ).toHaveLength(3);
 
       server.shutdown();
       await server.drain();
@@ -1397,14 +1396,18 @@ describe("Feature: landing work on the base branch", () => {
 
       // Then the write is refused, and the project is untouched
       const queued = fs.readFileSync(
-        queueFile(pathsOf(server).taskDir(id), "WORK"),
+        pathsOf(server).queueFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");
       expect(fs.existsSync(path.join(fixture.repo, "poke"))).toBe(false);
 
       expect(
-        git.gitOrThrow(pathsOf(server).worktree(id), ["log", "--oneline", "-1"]),
+        git.gitOrThrow(pathsOf(server).worktree(id), [
+          "log",
+          "--oneline",
+          "-1",
+        ]),
       ).toContain(`work on ${id}`);
 
       server.shutdown();

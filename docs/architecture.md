@@ -79,19 +79,19 @@ prompt through it.
 and hands each port to the constructor of the module that uses it. There is no
 bag of dependencies: a module names what it needs, and gets exactly that.
 
-| Port          | What it is for                                          | Adapter                           |
-| ------------- | ------------------------------------------------------- | --------------------------------- |
-| `Tasks`       | the graph on disk, under its lock                       | `task-store` + `transition-store` |
-| `Workspaces`  | clones, branches, rebases, and the status a guard reads | `git.ts`                          |
-| `Agents`      | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`          |
-| `Checks`      | running a declared check and reporting how it went      | `check-runner`                    |
-| `Prompts`     | every word an agent reads                               | `prompts.ts`                      |
-| `Inbox`       | the prompt queue and `findings.json`                    | `queue` + `findings`              |
-| `Assignments` | the live `ASSIGNMENT.md` and its rotation               | `assignment-store`                |
-| `Journal`     | the transition log and its cursor                       | `transition-log`                  |
-| `Publisher`   | the five views and the server log                       | `runtime`                         |
-| `Console`     | the command channel the TUI writes on                   | `command`                         |
-| `Paths`       | the runtime directory layout                            | `runtime`                         |
+| Port          | What it is for                                          | Adapter                            |
+| ------------- | ------------------------------------------------------- | ---------------------------------- |
+| `Tasks`       | the graph on disk, under its lock                       | `task-documents` over `task-store` |
+| `Workspaces`  | clones, branches, rebases, and the status a guard reads | `git.ts`                           |
+| `Agents`      | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`           |
+| `Checks`      | running a declared check and reporting how it went      | `check-runner`                     |
+| `Prompts`     | every word an agent reads                               | `prompts.ts`                       |
+| `Inbox`       | the prompt queue and `findings.json`                    | `task-files`                       |
+| `Assignments` | the live `ASSIGNMENT.md` and its rotation               | `task-files`                       |
+| `Journal`     | the transition log and its cursor                       | `transition-log`                   |
+| `Publisher`   | the five views and the server log                       | `runtime`                          |
+| `Console`     | the command channel the TUI writes on                   | `command`                          |
+| `Paths`       | the runtime directory layout                            | `runtime`                          |
 
 `Agents` and `Checks` are the two that reach a subprocess. `main/` drives the
 real ones — that is what those suites are for — so a port here buys a seam, not
@@ -100,6 +100,9 @@ is waiting on anything but `git` and `pi` doing real work.
 
 ## What the layers are not
 
+- `Tasks` is one object over the task directory and `Inbox`/`Assignments` are
+  one object over the runtime directory, because each is one place on disk with
+  one convention; splitting them into a file per verb only spread the layout.
 - `Tasks` is deliberately coarse — whole documents, read and written under one
   lock. The task document's whole point is that a person can edit it; a
   repository-per-aggregate abstraction over that would be `fs` with extra steps.

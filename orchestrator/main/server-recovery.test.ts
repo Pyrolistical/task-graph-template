@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { takeClaim } from "../adapters/claim.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import { branchName } from "../domain/workspace.ts";
 import { activeTaskPath } from "../adapters/task-store.ts";
 import * as git from "../adapters/git.ts";

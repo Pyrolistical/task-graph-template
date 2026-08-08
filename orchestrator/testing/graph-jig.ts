@@ -18,8 +18,9 @@ import {
   type TransitionName,
   type TransitionResult,
 } from "../domain/state-machine.ts";
-import { applyTransition } from "../adapters/transition-store.ts";
-import { type ClaimArgs, clearClaim, takeClaim } from "../adapters/claim.ts";
+import { applyTransition } from "../adapters/task-documents.ts";
+import { clearClaim, takeClaim } from "../adapters/task-documents.ts";
+import type { ClaimArgs } from "../app/ports.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 
 export { ORCHESTRATOR_DIR };

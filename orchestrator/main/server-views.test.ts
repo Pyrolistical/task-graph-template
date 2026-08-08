@@ -2,8 +2,8 @@ import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { applyTransition } from "../adapters/transition-store.ts";
-import { takeClaim } from "../adapters/claim.ts";
+import { applyTransition } from "../adapters/task-documents.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import { snapshot, writeAtomic } from "../adapters/runtime.ts";
 import {
   type Fixture,

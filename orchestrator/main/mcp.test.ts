@@ -4,15 +4,14 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import fs from "node:fs";
 import path from "node:path";
-import { applyTransition } from "../adapters/transition-store.ts";
-import { takeClaim } from "../adapters/claim.ts";
+import { applyTransition } from "../adapters/task-documents.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import {
   activeTaskPath,
   closedTaskPath,
   readTaskFile,
 } from "../adapters/task-store.ts";
 import { defaultAgentsPath } from "../adapters/runtime.ts";
-import { readFindings } from "../adapters/findings.ts";
 import {
   type Fixture,
   makeFixture,
@@ -22,6 +21,7 @@ import {
 } from "../testing/fixture.ts";
 import {
   editTaskFile,
+  filesOf,
   reaches,
   runtimeOf,
   serverFor,
@@ -203,7 +203,7 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(body).toContain("- the null case is untested");
 
       // Then the finding is also left where the next dispatch will read it
-      const found = readFindings(runtimeOf(fixture).findings(id));
+      const found = filesOf(fixture).findings(id);
       expect(found).toEqual(["the null case is untested"]);
 
       await client.close();

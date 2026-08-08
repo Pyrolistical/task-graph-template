@@ -269,7 +269,7 @@ function move(to: TaskState, body: string | null = null): Decision {
   return { kind: "move", to, body };
 }
 
-function requireText(value: unknown, label: string): string {
+export function requireText(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(
       `"${label}" must be a non-empty string, got ${JSON.stringify(value)}`,

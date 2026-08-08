@@ -2,9 +2,8 @@ import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { takeClaim } from "../adapters/claim.ts";
+import { takeClaim } from "../adapters/task-documents.ts";
 import { branchName } from "../domain/workspace.ts";
-import { queueFile } from "../adapters/queue.ts";
 import { readView } from "../adapters/tui.ts";
 import { activeTaskPath } from "../adapters/task-store.ts";
 import * as git from "../adapters/git.ts";
@@ -57,7 +56,7 @@ describe("Feature: running a task's checks", () => {
       const task = server.tasks().get(id)!;
       expect(task.state).toBe("WORK");
       const queued = fs.readFileSync(
-        queueFile(pathsOf(server).taskDir(id), "WORK"),
+        pathsOf(server).queueFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("echo boom >&2; exit 3");
@@ -93,7 +92,7 @@ describe("Feature: running a task's checks", () => {
 
       // Then the agent is told about both failures, not only the first
       const queued = fs.readFileSync(
-        queueFile(pathsOf(server).taskDir(id), "WORK"),
+        pathsOf(server).queueFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("(exit 1)");

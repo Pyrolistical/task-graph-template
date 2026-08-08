@@ -2,12 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   Agents,
-  Assignments,
   Checks,
   Console as CommandChannel,
-  Inbox,
   Publisher,
-  Tasks,
   Workspaces,
 } from "../app/ports.ts";
 import { Dispatch } from "../app/dispatch.ts";
@@ -21,23 +18,11 @@ import { TaskGraph } from "../app/task-graph.ts";
 import { branchName } from "../domain/workspace.ts";
 import { STAGE_OF } from "../domain/state-machine.ts";
 import { agentWrite, checkWrite, loadAgents } from "../adapters/agent-pool.ts";
-import { rotate } from "../adapters/assignment-store.ts";
 import { CheckRunner } from "../adapters/check-runner.ts";
-import { clearClaim, takeClaim } from "../adapters/claim.ts";
 import { takeCommand, watchCommands } from "../adapters/command.ts";
-import {
-  clearFailureCount,
-  clearFindings,
-  readFailureCount,
-  readFindings,
-  writeFailureCount,
-  writeFindings,
-} from "../adapters/findings.ts";
 import * as git from "../adapters/git.ts";
-import { readActiveTasks, readTaskBody } from "../adapters/graph-store.ts";
 import { PiProcess } from "../adapters/pi-process.ts";
 import { Prompts } from "../adapters/prompts.ts";
-import { append, drain, queueFile } from "../adapters/queue.ts";
 import {
   Runtime,
   defaultAgentsPath,
@@ -54,15 +39,10 @@ import {
   overlays,
   sandbox,
 } from "../adapters/sandbox.ts";
-import {
-  createTask,
-  findTaskFile,
-  isProcessAlive,
-  readTaskFile,
-  writeTaskBody,
-} from "../adapters/task-store.ts";
+import { isProcessAlive } from "../adapters/task-store.ts";
+import { TaskDocuments } from "../adapters/task-documents.ts";
+import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
-import { applyTransition } from "../adapters/transition-store.ts";
 import type { AgentRow } from "../domain/agents.ts";
 
 const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
@@ -119,23 +99,7 @@ export function wire(options: WiringOptions): Server {
 
   const checks = new CheckRunner();
 
-  const tasks: Tasks = {
-    list: () => readActiveTasks(tasksDir),
-    read: (id) => {
-      const filePath = findTaskFile(id, tasksDir);
-      return filePath === null ? null : readTaskFile(filePath).meta;
-    },
-    body: (id) => readTaskBody(tasksDir, id),
-    create: (title) => createTask(tasksDir, orchestratorDir, title),
-    writeBody: (id, body) => writeTaskBody(tasksDir, id, body),
-    apply: (id, name, args) => applyTransition(tasksDir, id, name, args),
-    claim: (id, args) => {
-      takeClaim(tasksDir, id, args);
-    },
-    releaseClaim: (id) => {
-      clearClaim(tasksDir, id);
-    },
-  };
+  const tasks = new TaskDocuments(tasksDir, orchestratorDir);
 
   const workspaces: Workspaces = {
     create: (branch, worktree, base) =>
@@ -219,33 +183,7 @@ export function wire(options: WiringOptions): Server {
 
   const prompts = new Prompts(orchestratorDir, overridesDir);
 
-  const inbox: Inbox = {
-    queue: (taskId, state, entry) =>
-      append(runtime.taskDir(taskId), state, entry),
-    drain: (taskId, state) => drain(runtime.taskDir(taskId), state),
-    queued: (taskId, state) =>
-      fs.existsSync(queueFile(runtime.taskDir(taskId), state)),
-    findings: (taskId) => readFindings(runtime.findings(taskId)),
-    setFindings: (taskId, findings) =>
-      writeFindings(runtime.findings(taskId), findings),
-    clearFindings: (taskId) => clearFindings(runtime.findings(taskId)),
-    reviewFailures: (taskId) =>
-      readFailureCount(runtime.reviewFailures(taskId)),
-    setReviewFailures: (taskId, failures) =>
-      writeFailureCount(runtime.reviewFailures(taskId), failures),
-    clearReviewFailures: (taskId) =>
-      clearFailureCount(runtime.reviewFailures(taskId)),
-  };
-
-  const assignments: Assignments = {
-    read: (taskId) => fs.readFileSync(runtime.assignment(taskId), "utf-8"),
-    write: (taskId, contents) =>
-      fs.writeFileSync(runtime.assignment(taskId), contents, "utf-8"),
-    exists: (taskId) => fs.existsSync(runtime.assignment(taskId)),
-    rotate: (taskId) => {
-      rotate(runtime.assignment(taskId), runtime.history(taskId));
-    },
-  };
+  const files = new TaskFiles(runtime);
 
   const journal = new TransitionLog(runtime.transitionLog);
 
@@ -272,7 +210,9 @@ export function wire(options: WiringOptions): Server {
     },
     read: (name) => {
       const filePath = runtime.view(name);
-      return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "{}";
+      return fs.existsSync(filePath)
+        ? fs.readFileSync(filePath, "utf-8")
+        : "{}";
     },
     lastAgents: () => {
       if (!fs.existsSync(runtime.agentsView)) {
@@ -301,7 +241,7 @@ export function wire(options: WiringOptions): Server {
   const graph = new TaskGraph(
     tasks,
     workspaces,
-    inbox,
+    files,
     journal,
     publisher,
     runtime,
@@ -310,8 +250,8 @@ export function wire(options: WiringOptions): Server {
   const settle = new SettleAgent(
     graph,
     pool,
-    assignments,
-    inbox,
+    files,
+    files,
     prompts,
     publisher,
     workspaces,
@@ -322,13 +262,13 @@ export function wire(options: WiringOptions): Server {
     pool,
     settle,
     workspaces,
-    assignments,
-    inbox,
+    files,
+    files,
     runtime,
     publisher,
     config.base,
   );
-  const runChecks = new RunChecks(graph, checkPort, inbox, prompts, repo);
+  const runChecks = new RunChecks(graph, checkPort, files, prompts, repo);
   const land = new Land(graph, pool, runChecks, workspaces, config.base);
   const recover = new Recover(
     graph,

@@ -8,7 +8,7 @@ import {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { attemptOf, historyName, rotate } from "./assignment-store.ts";
+import { attemptOf, historyName, rotate } from "./task-files.ts";
 import { TransitionLog } from "./transition-log.ts";
 import { isProcessAlive } from "./task-store.ts";
 import { splitDocument } from "../domain/task.ts";

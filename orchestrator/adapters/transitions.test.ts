@@ -14,7 +14,7 @@ import {
   type TransitionName,
   type TransitionResult,
 } from "../domain/state-machine.ts";
-import { applyTransition } from "./transition-store.ts";
+import { applyTransition } from "./task-documents.ts";
 import {
   ORCHESTRATOR_DIR,
   addDeps,
