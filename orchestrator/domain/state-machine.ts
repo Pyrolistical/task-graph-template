@@ -220,21 +220,35 @@ export const TRANSITION_NAMES = [
 
 export type TransitionName = (typeof TRANSITION_NAMES)[number];
 
-export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> = {
+const OFF_STAGE: Record<Exclude<ValidState, StageState>, TransitionName[]> = {
   NEW: ["submit"],
   BLOCKED: ["submit"],
   HELD_DESIGN: ["resume", "abort"],
   HELD_PLAN: ["resume", "abort"],
   HELD_WORK: ["resume", "abort"],
-  DESIGN: ["submit", "hold"],
-  DESIGN_REVIEW: ["submit", "feedback", "hold"],
-  PLAN: ["submit", "hold"],
-  PLAN_REVIEW: ["submit", "feedback", "hold"],
-  WORK: ["submit", "hold"],
-  CHECK: ["pass", "fail", "hold"],
-  WORK_REVIEW: ["submit", "feedback", "hold"],
-  MANAGER_REVIEW: ["feedback", "submit", "abort"],
 };
+
+function allowedFrom(state: ValidState): TransitionName[] {
+  if (!isStage(state)) {
+    return OFF_STAGE[state];
+  }
+  if (state === "MANAGER_REVIEW") {
+    return ["feedback", "submit", "abort"];
+  }
+
+  const stage = STAGE_OF[state];
+  if (stage.role === null) {
+    return ["pass", "fail", "hold"];
+  }
+  return stage.role === "reviewer"
+    ? ["submit", "feedback", "hold"]
+    : ["submit", "hold"];
+}
+
+export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> =
+  Object.fromEntries(
+    VALID_STATES.map((state) => [state, allowedFrom(state)]),
+  ) as Record<ValidState, TransitionName[]>;
 
 const AGENT_SPEECH: TransitionName[] = ["submit", "feedback"];
 
@@ -288,6 +302,25 @@ function requireFindings(value: unknown): string[] {
   return value as string[];
 }
 
+function advancing(state: ValidState, name: TransitionName): AdvancingState {
+  if (!isStage(state) || state === "MANAGER_REVIEW") {
+    throw new Error(
+      `"${name}" moves a task on from a stage, and "${state}" is not one`,
+    );
+  }
+  return state;
+}
+
+function backFrom(state: StageState, name: TransitionName): ValidState {
+  const back = STAGE_OF[state].back;
+  if (back === null) {
+    throw new Error(
+      `"${name}" sends a task back, and "${state}" has nowhere to go`,
+    );
+  }
+  return back;
+}
+
 function mutate(
   meta: TaskMeta,
   state: ValidState,
@@ -306,18 +339,19 @@ function mutate(
       if (state === "MANAGER_REVIEW") {
         return move("CLOSED");
       }
-      const submitted = STAGE_OF[state as AdvancingState].body
+      const stage = advancing(state, name);
+      const submitted = STAGE_OF[stage].body
         ? requireText(args.body, "body")
         : null;
-      return move(NEXT_STATE[state as AdvancingState], submitted);
+      return move(NEXT_STATE[stage], submitted);
     }
 
     case "pass": {
-      return move(NEXT_STATE[state as AdvancingState]);
+      return move(NEXT_STATE[advancing(state, name)]);
     }
 
     case "fail": {
-      return move(STAGE_OF[state as AdvancingState].back!);
+      return move(backFrom(advancing(state, name), name));
     }
 
     case "hold": {
@@ -340,7 +374,10 @@ function mutate(
 
     case "feedback": {
       const findings = requireFindings(args.findings);
-      const target = STAGE_OF[state as StageState].back!;
+      if (!isStage(state)) {
+        throw new Error(`"${name}" answers a stage, and "${state}" is not one`);
+      }
+      const target = backFrom(state, name);
       if (target !== "WORK") {
         return move(target);
       }
