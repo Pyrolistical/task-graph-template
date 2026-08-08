@@ -1,16 +1,16 @@
 import { type TaskId, type TaskMeta } from "../domain/task.ts";
 import { type Slot, agentOf } from "../domain/agents.ts";
 import {
-  type AgentStage,
+  type ClaimStage,
   type ClaimState,
   type Role,
-  AGENT_STAGES,
+  CLAIM_STAGES,
   STAGE_OF,
-  isAgentState,
+  isClaimState,
 } from "../domain/state-machine.ts";
 import type { RateOf } from "../domain/rates.ts";
 
-function ranksOf(stage: AgentStage) {
+function ranksOf(stage: ClaimStage) {
   return stage.section === null
     ? ([stage.state] as const)
     : ([`${stage.state}_STARTED`, `${stage.state}_FRESH`] as const);
@@ -18,7 +18,7 @@ function ranksOf(stage: AgentStage) {
 
 export const RANKS = [
   "resume",
-  ...[...AGENT_STAGES].reverse().flatMap(ranksOf),
+  ...[...CLAIM_STAGES].reverse().flatMap(ranksOf),
 ] as const;
 
 export type Rank = (typeof RANKS)[number];
@@ -26,14 +26,14 @@ export type Rank = (typeof RANKS)[number];
 export interface Candidate {
   task_id: TaskId;
   rank: Rank;
-  stage: ClaimState;
+  state: ClaimState;
   role: Role;
   blocking: number;
-  prefer_agent: string | null;
+  prefer_slot: string | null;
   session: string | null;
 }
 
-export const RANK_STAGE = Object.fromEntries(
+export const RANK_STATE = Object.fromEntries(
   RANKS.map((rank) => [
     rank,
     rank === "resume" ? "WORK" : rank.replace(/_(STARTED|FRESH)$/, ""),
@@ -41,7 +41,7 @@ export const RANK_STAGE = Object.fromEntries(
 ) as Record<Rank, ClaimState>;
 
 export function rankLabel(rank: Rank): string {
-  return rank === "resume" ? rank : RANK_STAGE[rank];
+  return rank === "resume" ? rank : RANK_STATE[rank];
 }
 
 function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
@@ -51,7 +51,7 @@ function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
   if (resumable.has(task.id)) {
     return "resume";
   }
-  if (!isAgentState(task.state)) {
+  if (!isClaimState(task.state)) {
     return null;
   }
   const stage = STAGE_OF[task.state];
@@ -78,10 +78,10 @@ export function candidates(
     found.push({
       task_id: id,
       rank,
-      stage: RANK_STAGE[rank],
-      role: STAGE_OF[RANK_STAGE[rank]].role,
+      state: RANK_STATE[rank],
+      role: STAGE_OF[RANK_STATE[rank]].role,
       blocking: blocking.get(id) ?? 0,
-      prefer_agent: task.workspace?.agent ?? null,
+      prefer_slot: task.workspace?.slot ?? null,
       session: rank === "resume" ? (task.workspace?.session ?? null) : null,
     });
   }
@@ -111,11 +111,11 @@ export function pickSlot(
   if (eligible.length === 0) {
     return null;
   }
-  if (candidate.prefer_agent === null) {
+  if (candidate.prefer_slot === null) {
     return fastest(eligible, rate);
   }
 
-  const wanted = agentOf(candidate.prefer_agent);
+  const wanted = agentOf(candidate.prefer_slot);
   const same = eligible.find((slot) => agentOf(slot.name) === wanted);
   if (same !== undefined) {
     return same;

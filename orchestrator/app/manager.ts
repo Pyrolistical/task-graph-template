@@ -27,7 +27,7 @@ export interface Manager {
   abort(id: TaskId): TransitionResult;
   setSchedulerEnabled(enabled: boolean): void;
   setAgentEnabled(agent: string, enabled: boolean): SlotRow[];
-  abortAgent(name: string): SlotRow;
+  abortSlot(name: string): SlotRow;
   reloadPrompts(): string[];
   writeViews(): Promise<void>;
   view(name: ViewName): string;

@@ -6,7 +6,7 @@ import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 import { Prompts } from "../adapters/prompts.ts";
 import type { ResultCall } from "../domain/results.ts";
 import {
-  AGENT_STATES,
+  CLAIM_STATES,
   STAGE_OF,
   type ClaimState,
 } from "../domain/state-machine.ts";
@@ -124,7 +124,7 @@ const SCENARIOS: Record<ClaimState, Scenario[]> = {
   ],
 };
 
-const STATES: readonly ClaimState[] = AGENT_STATES;
+const STATES: readonly ClaimState[] = CLAIM_STATES;
 
 type Verdict = "ok" | "mismatch" | "missing";
 

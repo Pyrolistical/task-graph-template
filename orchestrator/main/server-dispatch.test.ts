@@ -1129,7 +1129,7 @@ describe("Feature: handing a task to an agent", () => {
       const held = server.tasks().get(id)!;
       expect(held.claimed_by).toBe("pi-fake-fake-1");
       expect(held.claimed_pid).toBeGreaterThan(0);
-      expect(held.workspace!.agent).toBe("pi-fake-fake-1");
+      expect(held.workspace!.slot).toBe("pi-fake-fake-1");
       expect(held.workspace!.branch).toBe(branchName(id));
       expect(held.workspace!.worktree).toBe(pathsOf(server).worktree(id));
       expect(fs.existsSync(held.workspace!.session!)).toBe(true);

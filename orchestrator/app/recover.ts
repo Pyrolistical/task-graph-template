@@ -54,9 +54,9 @@ export class Recover {
       }
 
       runner.state = "BUSY";
-      runner.task_id = row.task_id;
+      runner.taskId = row.task_id;
       runner.role = row.role;
-      runner.started_at = row.started_at;
+      runner.startedAt = row.started_at;
       runner.detachedPid = row.pid;
       runner.session = row.session;
 
@@ -85,7 +85,7 @@ export class Recover {
       this.graph.releaseClaim(id);
 
       for (const runner of this.pool.workers()) {
-        if (runner.task_id === id && runner.process?.alive !== true) {
+        if (runner.taskId === id && runner.process?.alive !== true) {
           runner.process?.close();
           this.pool.release(runner.slot.name);
         }

@@ -62,8 +62,8 @@ function aRig(live = DISPATCHED) {
 
   const runner = pool.runner("pi-fake-fake-1");
   runner.state = "BUSY";
-  runner.task_id = task.id;
-  runner.stage = "WORK";
+  runner.taskId = task.id;
+  runner.taskState = "WORK";
   runner.role = "worker";
   runner.checkout = {
     branch: "task/000042",

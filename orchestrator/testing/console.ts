@@ -72,10 +72,10 @@ export function candidateOf(overrides: Partial<Candidate> = {}): Candidate {
   return {
     task_id: "000123",
     rank: "WORK_FRESH",
-    stage: "WORK",
+    state: "WORK",
     role: "worker",
     blocking: 0,
-    prefer_agent: null,
+    prefer_slot: null,
     session: null,
     ...overrides,
   };

@@ -138,7 +138,7 @@ export function build(startup: Startup): McpServer {
     "disable_scheduler",
     {
       description:
-        "Start nothing new. Running processes are still settled and their slots still released.",
+        "Start nothing new. Run processes are still settled and their slots still released.",
     },
     async () => {
       live().setSchedulerEnabled(false);
@@ -178,13 +178,13 @@ export function build(startup: Startup): McpServer {
   );
 
   mcp.registerTool(
-    "agent_abort",
+    "slot_abort",
     {
       description:
         "Abort whatever a slot is doing right now. Names a slot (with the trailing number), only works while the slot is doing something. The aborted turn ends the assignment and releases the slot.",
-      inputSchema: z.object({ agent: z.string().min(1) }),
+      inputSchema: z.object({ slot: z.string().min(1) }),
     },
-    async ({ agent }) => applied(live().abortAgent(agent)),
+    async ({ slot }) => applied(live().abortSlot(slot)),
   );
 
   function resource(

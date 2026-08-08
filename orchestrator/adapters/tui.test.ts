@@ -237,8 +237,8 @@ describe("Feature: the command channel between console and server", () => {
       // Given a console that has clicked the abort button on a slot
       const runtime = runtimeIn(tempDir("console-"));
       writeCommand(runtime, {
-        command: "agent_abort",
-        "agent-name-slot": "pi-fake-fake-1",
+        command: "slot_abort",
+        slot: "pi-fake-fake-1",
       });
 
       // When the server takes the command
@@ -246,8 +246,8 @@ describe("Feature: the command channel between console and server", () => {
 
       // Then it names the slot the click landed on
       expect(taken).toEqual({
-        command: "agent_abort",
-        "agent-name-slot": "pi-fake-fake-1",
+        command: "slot_abort",
+        slot: "pi-fake-fake-1",
       });
     },
   );
@@ -255,7 +255,7 @@ describe("Feature: the command channel between console and server", () => {
   testInTempDirs("an abort command naming no slot is dropped", () => {
     // Given a command file asking for an abort without saying of what
     const runtime = runtimeIn(tempDir("console-"));
-    fs.writeFileSync(runtime.consoleCommand, `{ "command": "agent_abort" }`);
+    fs.writeFileSync(runtime.consoleCommand, `{ "command": "slot_abort" }`);
 
     // When the server takes it
     const taken = takeCommand(runtime);
@@ -407,7 +407,7 @@ describe("Feature: reading the views the server publishes", () => {
     expect(hits.map((hit) => hit.command.command)).toEqual([
       "scheduler",
       "agent",
-      "agent_abort",
+      "slot_abort",
     ]);
   });
 

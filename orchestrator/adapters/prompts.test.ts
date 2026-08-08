@@ -11,7 +11,7 @@ import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { templateOf } from "../testing/orchestrator-jig.ts";
 import {
   type ClaimState,
-  AGENT_STATES,
+  CLAIM_STATES,
   STAGE_OF,
 } from "../domain/state-machine.ts";
 
@@ -377,7 +377,7 @@ describe("Feature: the issues an agent is sent back for", () => {
     () => {
       // Given every issue, named for each state an agent can be raised at in
       const wanted = Object.values(ISSUES).flatMap((issue) =>
-        AGENT_STATES.map((state) =>
+        CLAIM_STATES.map((state) =>
           path.join(ORCHESTRATOR_DIR, "prompts", `${issue.fragment(state)}.md`),
         ),
       );

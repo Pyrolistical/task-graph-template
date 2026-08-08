@@ -5,7 +5,7 @@ import {
   type Decision,
   type ValidState,
   decide,
-  isAgentState,
+  isClaimState,
 } from "./state-machine.ts";
 import type { TaskMeta } from "./task.ts";
 
@@ -18,8 +18,8 @@ function aTask(state: ValidState, overrides: Partial<TaskMeta> = {}): TaskMeta {
     state,
     state_entered: "2026-07-27T12:00:00Z",
     depends_on: [],
-    claimed_by: isAgentState(state) ? "agent-1" : null,
-    claimed_pid: isAgentState(state) ? 1234 : null,
+    claimed_by: isClaimState(state) ? "agent-1" : null,
+    claimed_pid: isClaimState(state) ? 1234 : null,
     held_reason: null,
     workspace: null,
     checks: [],

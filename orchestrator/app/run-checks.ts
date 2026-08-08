@@ -32,7 +32,7 @@ export class RunChecks {
     return this.checks.view;
   }
 
-  get running(): number {
+  get inflight(): number {
     return this.pending.size;
   }
 

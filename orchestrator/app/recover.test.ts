@@ -95,7 +95,7 @@ describe("Feature: reaping claims whose process is gone", () => {
 
     // Given the slot holding it still has a live process of its own
     const runner = pool.runner("pi-fake-fake-1");
-    runner.task_id = task.id;
+    runner.taskId = task.id;
     runner.process = aSession({ kind: "none" }, true);
 
     // When the reaper runs over the graph
@@ -116,7 +116,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     // Given the slot holding it kept a process that has already exited
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
-    runner.task_id = task.id;
+    runner.taskId = task.id;
     runner.process = aSession({ kind: "none" }, false);
 
     // When the reaper runs over the graph
@@ -135,7 +135,7 @@ describe("Feature: reaping claims whose process is gone", () => {
       workspace: {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
-        agent: "pi-fake-fake-1",
+        slot: "pi-fake-fake-1",
         session: null,
       },
     });
@@ -217,7 +217,7 @@ describe("Feature: recloning a workspace that went missing", () => {
       workspace: {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
-        agent: "pi-fake-fake-1",
+        slot: "pi-fake-fake-1",
         session: null,
       },
     });
@@ -237,7 +237,7 @@ describe("Feature: recloning a workspace that went missing", () => {
       workspace: {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
-        agent: "pi-fake-fake-1",
+        slot: "pi-fake-fake-1",
         session: null,
       },
     });
@@ -259,7 +259,7 @@ describe("Feature: recloning a workspace that went missing", () => {
       workspace: {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
-        agent: "pi-fake-fake-1",
+        slot: "pi-fake-fake-1",
         session: null,
       },
     });

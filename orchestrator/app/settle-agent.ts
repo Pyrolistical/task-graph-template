@@ -6,11 +6,11 @@ import type {
   Workspaces,
 } from "./ports.ts";
 import {
-  type Running,
+  type Run,
   type Runner,
   BACKOFF_START_MS,
   Pool,
-  running,
+  runOf,
 } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { diffAssignment, restored } from "../domain/assignment.ts";
@@ -50,7 +50,7 @@ export class SettleAgent {
     });
   }
 
-  async prompt(run: Running, message: string): Promise<void> {
+  async prompt(run: Run, message: string): Promise<void> {
     run.runner.results = [];
     await run.process.prompt(message);
   }
@@ -60,7 +60,7 @@ export class SettleAgent {
   }
 
   async settled(runner: Runner): Promise<void> {
-    const run = running(runner);
+    const run = runOf(runner);
     if (run === null) {
       return;
     }
@@ -88,12 +88,12 @@ export class SettleAgent {
     await this.apply(run, decideSettle(this.observe(run)));
   }
 
-  private observe(run: Running): Settlement {
-    const stage = STAGE_OF[run.stage];
+  private observe(run: Run): Settlement {
+    const stage = STAGE_OF[run.state];
     const live = this.assignments.read(run.taskId);
 
     return {
-      state: run.stage,
+      state: run.state,
       alive: run.process.alive,
       stopReason: run.process.stream.state.stopReason,
       looping: run.process.stream.state.looping,
@@ -107,7 +107,7 @@ export class SettleAgent {
     };
   }
 
-  private async apply(run: Running, intents: Intent[]): Promise<void> {
+  private async apply(run: Run, intents: Intent[]): Promise<void> {
     const { runner, taskId } = run;
 
     for (const intent of intents) {
@@ -162,7 +162,7 @@ export class SettleAgent {
   }
 
   async compacted(runner: Runner): Promise<void> {
-    const run = running(runner);
+    const run = runOf(runner);
     if (run === null || !run.process.alive) {
       return;
     }
@@ -184,10 +184,10 @@ export class SettleAgent {
       `${runner.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
     );
 
-    await run.process.steer(this.nudge(run.taskId, run.stage));
+    await run.process.steer(this.nudge(run.taskId, run.state));
   }
 
-  private async backOff(run: Running): Promise<void> {
+  private async backOff(run: Run): Promise<void> {
     const { runner } = run;
     const message = run.process.stream.state.errorMessage ?? "";
     const loading = /503/.test(message) && /load/i.test(message);
@@ -217,12 +217,12 @@ export class SettleAgent {
 
     runner.state = "BUSY";
     runner.retry = null;
-    await this.prompt(run, this.nudge(run.taskId, run.stage));
+    await this.prompt(run, this.nudge(run.taskId, run.state));
     this.watch(runner);
   }
 
   private async raise(
-    run: Running,
+    run: Run,
     name: IssueName,
     detail: string,
     vars: TemplateVars = {},
@@ -254,7 +254,7 @@ export class SettleAgent {
 
     runner.issues.set(name, used + 1);
     runner.state = "BUSY";
-    await this.prompt(run, this.prompts.issue(name, run.stage, vars));
+    await this.prompt(run, this.prompts.issue(name, run.state, vars));
     this.watch(runner);
   }
 }

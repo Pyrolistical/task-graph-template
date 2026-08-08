@@ -32,12 +32,12 @@ export interface Checkout {
 export interface Runner {
   slot: Slot;
   state: SlotState;
-  task_id: TaskId | null;
-  stage: ClaimState | null;
+  taskId: TaskId | null;
+  taskState: ClaimState | null;
   role: Role | null;
   checkout: Checkout | null;
   process: AgentProcess | null;
-  started_at: string | null;
+  startedAt: string | null;
   detachedPid: number | null;
   session: string | null;
   tokens: number | null;
@@ -53,12 +53,12 @@ function freshRunner(slot: Slot): Runner {
   return {
     slot,
     state: "IDLE",
-    task_id: null,
-    stage: null,
+    taskId: null,
+    taskState: null,
     role: null,
     checkout: null,
     process: null,
-    started_at: null,
+    startedAt: null,
     detachedPid: null,
     session: null,
     tokens: null,
@@ -71,25 +71,25 @@ function freshRunner(slot: Slot): Runner {
   };
 }
 
-export interface Running {
+export interface Run {
   runner: Runner;
   process: AgentProcess;
   taskId: TaskId;
-  stage: ClaimState;
+  state: ClaimState;
   checkout: Checkout;
 }
 
-export function running(runner: Runner): Running | null {
-  const { process, task_id, stage, checkout } = runner;
+export function runOf(runner: Runner): Run | null {
+  const { process, taskId, taskState, checkout } = runner;
   if (
     process === null ||
-    task_id === null ||
-    stage === null ||
+    taskId === null ||
+    taskState === null ||
     checkout === null
   ) {
     return null;
   }
-  return { runner, process, taskId: task_id, stage, checkout };
+  return { runner, process, taskId, state: taskState, checkout };
 }
 
 export class Pool {
@@ -98,7 +98,7 @@ export class Pool {
 
   private readonly members = new Map<string, Runner>();
   private readonly disabled = new Set<string>();
-  private readonly inflight = new Set<Promise<void>>();
+  private readonly tracked = new Set<Promise<void>>();
 
   constructor(
     private readonly agents: Agents,
@@ -141,7 +141,7 @@ export class Pool {
     return new Set(
       this.workers()
         .filter((runner) => runner.process?.alive === true)
-        .map((runner) => runner.task_id),
+        .map((runner) => runner.taskId),
     );
   }
 
@@ -178,7 +178,7 @@ export class Pool {
     return rows;
   }
 
-  abortAgent(name: string): SlotRow {
+  abortSlot(name: string): SlotRow {
     const runner = this.members.get(name);
     if (runner === undefined) {
       throw new Error(
@@ -221,19 +221,19 @@ export class Pool {
     );
   }
 
-  runOf(runner: Runner): Running {
-    const run = running(runner);
+  requireRun(runner: Runner): Run {
+    const run = runOf(runner);
     if (run === null) {
       throw new Error(
-        `${runner.slot.name} has no session to work in: it holds ${runner.task_id ?? "no task"}`,
+        `${runner.slot.name} has no session to work in: it holds ${runner.taskId ?? "no task"}`,
       );
     }
     return run;
   }
 
   track(runner: Runner, work: Promise<void>): void {
-    const taskId = runner.task_id;
-    const tracked = work
+    const taskId = runner.taskId;
+    const settling = work
       .catch((err: Error) => {
         this.publisher.log(
           `${runner.slot.name} on ${taskId} failed: ${err.message}`,
@@ -241,17 +241,17 @@ export class Pool {
         this.stop(runner);
       })
       .finally(() => {
-        this.inflight.delete(tracked);
+        this.tracked.delete(settling);
       });
-    this.inflight.add(tracked);
+    this.tracked.add(settling);
   }
 
-  get running(): number {
-    return this.inflight.size;
+  get inflight(): number {
+    return this.tracked.size;
   }
 
   settled(): Promise<unknown> {
-    return Promise.all([...this.inflight]);
+    return Promise.all([...this.tracked]);
   }
 
   harvest(workspace: { branch: string; worktree: string } | null): void {
@@ -293,16 +293,16 @@ export class Pool {
       return {
         ...idleRow(runner.slot, enabled),
         state: runner.state,
-        task_id: runner.task_id,
+        task_id: runner.taskId,
         role: runner.role,
         pid: runner.process?.pid ?? runner.detachedPid,
-        started_at: runner.started_at,
+        started_at: runner.startedAt,
         activity: runner.process?.stream.state.activity ?? { kind: "none" },
         tokens: runner.tokens,
         context_percent: runner.contextPercent,
         compactions: runner.compactions,
         session: runner.session,
-        log: runner.task_id === null ? null : this.paths.rpcLog(runner.task_id),
+        log: runner.taskId === null ? null : this.paths.rpcLog(runner.taskId),
         retry: runner.retry,
       };
     });

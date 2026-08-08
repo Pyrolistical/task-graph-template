@@ -882,7 +882,7 @@ describe("Feature: the workspace a task is worked in", () => {
       expect(metaOf(dir, id).workspace).toEqual({
         branch: "work/000001",
         worktree: "/tmp/task-graph-server/-repo/000001/worktree",
-        agent: "pi-anthropic-claude-sonnet-4-5-2",
+        slot: "pi-anthropic-claude-sonnet-4-5-2",
         session:
           "/tmp/task-graph-server/-repo/000001/session/worker/019f.jsonl",
       });
@@ -990,7 +990,7 @@ describe("Feature: the workspace a task is worked in", () => {
       const workspace = {
         branch: "work/000001",
         worktree: "/tmp/task-graph-server/-repo/000001/worktree",
-        agent: "pi-anthropic-claude-sonnet-4-5-2",
+        slot: "pi-anthropic-claude-sonnet-4-5-2",
         session: "/tmp/task-graph-server/-repo/000001/session/work/019f.jsonl",
       };
       const id = writeTask(dir, {
@@ -1052,7 +1052,7 @@ describe("Feature: the workspace a task is worked in", () => {
     extra.workspace = {
       branch: "b",
       worktree: "w",
-      agent: "a",
+      slot: "a",
       session: null,
       pid: 1,
     };

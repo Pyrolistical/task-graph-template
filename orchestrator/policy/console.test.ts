@@ -996,11 +996,11 @@ describe("Feature: drawing the whole screen", () => {
     const { hits } = screen(panes, [], layoutOf());
 
     // Then the abort target sits on the activity row and names that slot
-    const abort = hits.find((hit) => hit.command.command === "agent_abort");
+    const abort = hits.find((hit) => hit.command.command === "slot_abort");
     expect(abort!.row).toBe(QUEUE_LINES + 2);
     expect(abort!.command).toEqual({
-      command: "agent_abort",
-      "agent-name-slot": SLOTS[0]!.name,
+      command: "slot_abort",
+      slot: SLOTS[0]!.name,
     });
   });
 
@@ -1013,7 +1013,7 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then each abort target falls within the columns of its own pane
     const width = paneWidth(100, 2);
-    const aborts = hits.filter((hit) => hit.command.command === "agent_abort");
+    const aborts = hits.filter((hit) => hit.command.command === "slot_abort");
     expect(aborts).toHaveLength(2);
     expect(aborts[0]!.from).toBeLessThan(width);
     expect(aborts[1]!.from).toBeGreaterThanOrEqual(width + 1);
@@ -1022,7 +1022,7 @@ describe("Feature: drawing the whole screen", () => {
   test("a click inside the abort target sends the abort, and past it sends nothing", () => {
     // Given a screen with one abort target on it
     const { hits } = screen(cells(1), [], layoutOf());
-    const abort = hits.find((hit) => hit.command.command === "agent_abort")!;
+    const abort = hits.find((hit) => hit.command.command === "slot_abort")!;
 
     // When a click lands on its first column and another one past its last
     const clicked = [
@@ -1059,7 +1059,7 @@ describe("Feature: drawing the whole screen", () => {
     const { hits } = screen(panes, [], layoutOf());
 
     // Then there is no abort target, because there is no command to kill
-    expect(hits.some((hit) => hit.command.command === "agent_abort")).toBe(
+    expect(hits.some((hit) => hit.command.command === "slot_abort")).toBe(
       false,
     );
   });

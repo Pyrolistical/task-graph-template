@@ -51,11 +51,11 @@ describe("Feature: which task is dispatched next", () => {
     return plan(tasks, resumable, blockingCounts(tasks), free, rate);
   }
 
-  function workspace(agent = "pi-anthropic-m-1") {
+  function workspace(slot = "pi-anthropic-m-1") {
     return {
       branch: "work/000001",
       worktree: "/tmp/wt",
-      agent,
+      slot,
       session: "/tmp/s.jsonl",
     };
   }
@@ -503,7 +503,7 @@ describe("Feature: what is waiting on the manager", () => {
         workspace: {
           branch: "work/000001",
           worktree: "/tmp/orchestrator/000001/worktree",
-          agent: "pi-1",
+          slot: "pi-1",
           session: null,
         },
       }),

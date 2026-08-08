@@ -541,8 +541,8 @@ export function screen(
         from: from + width - buttonWidth,
         to: from + width,
         command: {
-          command: "agent_abort",
-          "agent-name-slot": pane.slot.name,
+          command: "slot_abort",
+          slot: pane.slot.name,
         },
       });
     }

@@ -99,7 +99,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     });
 
     // When the slot is aborted
-    pool.abortAgent("pi-fake-fake-1");
+    pool.abortSlot("pi-fake-fake-1");
 
     // Then the pool records that it killed the command the agent was running
     expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
@@ -114,7 +114,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     runner.process = aSession(activity);
 
     // When the slot is aborted
-    const attempt = () => pool.abortAgent("pi-fake-fake-1");
+    const attempt = () => pool.abortSlot("pi-fake-fake-1");
 
     // Then it is refused, because there is no command to kill
     expect(attempt).toThrow(/not running a bash tool call/);
@@ -129,7 +129,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     runner.process = aSession(activity);
 
     // When the slot is aborted
-    const attempt = () => pool.abortAgent("pi-fake-fake-1");
+    const attempt = () => pool.abortSlot("pi-fake-fake-1");
 
     // Then it is refused, because there is no command to kill
     expect(attempt).toThrow(/not running a bash tool call/);
@@ -148,7 +148,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     runner.process = aSession(activity);
 
     // When the slot is aborted
-    const attempt = () => pool.abortAgent("pi-fake-fake-1");
+    const attempt = () => pool.abortSlot("pi-fake-fake-1");
 
     // Then it is refused, because there is no command to kill
     expect(attempt).toThrow(/not running a bash tool call/);
@@ -168,7 +168,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     runner.process = aSession(activity);
 
     // When the slot is aborted
-    const attempt = () => pool.abortAgent("pi-fake-fake-1");
+    const attempt = () => pool.abortSlot("pi-fake-fake-1");
 
     // Then it is refused, because there is no command to kill
     expect(attempt).toThrow(/not running a bash tool call/);
@@ -179,7 +179,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     const { pool } = aPool();
 
     // When that slot is asked to abort its tool call
-    const attempt = () => pool.abortAgent("pi-fake-fake-1");
+    const attempt = () => pool.abortSlot("pi-fake-fake-1");
 
     // Then the pool says the slot is not running
     expect(attempt).toThrow(/pi-fake-fake-1 is not running/);
@@ -190,7 +190,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     const { pool } = aPool();
 
     // When the agent key is passed where a slot name belongs
-    const attempt = () => pool.abortAgent("pi-fake-fake");
+    const attempt = () => pool.abortSlot("pi-fake-fake");
 
     // Then the pool refuses and lists the slot names it has
     expect(attempt).toThrow(/no agent slot named "pi-fake-fake"/);
@@ -204,7 +204,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     git.present.add("/tmp/000042/worktree");
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
-    runner.task_id = "000042";
+    runner.taskId = "000042";
     runner.checkout = {
       branch: "task/000042",
       worktree: "/tmp/000042/worktree",
@@ -221,7 +221,7 @@ describe("Feature: releasing a slot when its work ends", () => {
 
     // Then the slot reads idle again, holding nothing
     expect(pool.rows()[0]!.state).toBe("IDLE");
-    expect(pool.runner("pi-fake-fake-1").task_id).toBeNull();
+    expect(pool.runner("pi-fake-fake-1").taskId).toBeNull();
   });
 
   test("work that throws stops the slot and says which task it failed on", async () => {
@@ -229,7 +229,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     const { pool, log } = aPool();
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
-    runner.task_id = "000042";
+    runner.taskId = "000042";
 
     // When the work the pool is tracking rejects
     pool.track(runner, Promise.reject(new Error("the provider hung up")));
@@ -249,7 +249,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     const { pool } = aPool();
 
     // When the amount of work in flight is read
-    const running = pool.running;
+    const running = pool.inflight;
 
     // Then there is none, so a tick has nothing to wait on
     expect(running).toBe(0);

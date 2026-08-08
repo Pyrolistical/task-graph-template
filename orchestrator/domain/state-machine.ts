@@ -137,23 +137,23 @@ export const STAGES = [
 
 type AnyStage = (typeof STAGES)[number];
 
-export type AgentStage = Extract<AnyStage, { role: Role }>;
+export type ClaimStage = Extract<AnyStage, { role: Role }>;
 
 export type ReviewStage = Extract<AnyStage, { role: "reviewer" }>;
 
 export type StageState = AnyStage["state"];
 
-export type ClaimState = AgentStage["state"];
+export type ClaimState = ClaimStage["state"];
 
 export type ReviewState = ReviewStage["state"];
 
 export type AdvancingState = Exclude<StageState, "MANAGER_REVIEW">;
 
-export const AGENT_STAGES = STAGES.filter(
-  (stage): stage is AgentStage => stage.role !== null,
+export const CLAIM_STAGES = STAGES.filter(
+  (stage): stage is ClaimStage => stage.role !== null,
 );
 
-export const AGENT_STATES = AGENT_STAGES.map(
+export const CLAIM_STATES = CLAIM_STAGES.map(
   (stage) => stage.state,
 ) as ClaimState[];
 
@@ -200,8 +200,8 @@ export function isStage(state: TaskState): state is StageState {
   return state in STAGE_OF;
 }
 
-export function isAgentState(state: TaskState): state is ClaimState {
-  return (AGENT_STATES as readonly string[]).includes(state);
+export function isClaimState(state: TaskState): state is ClaimState {
+  return (CLAIM_STATES as readonly string[]).includes(state);
 }
 
 export function isReviewState(state: TaskState): state is ReviewState {
@@ -414,7 +414,7 @@ export function decide(
     );
   }
   if (
-    isAgentState(from) &&
+    isClaimState(from) &&
     AGENT_SPEECH.includes(name) &&
     meta.claimed_by === null
   ) {

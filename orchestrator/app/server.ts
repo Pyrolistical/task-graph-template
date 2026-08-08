@@ -198,8 +198,8 @@ export class Server implements Manager {
     return this.pool.setAgentEnabled(agent, enabled);
   }
 
-  abortAgent(name: string): SlotRow {
-    return this.pool.abortAgent(name);
+  abortSlot(name: string): SlotRow {
+    return this.pool.abortSlot(name);
   }
 
   agentRows(): SlotRow[] {
@@ -227,7 +227,7 @@ export class Server implements Manager {
   }
 
   async drain(): Promise<void> {
-    while (this.pool.running > 0 || this.checker.running > 0) {
+    while (this.pool.inflight > 0 || this.checker.inflight > 0) {
       await Promise.all([this.pool.settled(), this.checker.settled()]);
     }
   }
@@ -268,8 +268,8 @@ export class Server implements Manager {
     try {
       if (command.command === "scheduler") {
         this.setSchedulerEnabled(command.enabled);
-      } else if (command.command === "agent_abort") {
-        this.abortAgent(command["agent-name-slot"]);
+      } else if (command.command === "slot_abort") {
+        this.abortSlot(command.slot);
       } else {
         this.setAgentEnabled(command.agent, command.enabled);
       }

@@ -28,7 +28,7 @@ const timestamp = z
 const Workspace = z.strictObject({
   branch: nonEmpty,
   worktree: nonEmpty,
-  agent: nonEmpty,
+  slot: nonEmpty,
   session: nonEmpty.nullable(),
 });
 
@@ -70,7 +70,7 @@ const QUOTED_TEXT_FIELDS = new Set([
   "held_reason",
   "branch",
   "worktree",
-  "agent",
+  "slot",
   "session",
 ]);
 

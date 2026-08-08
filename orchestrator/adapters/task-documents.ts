@@ -13,10 +13,10 @@ import {
   type TransitionName,
   type TransitionResult,
   type ValidState,
-  AGENT_STATES,
+  CLAIM_STATES,
   ENTRY_STATE,
   decide,
-  isAgentState,
+  isClaimState,
   isHeld,
   requireText,
 } from "../domain/state-machine.ts";
@@ -195,9 +195,9 @@ export function takeClaim(
 
     const { meta, body } = readTaskFile(filePath);
 
-    if (!isAgentState(meta.state)) {
+    if (!isClaimState(meta.state)) {
       throw new Error(
-        `Task "${taskId}" is in ${meta.state}, which no agent runs. Claimable states: ${AGENT_STATES.join(", ")}`,
+        `Task "${taskId}" is in ${meta.state}, which no agent runs. Claimable states: ${CLAIM_STATES.join(", ")}`,
       );
     }
     if (meta.claimed_by !== null) {
@@ -214,7 +214,7 @@ export function takeClaim(
       meta.workspace = {
         branch: requireText(args.branch, "branch"),
         worktree: requireText(args.worktree, "worktree"),
-        agent: meta.claimed_by,
+        slot: meta.claimed_by,
         session,
       };
     }

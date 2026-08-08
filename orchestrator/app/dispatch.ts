@@ -73,9 +73,9 @@ export class Dispatch {
   ): Promise<void> {
     const runner = this.pool.runner(slot.name);
     runner.state = "SPAWNING";
-    runner.task_id = task.id;
-    runner.started_at = new Date().toISOString();
-    runner.stage = candidate.stage;
+    runner.taskId = task.id;
+    runner.startedAt = new Date().toISOString();
+    runner.taskState = candidate.state;
     runner.role = candidate.role;
     runner.issues.clear();
 
@@ -84,7 +84,7 @@ export class Dispatch {
       return;
     }
 
-    const stage = candidate.stage;
+    const stage = candidate.state;
     this.paths.prepare(task.id);
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
@@ -126,7 +126,7 @@ export class Dispatch {
     const queued = this.inbox.drain(task.id, stage);
     const message = this.settle.nudge(task.id, stage);
     await this.settle.prompt(
-      this.pool.runOf(runner),
+      this.pool.requireRun(runner),
       queued === "" ? message : `${queued}\n\n${message}`,
     );
     this.settle.watch(runner);
@@ -173,7 +173,7 @@ export class Dispatch {
 
     const queued = this.inbox.drain(task.id, "WORK");
     await this.settle.prompt(
-      this.pool.runOf(runner),
+      this.pool.requireRun(runner),
       queued === "" ? this.settle.nudge(task.id, "WORK") : queued,
     );
     this.settle.watch(runner);

@@ -701,7 +701,7 @@ describe("Feature: aborting the command an agent is running", () => {
       expect(row.activity.kind).toBe("tool-call");
 
       // When the manager aborts that command
-      server.abortAgent(row.name);
+      server.abortSlot(row.name);
 
       // Then the command is killed and the agent finishes its turn from there
       server.setSchedulerEnabled(false);
@@ -725,7 +725,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts it
-      const attempt = () => server.abortAgent("pi-fake-fake-1");
+      const attempt = () => server.abortSlot("pi-fake-fake-1");
 
       // Then it is refused, because there is no command to kill
       expect(attempt).toThrow(/not running/);
@@ -743,7 +743,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts a slot that is not in the pool
-      const attempt = () => server.abortAgent("pi-nobody-1");
+      const attempt = () => server.abortSlot("pi-nobody-1");
 
       // Then it is refused, and the slot names it does have are listed
       expect(attempt).toThrow(/no agent slot named "pi-nobody-1"/);
@@ -762,7 +762,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts using the agent key rather than the slot name
-      const attempt = () => server.abortAgent("pi-fake-fake");
+      const attempt = () => server.abortSlot("pi-fake-fake");
 
       // Then it is refused, because an abort names one running process
       expect(attempt).toThrow(/no agent slot named "pi-fake-fake"/);
@@ -798,8 +798,8 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // When the console writes an abort for that slot
       writeCommand(pathsOf(server), {
-        command: "agent_abort",
-        "agent-name-slot": "pi-fake-fake-1",
+        command: "slot_abort",
+        slot: "pi-fake-fake-1",
       });
 
       // Then the command is killed, exactly as the manager's own abort would
@@ -831,8 +831,8 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // When the console writes an abort for that slot
       writeCommand(pathsOf(server), {
-        command: "agent_abort",
-        "agent-name-slot": "pi-fake-fake-1",
+        command: "slot_abort",
+        slot: "pi-fake-fake-1",
       });
 
       // Then the refusal is logged and the server carries on running

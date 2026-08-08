@@ -97,12 +97,12 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then there is one tool for each judgement only a person can make
       expect(tools.tools.map((t) => t.name).sort()).toEqual([
-        "agent_abort",
         "disable_agent",
         "disable_scheduler",
         "enable_agent",
         "enable_scheduler",
         "reload_prompts",
+        "slot_abort",
         "task_abort",
         "task_create",
         "task_feedback",
@@ -770,8 +770,8 @@ describe("Feature: the tool surface the manager works through", () => {
 
     // When the manager aborts one of them
     const result = await client.callTool({
-      name: "agent_abort",
-      arguments: { agent: slots[0]!.name },
+      name: "slot_abort",
+      arguments: { slot: slots[0]!.name },
     });
 
     // Then it is refused, because there is no command of its own to kill
@@ -790,8 +790,8 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // When the manager aborts a slot that does not exist
       const result = await client.callTool({
-        name: "agent_abort",
-        arguments: { agent: "pi-fake-fake9" },
+        name: "slot_abort",
+        arguments: { slot: "pi-fake-fake9" },
       });
 
       // Then the refusal lists the slots there are, so the name is easy to fix
