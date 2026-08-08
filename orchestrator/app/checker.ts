@@ -1,4 +1,6 @@
-import type { Checks, Messages, Prompts } from "./ports.ts";
+import type { Checks } from "./ports/checks.ts";
+import type { Messages } from "./ports/messages.ts";
+import type { Prompts } from "./ports/prompts.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";

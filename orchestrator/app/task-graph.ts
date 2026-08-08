@@ -1,13 +1,9 @@
-import type {
-  ClaimArgs,
-  CreatedTask,
-  Reviews,
-  Transitions,
-  Paths,
-  Publisher,
-  Tasks,
-  Workspaces,
-} from "./ports.ts";
+import type { Paths } from "./ports/paths.ts";
+import type { Publisher } from "./ports/publisher.ts";
+import type { Reviews } from "./ports/reviews.ts";
+import type { ClaimArgs, CreatedTask, Tasks } from "./ports/tasks.ts";
+import type { Transitions } from "./ports/transitions.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import {
   type TaskRow,
   RECENT_TASKS,

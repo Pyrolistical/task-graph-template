@@ -1,10 +1,8 @@
-import type {
-  Assignments,
-  Messages,
-  Paths,
-  Publisher,
-  Workspaces,
-} from "./ports.ts";
+import type { Assignments } from "./ports/assignments.ts";
+import type { Messages } from "./ports/messages.ts";
+import type { Paths } from "./ports/paths.ts";
+import type { Publisher } from "./ports/publisher.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import { type Runner, Pool } from "./pool.ts";
 import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";

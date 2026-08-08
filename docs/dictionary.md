@@ -74,7 +74,7 @@ one of them is wrong.
 | runtime directory | `/tmp/task-graph-server/<repo>/` — everything the server knows, on disk     | `Runtime`, `Paths`             |
 | task directory    | `~/task-graph/<key>/` — the task documents, `agents.json` and the overrides | `tasksDir`                     |
 | command channel   | the one file the console writes back on                                     | `CommandChannel`, `Command`    |
-| port              | what the application needs, declared in `app/ports.ts`                      | `Tasks`, `Workspaces`, …       |
+| port              | what the application needs, one file per port in `app/ports/`               | `Tasks`, `Workspaces`, …       |
 | adapter           | the one implementation of a port that touches the outside world             | `TaskDocuments`, `git.ts`, …   |
 
 ## Words that are not used
@@ -99,7 +99,7 @@ one of them is wrong.
   is `camelCase`, in the same object as its serialized neighbours if it must be
 - ports are plural nouns for the capability (`Tasks`, `Messages`, `Reviews`);
   adapters are named for the thing they actually are (`TaskDocuments`,
-  `TransitionLog`, `CheckRunner`)
+  `TransitionLog`, `CheckRunner`), and each declares `implements` on its port
 - application modules are nouns, one per file, and the file is the noun in
   kebab-case: `dispatcher.ts` holds `Dispatcher`, `settler.ts` holds `Settler`
 - `xOf(y)` derives an `x` from a `y` (`agentOf`, `tailOf`, `runOf`, `varsOf`)

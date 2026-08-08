@@ -1,10 +1,8 @@
-import type {
-  Assignments,
-  Reviews,
-  Prompts,
-  Publisher,
-  Workspaces,
-} from "./ports.ts";
+import type { Assignments } from "./ports/assignments.ts";
+import type { Prompts } from "./ports/prompts.ts";
+import type { Publisher } from "./ports/publisher.ts";
+import type { Reviews } from "./ports/reviews.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import {
   type Run,
   type Runner,

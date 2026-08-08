@@ -1,4 +1,6 @@
-import type { Paths, Publisher, Workspaces } from "./ports.ts";
+import type { Paths } from "./ports/paths.ts";
+import type { Publisher } from "./ports/publisher.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import { Pool } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";

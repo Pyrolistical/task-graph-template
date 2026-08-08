@@ -1,20 +1,13 @@
-import type {
-  AgentProcess,
-  Agents,
-  Assignments,
-  CreatedTask,
-  Messages,
-  Reviews,
-  Transitions,
-  TransitionEntry,
-  Paths,
-  Prompts,
-  Publisher,
-  Tasks,
-  ViewName,
-  Views,
-  Workspaces,
-} from "../app/ports.ts";
+import type { AgentProcess, Agents } from "../app/ports/agents.ts";
+import type { Assignments } from "../app/ports/assignments.ts";
+import type { Messages } from "../app/ports/messages.ts";
+import type { Paths } from "../app/ports/paths.ts";
+import type { Prompts } from "../app/ports/prompts.ts";
+import type { Publisher, ViewName, Views } from "../app/ports/publisher.ts";
+import type { Reviews } from "../app/ports/reviews.ts";
+import type { CreatedTask, Tasks } from "../app/ports/tasks.ts";
+import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
+import type { Workspaces } from "../app/ports/workspaces.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";

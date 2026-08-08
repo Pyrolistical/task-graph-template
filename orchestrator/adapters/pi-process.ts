@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import type { AgentProcess } from "../app/ports/agents.ts";
 import {
   type OnCompaction,
   type OnResult,
@@ -9,7 +10,7 @@ import {
   spawnArgs,
 } from "../domain/protocol.ts";
 
-export class PiProcess {
+export class PiProcess implements AgentProcess {
   readonly stream: PiStream;
   readonly pid: number;
 

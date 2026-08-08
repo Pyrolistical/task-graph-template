@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ViewName } from "../app/ports.ts";
+import type { ViewName } from "../app/ports/publisher.ts";
 import type { TaskId } from "../domain/task.ts";
 import {
   type ClaimState,

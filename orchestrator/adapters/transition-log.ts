@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { TransitionEntry, Transitions } from "../app/ports.ts";
+import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
 
 export const TRANSITION_LOG_LINES = 1000;
 

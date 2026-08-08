@@ -1,11 +1,7 @@
-import type {
-  AgentProcess,
-  AgentSpec,
-  Agents,
-  Paths,
-  Publisher,
-  Workspaces,
-} from "./ports.ts";
+import type { AgentProcess, AgentSpec, Agents } from "./ports/agents.ts";
+import type { Paths } from "./ports/paths.ts";
+import type { Publisher } from "./ports/publisher.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import {
   type SlotRow,
   type Slot,

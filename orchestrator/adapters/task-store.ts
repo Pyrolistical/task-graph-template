@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { CreatedTask } from "../app/ports.ts";
+import type { CreatedTask } from "../app/ports/tasks.ts";
 import {
   type TaskId,
   type TaskMeta,

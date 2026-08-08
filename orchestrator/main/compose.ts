@@ -1,12 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  Agents,
-  Checks,
-  CommandChannel,
-  Publisher,
-  Workspaces,
-} from "../app/ports.ts";
 import { Dispatcher } from "../app/dispatcher.ts";
 import { Lander } from "../app/lander.ts";
 import { Pool } from "../app/pool.ts";
@@ -16,34 +9,28 @@ import { Server, type ServerConfig } from "../app/server.ts";
 import { Settler } from "../app/settler.ts";
 import { TaskGraph } from "../app/task-graph.ts";
 import { branchName } from "../domain/workspace.ts";
-import { STAGE_OF } from "../domain/state-machine.ts";
-import { agentWrite, checkWrite, loadAgents } from "../adapters/agent-pool.ts";
-import { CheckRunner } from "../adapters/check-runner.ts";
-import { takeCommand, watchCommands } from "../adapters/command.ts";
+import { loadAgents } from "../adapters/agent-pool.ts";
+import { CommandFile } from "../adapters/command.ts";
 import * as git from "../adapters/git.ts";
-import { PiProcess } from "../adapters/pi-process.ts";
+import { GitWorkspaces } from "../adapters/git-workspaces.ts";
+import { PiAgents } from "../adapters/pi-agents.ts";
 import { PromptFiles } from "../adapters/prompt-files.ts";
 import {
   Runtime,
   defaultAgentsPath,
   defaultTasksDir,
-  viewJson,
-  writeAtomic,
 } from "../adapters/runtime.ts";
 import {
-  AGENT_OOM_SCORE_ADJUST,
-  CHECK_OOM_SCORE_ADJUST,
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
   hasLimits,
-  overlays,
-  sandbox,
 } from "../adapters/sandbox.ts";
+import { SandboxedChecks } from "../adapters/sandboxed-checks.ts";
 import { isProcessAlive } from "../adapters/task-store.ts";
 import { TaskDocuments } from "../adapters/task-documents.ts";
 import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
-import type { SlotRow } from "../domain/agents.ts";
+import { ViewFiles } from "../adapters/view-files.ts";
 
 const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
 
@@ -97,89 +84,20 @@ export function wire(options: WiringOptions): Server {
     );
   }
 
-  const checks = new CheckRunner();
+  const checks = new SandboxedChecks(runtime, slots, repo, sandboxCommand);
 
   const tasks = new TaskDocuments(tasksDir, orchestratorDir);
 
-  const workspaces: Workspaces = {
-    create: (branch, worktree, base) =>
-      git.createWorkspace(repo, branch, worktree, base),
-    remove: (worktree) => git.removeWorkspace(worktree),
-    exists: (worktree) => fs.existsSync(worktree),
-    branchExists: (branch) => git.branchExists(repo, branch),
-    deleteBranch: (branch) => git.deleteBranch(repo, branch),
-    head: (worktree) => git.head(worktree),
-    resetTo: (worktree, commit) => git.resetTo(worktree, commit),
-    status: (worktree, base) => ({
-      dirty: git.uncommitted(worktree),
-      commits: git.commitCount(worktree, base),
-    }),
-    harvest: (worktree, branch) => git.harvest(repo, worktree, branch),
-    syncBase: (worktree, base) => git.syncBase(worktree, base),
-    rebase: (worktree, base) => git.rebase(worktree, base),
-    abortRebase: (worktree) => git.abortRebase(worktree),
-    fastForward: (branch) => git.mergeFastForward(repo, branch),
-    isAncestor: (ref, of) => git.isAncestor(repo, ref, of),
-  };
+  const workspaces = new GitWorkspaces(repo);
 
-  const agents: Agents = {
-    slots: () => slots,
-    hasSession: (at) => fs.existsSync(at),
-    spawn: (spec, onUsage, onCompaction, onResult) =>
-      new PiProcess(
-        {
-          provider: spec.slot.provider,
-          model: spec.slot.model,
-          sessionDir: runtime.sessionDir(spec.taskId, spec.role),
-          name: `${spec.taskId} ${spec.state}`,
-          cwd: spec.cwd,
-          extension: path.join(
-            orchestratorDir,
-            `result-tools-${STAGE_OF[spec.state].tools}.ts`,
-          ),
-          log: runtime.rpcLog(spec.taskId),
-        },
-        piCommand,
-        sandbox(
-          {
-            cwd: spec.cwd,
-            writable: [runtime.taskRoot(spec.taskId)],
-            readable: [repo, orchestratorDir],
-            overlay: overlays(agentWrite(spec.slot)),
-            oomScoreAdjust: AGENT_OOM_SCORE_ADJUST,
-          },
-          sandboxCommand,
-        ),
-        onUsage,
-        onCompaction,
-        onResult,
-      ),
-  };
-
-  const checkPort: Checks = {
-    get view() {
-      return checks.view;
-    },
-    isRunning: (taskId) => checks.isRunning(taskId),
-    run: (taskId, index, command, worktree) =>
-      checks.start(
-        taskId,
-        index,
-        command,
-        worktree,
-        runtime.checkLog(taskId, index),
-        sandbox(
-          {
-            cwd: worktree,
-            writable: [worktree],
-            readable: [repo],
-            overlay: overlays(checkWrite(slots)),
-            oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
-          },
-          sandboxCommand,
-        ),
-      ),
-  };
+  const agents = new PiAgents(
+    runtime,
+    slots,
+    repo,
+    orchestratorDir,
+    piCommand,
+    sandboxCommand,
+  );
 
   const prompts = new PromptFiles(orchestratorDir, overridesDir);
 
@@ -187,56 +105,9 @@ export function wire(options: WiringOptions): Server {
 
   const transitions = new TransitionLog(runtime.transitionLog);
 
-  const publisher: Publisher = {
-    publish: (views) => {
-      writeAtomic(
-        runtime.slotsView,
-        viewJson(views.seq, "slots", views.slots, {
-          agents_file: views.agentsFile,
-        }),
-      );
-      writeAtomic(
-        runtime.checksView,
-        viewJson(views.seq, "checks", views.checks),
-      );
-      writeAtomic(runtime.tasksView, viewJson(views.seq, "tasks", views.tasks));
-      writeAtomic(runtime.inboxView, viewJson(views.seq, "inbox", views.inbox));
-      writeAtomic(
-        runtime.queueView,
-        viewJson(views.seq, "queue", views.queue, {
-          scheduling: views.scheduling,
-        }),
-      );
-    },
-    read: (name) => {
-      const filePath = runtime.view(name);
-      return fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, "utf-8")
-        : "{}";
-    },
-    lastSlots: () => {
-      if (!fs.existsSync(runtime.slotsView)) {
-        return null;
-      }
-      try {
-        return (
-          JSON.parse(fs.readFileSync(runtime.slotsView, "utf-8")) as {
-            slots: SlotRow[];
-          }
-        ).slots;
-      } catch {
-        return null;
-      }
-    },
-    log: (line) => {
-      runtime.log(line);
-    },
-  };
+  const publisher = new ViewFiles(runtime);
 
-  const commands: CommandChannel = {
-    take: () => takeCommand(runtime),
-    watch: (apply) => watchCommands(runtime, apply),
-  };
+  const commands = new CommandFile(runtime);
 
   const graph = new TaskGraph(
     tasks,
@@ -268,7 +139,7 @@ export function wire(options: WiringOptions): Server {
     publisher,
     config.base,
   );
-  const checker = new Checker(graph, checkPort, files, prompts, repo);
+  const checker = new Checker(graph, checks, files, prompts, repo);
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
   const recovery = new Recovery(
     graph,

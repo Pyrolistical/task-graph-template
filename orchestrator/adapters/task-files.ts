@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Assignments, Messages, Reviews } from "../app/ports.ts";
+import type { Assignments } from "../app/ports/assignments.ts";
+import type { Messages } from "../app/ports/messages.ts";
+import type { Reviews } from "../app/ports/reviews.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
 import { Runtime } from "./runtime.ts";

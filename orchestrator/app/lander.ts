@@ -1,4 +1,4 @@
-import type { Workspaces } from "./ports.ts";
+import type { Workspaces } from "./ports/workspaces.ts";
 import { Pool } from "./pool.ts";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";

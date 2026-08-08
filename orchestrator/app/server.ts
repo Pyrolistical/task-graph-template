@@ -1,13 +1,9 @@
-import type {
-  ClaimArgs,
-  CommandChannel,
-  CreatedTask,
-  Transitions,
-  Paths,
-  Prompts,
-  Publisher,
-  ViewName,
-} from "./ports.ts";
+import type { CommandChannel } from "./ports/command-channel.ts";
+import type { Paths } from "./ports/paths.ts";
+import type { Prompts } from "./ports/prompts.ts";
+import type { Publisher, ViewName } from "./ports/publisher.ts";
+import type { ClaimArgs, CreatedTask } from "./ports/tasks.ts";
+import type { Transitions } from "./ports/transitions.ts";
 import type { Manager, PathReport } from "./manager.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { Lander } from "./lander.ts";

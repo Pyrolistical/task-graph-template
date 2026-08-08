@@ -1,4 +1,5 @@
-import type { CreatedTask, ViewName } from "./ports.ts";
+import type { ViewName } from "./ports/publisher.ts";
+import type { CreatedTask } from "./ports/tasks.ts";
 import type { SlotRow } from "../domain/agents.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 import type { TransitionResult } from "../domain/state-machine.ts";

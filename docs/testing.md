@@ -45,7 +45,7 @@ What it does is declared, not coded. A `Plan` maps task id → claimed state →
 | File                  | What it stands up                                                                                                                                               |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `temp-dirs.ts`        | `testInTempDirs()`, a `test()` that gives each test its own temp directories and removes them on success, keeping them on failure so a failure can be inspected |
-| `ports.ts`            | pure fakes for every port in `app/ports.ts`, so an app module can be driven with no filesystem at all                                                           |
+| `ports.ts`            | pure fakes for every port in `app/ports/`, so an app module can be driven with no filesystem at all                                                             |
 | `orchestrator-jig.ts` | a real git repo with one commit, and `commitIn` to add more                                                                                                     |
 | `graph-jig.ts`        | a task directory seeded with `next-task-id`, plus `baseMeta` and `bodyOf` for document-level tests                                                              |
 | `fixture.ts`          | the whole world: repo, task directory, agents file, runtime root, fake `pi`, and the `Plan` it runs                                                             |

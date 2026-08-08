@@ -20,7 +20,7 @@ import {
 } from "../domain/state-machine.ts";
 import { applyTransition } from "../adapters/task-documents.ts";
 import { clearClaim, takeClaim } from "../adapters/task-documents.ts";
-import type { ClaimArgs } from "../app/ports.ts";
+import type { ClaimArgs } from "../app/ports/tasks.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 
 export { ORCHESTRATOR_DIR };

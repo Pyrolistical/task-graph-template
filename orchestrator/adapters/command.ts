@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import type { CommandChannel } from "../app/ports/command-channel.ts";
 import { type Command, Command as CommandSchema } from "../domain/command.ts";
 
 export type { Command };
@@ -49,4 +50,16 @@ export function watchCommands(
   });
   watcher.unref();
   return watcher;
+}
+
+export class CommandFile implements CommandChannel {
+  constructor(private readonly runtime: Runtime) {}
+
+  take(): Command | null {
+    return takeCommand(this.runtime);
+  }
+
+  watch(apply: (command: Command) => void): { close(): void } {
+    return watchCommands(this.runtime, apply);
+  }
 }

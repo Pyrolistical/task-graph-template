@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { type TaskId, isValidId } from "./orchestrator/domain/task.ts";
-import type { ViewName } from "./orchestrator/app/ports.ts";
+import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
 import { Server } from "./orchestrator/app/server.ts";
 import { Runtime } from "./orchestrator/adapters/runtime.ts";

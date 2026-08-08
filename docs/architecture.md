@@ -21,7 +21,7 @@ The orchestrator is an onion: five layers, and every dependency points inward.
 ```
 
 - `domain/` and `policy/` name no filesystem, no subprocess, no environment
-- `app/` knows the ports in `app/ports.ts` and nothing about what implements them
+- `app/` knows the ports in `app/ports/` and nothing about what implements them
 - `adapters/` is where `node:fs`, `git`, `bwrap` and `pi` live
 - `main/compose.ts` is the only module that knows both halves
 
@@ -75,24 +75,27 @@ the ~15 operations behind the MCP tools and resources, and nothing else. `mcp.ts
 holds a `Manager`, never a `Server`, so it cannot reach a store, a path or a
 prompt through it.
 
-`app/ports.ts` declares what the application needs; `main/compose.ts` supplies it,
-and hands each port to the constructor of the module that uses it. There is no
-bag of dependencies: a module names what it needs, and gets exactly that.
+`app/ports/` declares what the application needs, one file per port;
+`main/compose.ts` supplies it, and hands each port to the constructor of the
+module that uses it. There is no bag of dependencies: a module names what it
+needs, and gets exactly that. `compose.ts` only constructs and wires: every port
+is a class in `adapters/` that declares `implements`, so an adapter is checked
+where it is written rather than where it is passed.
 
-| Port             | What it is for                                          | Adapter                            |
-| ---------------- | ------------------------------------------------------- | ---------------------------------- |
-| `Tasks`          | the graph on disk, under its lock                       | `task-documents` over `task-store` |
-| `Workspaces`     | clones, branches, rebases, and the status a guard reads | `git.ts`                           |
-| `Agents`         | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`           |
-| `Checks`         | running a declared check and reporting how it went      | `check-runner`                     |
-| `Prompts`        | every word an agent reads                               | `prompt-files`                     |
-| `Messages`       | the message queue a task carries between dispatches     | `task-files`                       |
-| `Reviews`        | `findings.json` and the review-failure count            | `task-files`                       |
-| `Assignments`    | the live `ASSIGNMENT.md` and its rotation               | `task-files`                       |
-| `Transitions`    | the transition log and its cursor                       | `transition-log`                   |
-| `Publisher`      | the five views and the server log                       | `runtime`                          |
-| `CommandChannel` | the command channel the TUI writes on                   | `command`                          |
-| `Paths`          | the runtime directory layout                            | `runtime`                          |
+| Port             | What it is for                                          | Adapter                                |
+| ---------------- | ------------------------------------------------------- | -------------------------------------- |
+| `Tasks`          | the graph on disk, under its lock                       | `task-documents` over `task-store`     |
+| `Workspaces`     | clones, branches, rebases, and the status a guard reads | `git-workspaces` over `git.ts`         |
+| `Agents`         | spawning a sandboxed `pi` and talking to it             | `pi-agents` over `pi-process`          |
+| `Checks`         | running a declared check and reporting how it went      | `sandboxed-checks` over `check-runner` |
+| `Prompts`        | every word an agent reads                               | `prompt-files`                         |
+| `Messages`       | the message queue a task carries between dispatches     | `task-files`                           |
+| `Reviews`        | `findings.json` and the review-failure count            | `task-files`                           |
+| `Assignments`    | the live `ASSIGNMENT.md` and its rotation               | `task-files`                           |
+| `Transitions`    | the transition log and its cursor                       | `transition-log`                       |
+| `Publisher`      | the five views and the server log                       | `view-files` over `runtime`            |
+| `CommandChannel` | the command channel the TUI writes on                   | `command`                              |
+| `Paths`          | the runtime directory layout                            | `runtime`                              |
 
 `Agents` and `Checks` are the two that reach a subprocess. `main/` drives the
 real ones — that is what those suites are for — so a port here buys a seam, not
