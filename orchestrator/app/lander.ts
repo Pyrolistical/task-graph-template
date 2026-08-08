@@ -1,6 +1,6 @@
 import type { Workspaces } from "./ports.ts";
 import { Pool } from "./pool.ts";
-import { RunChecks } from "./run-checks.ts";
+import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { HELD_STATES, type TaskState } from "../domain/state-machine.ts";
 import type { TransitionResult } from "../domain/state-machine.ts";
@@ -8,11 +8,11 @@ import type { TaskId, TaskMeta } from "../domain/task.ts";
 
 const ABORTABLE_STATES: TaskState[] = ["MANAGER_REVIEW", ...HELD_STATES];
 
-export class Land {
+export class Lander {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
-    private readonly checks: RunChecks,
+    private readonly checks: Checker,
     private readonly workspaces: Workspaces,
     private readonly base: string,
   ) {}

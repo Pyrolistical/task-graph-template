@@ -3,7 +3,7 @@ import { Pool } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 
-export class Recover {
+export class Recovery {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,

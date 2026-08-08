@@ -6,7 +6,7 @@ import type {
   Workspaces,
 } from "./ports.ts";
 import { type Runner, Pool } from "./pool.ts";
-import { SettleAgent } from "./settle-agent.ts";
+import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
@@ -14,11 +14,11 @@ import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
 import { type Candidate, plan } from "../policy/scheduler.ts";
 
-export class Dispatch {
+export class Dispatcher {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
-    private readonly settle: SettleAgent,
+    private readonly settler: Settler,
     private readonly workspaces: Workspaces,
     private readonly assignments: Assignments,
     private readonly messages: Messages,
@@ -107,7 +107,7 @@ export class Dispatch {
     const process = this.pool.spawn(
       runner,
       { taskId: task.id, state: stage, role: candidate.role, cwd: worktree },
-      (settling) => this.settle.compacted(settling),
+      (settling) => this.settler.compacted(settling),
     );
     runner.process = process;
 
@@ -124,12 +124,12 @@ export class Dispatch {
 
     runner.state = "BUSY";
     const queued = this.messages.drain(task.id, stage);
-    const message = this.settle.nudge(task.id, stage);
-    await this.settle.prompt(
+    const message = this.settler.nudge(task.id, stage);
+    await this.settler.prompt(
       this.pool.requireRun(runner),
       queued === "" ? message : `${queued}\n\n${message}`,
     );
-    this.settle.watch(runner);
+    this.settler.watch(runner);
   }
 
   private async resume(
@@ -154,7 +154,7 @@ export class Dispatch {
         role,
         cwd: workspace.worktree,
       },
-      (settling) => this.settle.compacted(settling),
+      (settling) => this.settler.compacted(settling),
     );
     runner.process = process;
 
@@ -172,11 +172,11 @@ export class Dispatch {
     runner.state = "BUSY";
 
     const queued = this.messages.drain(task.id, "WORK");
-    await this.settle.prompt(
+    await this.settler.prompt(
       this.pool.requireRun(runner),
-      queued === "" ? this.settle.nudge(task.id, "WORK") : queued,
+      queued === "" ? this.settler.nudge(task.id, "WORK") : queued,
     );
-    this.settle.watch(runner);
+    this.settler.watch(runner);
   }
 
   private requireStill(task: TaskMeta, slot: Slot): void {

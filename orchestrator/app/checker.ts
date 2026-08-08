@@ -3,7 +3,7 @@ import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 
-export class RunChecks {
+export class Checker {
   private readonly pending = new Map<TaskId, Promise<void>>();
 
   constructor(

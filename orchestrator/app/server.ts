@@ -9,11 +9,11 @@ import type {
   ViewName,
 } from "./ports.ts";
 import type { Manager, PathReport } from "./manager.ts";
-import { Dispatch } from "./dispatch.ts";
-import { Land } from "./land.ts";
+import { Dispatcher } from "./dispatcher.ts";
+import { Lander } from "./lander.ts";
 import { Pool } from "./pool.ts";
-import { Recover } from "./recover.ts";
-import { RunChecks } from "./run-checks.ts";
+import { Recovery } from "./recovery.ts";
+import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Command } from "../domain/command.ts";
 import type { SlotRow } from "../domain/agents.ts";
@@ -44,10 +44,10 @@ export class Server implements Manager {
     readonly config: ServerConfig,
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
-    private readonly dispatcher: Dispatch,
-    private readonly checker: RunChecks,
-    private readonly lander: Land,
-    private readonly recovery: Recover,
+    private readonly dispatcher: Dispatcher,
+    private readonly checker: Checker,
+    private readonly lander: Lander,
+    private readonly recovery: Recovery,
     private readonly commands: CommandChannel,
     private readonly transitions: Transitions,
     private readonly promptStore: Prompts,

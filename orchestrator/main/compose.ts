@@ -7,13 +7,13 @@ import type {
   Publisher,
   Workspaces,
 } from "../app/ports.ts";
-import { Dispatch } from "../app/dispatch.ts";
-import { Land } from "../app/land.ts";
+import { Dispatcher } from "../app/dispatcher.ts";
+import { Lander } from "../app/lander.ts";
 import { Pool } from "../app/pool.ts";
-import { Recover } from "../app/recover.ts";
-import { RunChecks } from "../app/run-checks.ts";
+import { Recovery } from "../app/recovery.ts";
+import { Checker } from "../app/checker.ts";
 import { Server, type ServerConfig } from "../app/server.ts";
-import { SettleAgent } from "../app/settle-agent.ts";
+import { Settler } from "../app/settler.ts";
 import { TaskGraph } from "../app/task-graph.ts";
 import { branchName } from "../domain/workspace.ts";
 import { STAGE_OF } from "../domain/state-machine.ts";
@@ -247,7 +247,7 @@ export function wire(options: WiringOptions): Server {
     runtime,
   );
   const pool = new Pool(agents, workspaces, runtime, publisher, isProcessAlive);
-  const settle = new SettleAgent(
+  const settler = new Settler(
     graph,
     pool,
     files,
@@ -257,10 +257,10 @@ export function wire(options: WiringOptions): Server {
     workspaces,
     config.base,
   );
-  const dispatch = new Dispatch(
+  const dispatcher = new Dispatcher(
     graph,
     pool,
-    settle,
+    settler,
     workspaces,
     files,
     files,
@@ -268,9 +268,9 @@ export function wire(options: WiringOptions): Server {
     publisher,
     config.base,
   );
-  const runChecks = new RunChecks(graph, checkPort, files, prompts, repo);
-  const land = new Land(graph, pool, runChecks, workspaces, config.base);
-  const recover = new Recover(
+  const checker = new Checker(graph, checkPort, files, prompts, repo);
+  const lander = new Lander(graph, pool, checker, workspaces, config.base);
+  const recovery = new Recovery(
     graph,
     pool,
     workspaces,
@@ -284,10 +284,10 @@ export function wire(options: WiringOptions): Server {
     config,
     graph,
     pool,
-    dispatch,
-    runChecks,
-    land,
-    recover,
+    dispatcher,
+    checker,
+    lander,
+    recovery,
     commands,
     transitions,
     prompts,

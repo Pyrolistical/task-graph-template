@@ -28,7 +28,7 @@ import {
 export const BACKOFF_CAP_MS = 64000;
 export const MODEL_LOADING_MS = 5000;
 
-export class SettleAgent {
+export class Settler {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
@@ -56,10 +56,10 @@ export class SettleAgent {
   }
 
   watch(runner: Runner): void {
-    this.pool.track(runner, this.settled(runner));
+    this.pool.track(runner, this.settle(runner));
   }
 
-  async settled(runner: Runner): Promise<void> {
+  async settle(runner: Runner): Promise<void> {
     const run = runOf(runner);
     if (run === null) {
       return;

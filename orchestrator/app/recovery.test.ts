@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Pool } from "./pool.ts";
-import { Recover } from "./recover.ts";
+import { Recovery } from "./recovery.ts";
 import { TaskGraph } from "./task-graph.ts";
 import {
   FakeTaskFiles,
@@ -41,7 +41,7 @@ function aRig(tasks: TaskMeta[]) {
     publisher,
     (pid) => pid === LIVE_PID,
   );
-  const recover = new Recover(
+  const recover = new Recovery(
     graph,
     pool,
     workspaces,
