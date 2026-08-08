@@ -4,7 +4,7 @@ import { type TaskMeta, rebuildDocument } from "../domain/task.ts";
 import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
-import { Prompts } from "../adapters/prompts.ts";
+import { PromptFiles } from "../adapters/prompt-files.ts";
 import { Runtime } from "../adapters/runtime.ts";
 import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
@@ -13,7 +13,7 @@ import { wire } from "../main/compose.ts";
 
 interface Rig {
   runtime: Runtime;
-  prompts: Prompts;
+  prompts: PromptFiles;
 }
 
 const RIGS = new WeakMap<Server, Rig>();
@@ -25,7 +25,7 @@ export async function startServer(
   const orchestratorDir = options.orchestratorDir ?? ORCHESTRATOR_DIR;
   RIGS.set(server, {
     runtime: new Runtime(options.repo, options.serverRoot),
-    prompts: new Prompts(
+    prompts: new PromptFiles(
       orchestratorDir,
       options.overridesDir ?? options.tasksDir ?? null,
     ),
@@ -45,7 +45,7 @@ export function pathsOf(server: Server): Runtime {
   return rigOf(server).runtime;
 }
 
-export function promptsOf(server: Server): Prompts {
+export function promptsOf(server: Server): PromptFiles {
   return rigOf(server).prompts;
 }
 

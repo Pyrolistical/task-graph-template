@@ -3,7 +3,7 @@ import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { ISSUES } from "../domain/issues.ts";
-import { Prompts } from "./prompts.ts";
+import { PromptFiles } from "./prompt-files.ts";
 import { resultFromCall } from "../domain/results.ts";
 import { render } from "../domain/fragment.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
@@ -77,7 +77,7 @@ describe("Feature: overriding the words an agent reads", () => {
     "a project with no overrides reads every prompt as shipped",
     () => {
       // Given a prompt store pointed at the orchestrator and nowhere else
-      const prompts = new Prompts(ORCHESTRATOR_DIR);
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
       // When a fragment is asked for
       const fragment = prompts.fragment("WORK");
@@ -92,7 +92,7 @@ describe("Feature: overriding the words an agent reads", () => {
     const dir = overrides({ "prompts/WORK.md": "you are an implementer\n" });
 
     // When the fragment is asked for
-    const fragment = new Prompts(ORCHESTRATOR_DIR, dir).fragment("WORK");
+    const fragment = new PromptFiles(ORCHESTRATOR_DIR, dir).fragment("WORK");
 
     // Then the project's words are what the agent will read
     expect(fragment).toBe("you are an implementer\n");
@@ -101,7 +101,7 @@ describe("Feature: overriding the words an agent reads", () => {
   testInTempDirs("overriding one prompt leaves every other one alone", () => {
     // Given a project that overrides only the WORK prompt
     const dir = overrides({ "prompts/WORK.md": "do it\n" });
-    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
 
     // When the other prompts are asked for
     const others = [
@@ -132,7 +132,7 @@ describe("Feature: overriding the words an agent reads", () => {
       });
 
       // When it is rendered with a failed check
-      const rendered = new Prompts(ORCHESTRATOR_DIR, dir).fragment(
+      const rendered = new PromptFiles(ORCHESTRATOR_DIR, dir).fragment(
         "check-failed",
         {
           failures: [{ command: "bun test", exit_code: "1", output: "boom" }],
@@ -149,7 +149,7 @@ describe("Feature: overriding the words an agent reads", () => {
     () => {
       // Given a prompt store that has already cached an override
       const dir = overrides({ "prompts/WORK.md": "one\n" });
-      const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
 
       // When the file on disk is edited
       fs.writeFileSync(path.join(dir, "prompts", "WORK.md"), "two\n");
@@ -162,7 +162,7 @@ describe("Feature: overriding the words an agent reads", () => {
   testInTempDirs("reloading picks up an edited override", () => {
     // Given a prompt store whose cached override has since been edited
     const dir = overrides({ "prompts/WORK.md": "one\n" });
-    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
     fs.writeFileSync(path.join(dir, "prompts", "WORK.md"), "two\n");
 
     // When the store is reloaded
@@ -176,7 +176,7 @@ describe("Feature: overriding the words an agent reads", () => {
   testInTempDirs("reloading after a deleted override falls back again", () => {
     // Given a prompt store whose override has since been deleted
     const dir = overrides({ "prompts/WORK.md": "one\n" });
-    const prompts = new Prompts(ORCHESTRATOR_DIR, dir);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
     fs.rmSync(path.join(dir, "prompts", "WORK.md"));
 
     // When the store is reloaded
@@ -192,7 +192,8 @@ describe("Feature: overriding the words an agent reads", () => {
     const dir = overrides({});
 
     // When a prompt that exists nowhere is asked for
-    const attempt = () => new Prompts(ORCHESTRATOR_DIR, dir).fragment("nope");
+    const attempt = () =>
+      new PromptFiles(ORCHESTRATOR_DIR, dir).fragment("nope");
 
     // Then both places it looked are named, so the typo is easy to find
     expect(attempt).toThrow(

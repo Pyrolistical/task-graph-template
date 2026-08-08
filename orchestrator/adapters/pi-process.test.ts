@@ -13,7 +13,7 @@ import { PiProcess } from "./pi-process.ts";
 import type { Sample } from "../domain/rates.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { shippedFile } from "../testing/orchestrator-jig.ts";
-import { Prompts } from "./prompts.ts";
+import { PromptFiles } from "./prompt-files.ts";
 
 beforeAll(() => {
   setSystemTime(new Date("2026-01-01").getTime());
@@ -689,7 +689,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a designer is prompted with words of its own", () => {
     // Given the DESIGN state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("DESIGN");
@@ -701,7 +701,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a design reviewer is prompted with words of its own", () => {
     // Given the DESIGN_REVIEW state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("DESIGN_REVIEW");
@@ -713,7 +713,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a planner is prompted with words of its own", () => {
     // Given the PLAN state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("PLAN");
@@ -725,7 +725,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a plan reviewer is prompted with words of its own", () => {
     // Given the PLAN_REVIEW state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("PLAN_REVIEW");
@@ -737,7 +737,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a worker is prompted with words of its own", () => {
     // Given the WORK state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("WORK");
@@ -749,7 +749,7 @@ describe("Feature: how an agent is spawned", () => {
 
   testInTempDirs("a work reviewer is prompted with words of its own", () => {
     // Given the WORK_REVIEW state an agent is dispatched into
-    const prompts = new Prompts(ORCHESTRATOR_DIR);
+    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
     // When the fragment it is prompted with is read
     const text = prompts.fragment("WORK_REVIEW");

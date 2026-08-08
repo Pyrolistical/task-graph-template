@@ -591,7 +591,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         5,
       );
-      expect(server.agentRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0]!.state).toBe("IDLE");
 
       server.shutdown();
     },

@@ -12,7 +12,7 @@ import type { Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
 import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
-import { type Candidate, plan } from "../policy/scheduler.ts";
+import { type Candidate, schedule } from "../policy/scheduler.ts";
 
 export class Dispatcher {
   constructor(
@@ -44,7 +44,7 @@ export class Dispatcher {
   }
 
   async run({ tasks, blocking }: Snapshot): Promise<void> {
-    for (const { candidate, slot } of plan(
+    for (const { candidate, slot } of schedule(
       tasks,
       this.resumable(tasks),
       blocking,
@@ -84,7 +84,7 @@ export class Dispatcher {
       return;
     }
 
-    const stage = candidate.state;
+    const state = candidate.state;
     this.paths.prepare(task.id);
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
@@ -93,7 +93,7 @@ export class Dispatcher {
       this.workspaces.create(branch, worktree, this.base);
     }
 
-    const section = STAGE_OF[stage].section;
+    const section = STAGE_OF[state].section;
     runner.checkout = {
       branch,
       worktree,
@@ -106,7 +106,7 @@ export class Dispatcher {
 
     const process = this.pool.spawn(
       runner,
-      { taskId: task.id, state: stage, role: candidate.role, cwd: worktree },
+      { taskId: task.id, state, role: candidate.role, cwd: worktree },
       (settling) => this.settler.compacted(settling),
     );
     runner.process = process;
@@ -123,8 +123,8 @@ export class Dispatcher {
     });
 
     runner.state = "BUSY";
-    const queued = this.messages.drain(task.id, stage);
-    const message = this.settler.nudge(task.id, stage);
+    const queued = this.messages.drain(task.id, state);
+    const message = this.settler.nudge(task.id, state);
     await this.settler.prompt(
       this.pool.requireRun(runner),
       queued === "" ? message : `${queued}\n\n${message}`,

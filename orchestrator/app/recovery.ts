@@ -42,7 +42,7 @@ export class Recovery {
 
     for (const row of rows) {
       const runner = this.pool
-        .workers()
+        .runners()
         .find((one) => one.slot.name === row.name);
       if (
         runner === undefined ||
@@ -84,7 +84,7 @@ export class Recovery {
       this.pool.harvest(task.workspace);
       this.graph.releaseClaim(id);
 
-      for (const runner of this.pool.workers()) {
+      for (const runner of this.pool.runners()) {
         if (runner.taskId === id && runner.process?.alive !== true) {
           runner.process?.close();
           this.pool.release(runner.slot.name);

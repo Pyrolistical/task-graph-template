@@ -33,7 +33,7 @@ export interface Candidate {
   session: string | null;
 }
 
-export const RANK_STATE = Object.fromEntries(
+export const STATE_OF = Object.fromEntries(
   RANKS.map((rank) => [
     rank,
     rank === "resume" ? "WORK" : rank.replace(/_(STARTED|FRESH)$/, ""),
@@ -41,7 +41,7 @@ export const RANK_STATE = Object.fromEntries(
 ) as Record<Rank, ClaimState>;
 
 export function rankLabel(rank: Rank): string {
-  return rank === "resume" ? rank : RANK_STATE[rank];
+  return rank === "resume" ? rank : STATE_OF[rank];
 }
 
 function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
@@ -78,8 +78,8 @@ export function candidates(
     found.push({
       task_id: id,
       rank,
-      state: RANK_STATE[rank],
-      role: STAGE_OF[RANK_STATE[rank]].role,
+      state: STATE_OF[rank],
+      role: STAGE_OF[STATE_OF[rank]].role,
       blocking: blocking.get(id) ?? 0,
       prefer_slot: task.workspace?.slot ?? null,
       session: rank === "resume" ? (task.workspace?.session ?? null) : null,
@@ -129,7 +129,7 @@ export interface Dispatch {
   slot: Slot;
 }
 
-export function plan(
+export function schedule(
   tasks: Map<TaskId, TaskMeta>,
   resumable: Set<TaskId>,
   blocking: Map<TaskId, number>,

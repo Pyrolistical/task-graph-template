@@ -427,7 +427,7 @@ describe("Feature: commands the console writes for the server", () => {
         agent: "pi-fake-fake",
         enabled: false,
       });
-      await applied(() => !server.agentRows()[0]!.enabled);
+      await applied(() => !server.slotRows()[0]!.enabled);
 
       writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
       await applied(() => !server.schedulerEnabled);
@@ -483,7 +483,7 @@ describe("Feature: commands the console writes for the server", () => {
       expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "no agent named",
       );
-      expect(server.agentRows()[0]!.enabled).toBe(true);
+      expect(server.slotRows()[0]!.enabled).toBe(true);
 
       server.shutdown();
     },
@@ -517,8 +517,8 @@ describe("Feature: turning an agent off and on", () => {
 
       // Then nothing is dispatched, and the console says why
       expect(stateOf(server, id)).toBe("WORK");
-      expect(server.agentRows()[0]!.state).toBe("DISABLED");
-      expect(server.agentRows()[0]!.enabled).toBe(false);
+      expect(server.slotRows()[0]!.state).toBe("DISABLED");
+      expect(server.slotRows()[0]!.enabled).toBe(false);
 
       server.shutdown();
     },
@@ -536,7 +536,7 @@ describe("Feature: turning an agent off and on", () => {
 
       // Given a pool of two agents, one of them with three slots
       const server = await serverFor(fixture);
-      expect(server.agentRows().every((row) => row.enabled)).toBe(true);
+      expect(server.slotRows().every((row) => row.enabled)).toBe(true);
 
       // When one of them is disabled
       const rows = server.setAgentEnabled("pi-fake-fake", false);
@@ -546,7 +546,7 @@ describe("Feature: turning an agent off and on", () => {
       expect(rows.every((row) => row.state === "DISABLED")).toBe(true);
 
       const untouched = server
-        .agentRows()
+        .slotRows()
         .filter((row) => row.agent === "pi-other-other");
       expect(untouched).toHaveLength(1);
       expect(untouched[0]!.state).toBe("IDLE");
@@ -627,8 +627,8 @@ describe("Feature: turning an agent off and on", () => {
       // Then it finishes the work before the slot is taken out of the pool
       await server.drain();
       await settle(server);
-      expect(server.agentRows()[0]!.state).toBe("DISABLED");
-      expect(server.agentRows()[0]!.task_id).toBeNull();
+      expect(server.slotRows()[0]!.state).toBe("DISABLED");
+      expect(server.slotRows()[0]!.task_id).toBeNull();
       expect(stateOf(server, id)).toBe("WORK_REVIEW");
 
       server.shutdown();
@@ -696,7 +696,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await server.tick();
-      const row = server.agentRows()[0]!;
+      const row = server.slotRows()[0]!;
       expect(row.state).toBe("BUSY");
       expect(row.activity.kind).toBe("tool-call");
 

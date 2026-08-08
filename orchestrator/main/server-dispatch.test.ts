@@ -1216,7 +1216,7 @@ describe("Feature: handing a task to an agent", () => {
 
       // Then only one slot took the task, and no dispatch failed
       expect(
-        server.agentRows().filter((row) => row.task_id === id),
+        server.slotRows().filter((row) => row.task_id === id),
       ).toHaveLength(1);
 
       await server.drain();

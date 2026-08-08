@@ -32,7 +32,7 @@ export type TaskState = (typeof ALL_STATES)[number];
 
 export type Guard = "none" | "untouched" | "committed";
 
-interface Stage {
+interface StageFields {
   state: ValidState;
   phase: Phase;
   role: Role | null;
@@ -133,15 +133,15 @@ export const STAGES = [
     back: "WORK",
     body: false,
   },
-] as const satisfies readonly Stage[];
+] as const satisfies readonly StageFields[];
 
-type AnyStage = (typeof STAGES)[number];
+export type Stage = (typeof STAGES)[number];
 
-export type ClaimStage = Extract<AnyStage, { role: Role }>;
+export type ClaimStage = Extract<Stage, { role: Role }>;
 
-export type ReviewStage = Extract<AnyStage, { role: "reviewer" }>;
+export type ReviewStage = Extract<Stage, { role: "reviewer" }>;
 
-export type StageState = AnyStage["state"];
+export type StageState = Stage["state"];
 
 export type ClaimState = ClaimStage["state"];
 
@@ -165,7 +165,7 @@ export const REVIEW_FAILURE_LIMIT = 2;
 
 export const STAGE_OF = Object.fromEntries(
   STAGES.map((stage) => [stage.state, stage]),
-) as { [S in StageState]: Extract<AnyStage, { state: S }> };
+) as { [S in StageState]: Extract<Stage, { state: S }> };
 
 export const NEXT_STATE = Object.fromEntries(
   STAGES.slice(0, -1).map((stage, index) => [

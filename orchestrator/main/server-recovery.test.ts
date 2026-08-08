@@ -178,7 +178,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await unclaimed(server, id);
 
       // Then the slot is idle and the task is back in the queue where it stood
-      const row = server.agentRows()[0]!;
+      const row = server.slotRows()[0]!;
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
       expect(server.tasks().get(id)!.claimed_by).toBeNull();
@@ -205,7 +205,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await unclaimed(server, id);
 
       // Then the dead slot does not shield the task, and is released with it
-      expect(server.agentRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0]!.state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -310,7 +310,7 @@ describe("Feature: an abort that races a dispatch", () => {
       await server.drain();
       expect(stateOf(server, id)).toBe("CLOSED");
       expect(server.tasks().get(id)).toBeUndefined();
-      expect(server.agentRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0]!.state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -338,7 +338,7 @@ describe("Feature: an abort that races a dispatch", () => {
       // Then the slot goes back to idle, and the lost dispatch is logged
       await ticking;
       await server.drain();
-      const row = server.agentRows()[0]!;
+      const row = server.slotRows()[0]!;
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
       expect(

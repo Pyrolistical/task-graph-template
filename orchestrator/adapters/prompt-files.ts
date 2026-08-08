@@ -9,7 +9,7 @@ interface CachedFile {
   contents: string;
 }
 
-export class Prompts {
+export class PromptFiles {
   private readonly dirs: string[];
   private readonly cached = new Map<string, CachedFile>();
 

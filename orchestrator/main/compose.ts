@@ -22,7 +22,7 @@ import { CheckRunner } from "../adapters/check-runner.ts";
 import { takeCommand, watchCommands } from "../adapters/command.ts";
 import * as git from "../adapters/git.ts";
 import { PiProcess } from "../adapters/pi-process.ts";
-import { Prompts } from "../adapters/prompts.ts";
+import { PromptFiles } from "../adapters/prompt-files.ts";
 import {
   Runtime,
   defaultAgentsPath,
@@ -181,7 +181,7 @@ export function wire(options: WiringOptions): Server {
       ),
   };
 
-  const prompts = new Prompts(orchestratorDir, overridesDir);
+  const prompts = new PromptFiles(orchestratorDir, overridesDir);
 
   const files = new TaskFiles(runtime);
 

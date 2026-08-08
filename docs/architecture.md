@@ -85,7 +85,7 @@ bag of dependencies: a module names what it needs, and gets exactly that.
 | `Workspaces`     | clones, branches, rebases, and the status a guard reads | `git.ts`                           |
 | `Agents`         | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`           |
 | `Checks`         | running a declared check and reporting how it went      | `check-runner`                     |
-| `Prompts`        | every word an agent reads                               | `prompts.ts`                       |
+| `Prompts`        | every word an agent reads                               | `prompt-files`                     |
 | `Messages`       | the message queue a task carries between dispatches     | `task-files`                       |
 | `Reviews`        | `findings.json` and the review-failure count            | `task-files`                       |
 | `Assignments`    | the live `ASSIGNMENT.md` and its rotation               | `task-files`                       |

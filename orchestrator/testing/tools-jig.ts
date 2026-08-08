@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { PiProcess } from "../adapters/pi-process.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
-import { Prompts } from "../adapters/prompts.ts";
+import { PromptFiles } from "../adapters/prompt-files.ts";
 import type { ResultCall } from "../domain/results.ts";
 import {
   CLAIM_STATES,
@@ -11,7 +11,7 @@ import {
   type ClaimState,
 } from "../domain/state-machine.ts";
 
-const PROMPTS = new Prompts(ORCHESTRATOR_DIR);
+const PROMPTS = new PromptFiles(ORCHESTRATOR_DIR);
 
 interface Scenario {
   name: string;

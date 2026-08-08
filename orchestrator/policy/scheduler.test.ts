@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type Slot, agentOf } from "../domain/agents.ts";
 import { blockingCounts } from "../domain/graph.ts";
 import { inbox } from "./inbox.ts";
-import { candidates, pickSlot, plan } from "./scheduler.ts";
+import { candidates, pickSlot, schedule } from "./scheduler.ts";
 import type { RateOf } from "../domain/rates.ts";
 import { ALL_ROLES } from "../domain/state-machine.ts";
 import { type TaskMeta } from "../domain/task.ts";
@@ -48,7 +48,7 @@ describe("Feature: which task is dispatched next", () => {
     free: Slot[],
     rate: RateOf = unmeasured,
   ) {
-    return plan(tasks, resumable, blockingCounts(tasks), free, rate);
+    return schedule(tasks, resumable, blockingCounts(tasks), free, rate);
   }
 
   function workspace(slot = "pi-anthropic-m-1") {

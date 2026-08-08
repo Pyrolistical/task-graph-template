@@ -31,6 +31,6 @@ export interface Manager {
   reloadPrompts(): string[];
   writeViews(): Promise<void>;
   view(name: ViewName): string;
-  paths(): PathReport;
+  pathReport(): PathReport;
   readonly lastError: string | null;
 }

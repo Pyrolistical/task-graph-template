@@ -21,9 +21,9 @@ function substitute(line: string, vars: Record<string, unknown>): string {
   });
 }
 
-export function render(template: string, vars: FragmentVars): string {
+export function render(fragment: string, vars: FragmentVars): string {
   const out: string[] = [];
-  const lines = template.split("\n");
+  const lines = fragment.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;

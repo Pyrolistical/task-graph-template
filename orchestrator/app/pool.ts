@@ -96,7 +96,7 @@ export class Pool {
   readonly slots: Slot[];
   readonly rates = new Rates();
 
-  private readonly members = new Map<string, Runner>();
+  private readonly byName = new Map<string, Runner>();
   private readonly disabled = new Set<string>();
   private readonly tracked = new Set<Promise<void>>();
 
@@ -109,19 +109,19 @@ export class Pool {
   ) {
     this.slots = agents.slots();
     for (const slot of this.slots) {
-      this.members.set(slot.name, freshRunner(slot));
+      this.byName.set(slot.name, freshRunner(slot));
       if (!slot.enabled) {
         this.disabled.add(slot.agent);
       }
     }
   }
 
-  workers(): Runner[] {
-    return [...this.members.values()];
+  runners(): Runner[] {
+    return [...this.byName.values()];
   }
 
   runner(name: string): Runner {
-    const runner = this.members.get(name);
+    const runner = this.byName.get(name);
     if (runner === undefined) {
       throw new Error(`no agent slot named "${name}"`);
     }
@@ -129,7 +129,7 @@ export class Pool {
   }
 
   freeSlots(): Slot[] {
-    return this.workers()
+    return this.runners()
       .filter(
         (runner) =>
           runner.state === "IDLE" && !this.disabled.has(runner.slot.agent),
@@ -139,7 +139,7 @@ export class Pool {
 
   busyTasks(): Set<TaskId | null> {
     return new Set(
-      this.workers()
+      this.runners()
         .filter((runner) => runner.process?.alive === true)
         .map((runner) => runner.taskId),
     );
@@ -150,7 +150,7 @@ export class Pool {
   }
 
   agentNames(): string[] {
-    return [...new Set(this.workers().map((runner) => runner.slot.agent))];
+    return [...new Set(this.runners().map((runner) => runner.slot.agent))];
   }
 
   setAgentEnabled(agent: string, enabled: boolean): SlotRow[] {
@@ -179,10 +179,10 @@ export class Pool {
   }
 
   abortSlot(name: string): SlotRow {
-    const runner = this.members.get(name);
+    const runner = this.byName.get(name);
     if (runner === undefined) {
       throw new Error(
-        `no agent slot named "${name}"; the pool has ${[...this.members.keys()].join(", ")}`,
+        `no agent slot named "${name}"; the pool has ${[...this.byName.keys()].join(", ")}`,
       );
     }
 
@@ -284,7 +284,7 @@ export class Pool {
   }
 
   rows(): SlotRow[] {
-    return this.workers().map((runner) => {
+    return this.runners().map((runner) => {
       const enabled = !this.disabled.has(runner.slot.agent);
       if (runner.state === "IDLE") {
         return idleRow(runner.slot, enabled);
@@ -310,7 +310,7 @@ export class Pool {
 
   async readStats(): Promise<void> {
     await Promise.all(
-      this.workers().map(async (runner) => {
+      this.runners().map(async (runner) => {
         if (runner.process === null || !runner.process.alive) {
           return;
         }
@@ -325,7 +325,7 @@ export class Pool {
   }
 
   shutdown(): void {
-    for (const runner of this.workers()) {
+    for (const runner of this.runners()) {
       if (runner.process === null) {
         continue;
       }

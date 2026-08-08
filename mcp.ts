@@ -235,7 +235,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () => JSON.stringify(live().paths(), null, 2),
+    () => JSON.stringify(live().pathReport(), null, 2),
   );
 
   resource(
@@ -256,7 +256,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => live().paths().runtime_root,
+    () => live().pathReport().runtime_root,
   );
 
   return mcp;

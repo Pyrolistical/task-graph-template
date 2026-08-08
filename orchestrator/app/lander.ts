@@ -12,7 +12,7 @@ export class Lander {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
-    private readonly checks: Checker,
+    private readonly checker: Checker,
     private readonly workspaces: Workspaces,
     private readonly base: string,
   ) {}
@@ -32,7 +32,7 @@ export class Lander {
       }
 
       for (const [index, command] of task.checks.entries()) {
-        const result = await this.checks.run(taskId, index, command, worktree);
+        const result = await this.checker.run(taskId, index, command, worktree);
         if (result.code !== 0) {
           throw new Error(
             `\`${result.command}\` failed after the rebase (exit ${result.code}):\n${result.tail}`,

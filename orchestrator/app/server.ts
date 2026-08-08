@@ -50,8 +50,8 @@ export class Server implements Manager {
     private readonly recovery: Recovery,
     private readonly commands: CommandChannel,
     private readonly transitions: Transitions,
-    private readonly promptStore: Prompts,
-    private readonly layout: Paths,
+    private readonly prompts: Prompts,
+    private readonly paths: Paths,
     private readonly publisher: Publisher,
   ) {}
 
@@ -63,33 +63,33 @@ export class Server implements Manager {
     return this.publisher.read(name);
   }
 
-  paths(): PathReport {
+  pathReport(): PathReport {
     return {
       repo: this.config.repo,
       tasks_dir: this.config.tasksDir,
       agents_file: this.config.agentsPath,
       overrides_prompts_dir: this.config.promptDirs.overrides,
       orchestrator_prompts_dir: this.config.promptDirs.orchestrator,
-      runtime_root: this.layout.root,
-      server_log: this.layout.serverLog,
-      transition_log: this.layout.transitionLog,
-      console_command: this.layout.consoleCommand,
+      runtime_root: this.paths.root,
+      server_log: this.paths.serverLog,
+      transition_log: this.paths.transitionLog,
+      console_command: this.paths.consoleCommand,
       views: {
-        slots: this.layout.slotsView,
-        checks: this.layout.checksView,
-        tasks: this.layout.tasksView,
-        inbox: this.layout.inboxView,
-        queue: this.layout.queueView,
+        slots: this.paths.slotsView,
+        checks: this.paths.checksView,
+        tasks: this.paths.tasksView,
+        inbox: this.paths.inboxView,
+        queue: this.paths.queueView,
       },
     };
   }
 
   async start(): Promise<Server> {
-    this.layout.takeLock();
+    this.paths.takeLock();
     this.publisher.log(
       `starting against ${this.config.repo} (base ${this.config.base})`,
     );
-    for (const filePath of this.promptStore.cachedFiles()) {
+    for (const filePath of this.prompts.cachedFiles()) {
       this.publisher.log(`cached ${filePath}`);
     }
     this.recovery.reclone();
@@ -164,7 +164,7 @@ export class Server implements Manager {
   }
 
   reloadPrompts(): string[] {
-    const paths = this.promptStore.reload();
+    const paths = this.prompts.reload();
     for (const filePath of paths) {
       this.publisher.log(`cached ${filePath}`);
     }
@@ -202,7 +202,7 @@ export class Server implements Manager {
     return this.pool.abortSlot(name);
   }
 
-  agentRows(): SlotRow[] {
+  slotRows(): SlotRow[] {
     return this.pool.rows();
   }
 
@@ -284,7 +284,7 @@ export class Server implements Manager {
 
   detach(): void {
     this.watcher?.close();
-    this.layout.clearLock();
+    this.paths.clearLock();
     this.publisher.log(
       "manager exited; agents left running, views left on disk",
     );
@@ -292,7 +292,7 @@ export class Server implements Manager {
 
   shutdown(): void {
     this.watcher?.close();
-    this.layout.clearLock();
+    this.paths.clearLock();
     this.pool.shutdown();
   }
 }
