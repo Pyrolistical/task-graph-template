@@ -27,10 +27,17 @@ export interface ClaimArgs {
   session?: string;
 }
 
+export interface CreatedTask {
+  id: TaskId;
+  filePath: string;
+}
+
 export interface Tasks {
   list(): { tasks: Map<TaskId, TaskMeta>; problems: Map<string, string> };
   read(id: TaskId): TaskMeta | null;
   body(id: TaskId): string;
+  create(title: string): CreatedTask;
+  writeBody(id: TaskId, body: string): string;
   apply(
     id: TaskId,
     name: TransitionName,
@@ -162,8 +169,19 @@ export interface Views {
   scheduling: boolean;
 }
 
+export const VIEW_NAMES = [
+  "agents",
+  "checks",
+  "tasks",
+  "inbox",
+  "queue",
+] as const;
+
+export type ViewName = (typeof VIEW_NAMES)[number];
+
 export interface Publisher {
   publish(views: Views): void;
+  read(name: ViewName): string;
   lastAgents(): AgentRow[] | null;
   log(line: string): void;
 }

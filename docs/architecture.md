@@ -70,6 +70,11 @@ constructed in dependency order by `main/compose.ts`.
 
 ## The ports
 
+`app/manager.ts` declares what a protocol adapter may ask the application to do:
+the ~15 operations behind the MCP tools and resources, and nothing else. `mcp.ts`
+holds a `Manager`, never a `Server`, so it cannot reach a store, a path or a
+prompt through it.
+
 `app/ports.ts` declares what the application needs; `main/compose.ts` supplies it,
 and hands each port to the constructor of the module that uses it. There is no
 bag of dependencies: a module names what it needs, and gets exactly that.

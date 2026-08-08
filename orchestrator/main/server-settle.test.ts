@@ -18,6 +18,9 @@ import { readFailureCount, readFindings } from "../adapters/findings.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { bodyOf } from "../testing/graph-jig.ts";
 import {
+  journalOf,
+  pathsOf,
+  promptsOf,
   reaches,
   reviewCycle,
   runOnce,
@@ -66,12 +69,12 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       expect(body).toContain("- the null case is untested");
 
       // Then it is also left where the next dispatch will pick it up
-      expect(readFindings(server.runtime.findings(id))).toEqual([
+      expect(readFindings(pathsOf(server).findings(id))).toEqual([
         "the null case is untested",
       ]);
 
       // Then the transition is recorded as the server's, not the reviewer's
-      const applied = server.transitions
+      const applied = journalOf(server)
         .read()
         .find((e) => e.transition === "feedback" && e.from === "WORK_REVIEW")!;
       expect(applied.to).toBe("WORK");
@@ -115,14 +118,14 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       await settleTo(server, id, "MANAGER_REVIEW");
 
       // Then the worker's second prompt carried the findings it had to answer
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))[1]).toBe(
-        server.prompts.fragment("WORK-with-findings", {
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))[1]).toBe(
+        promptsOf(server).fragment("WORK-with-findings", {
           findings: [{ finding: "the null case is untested" }],
         }),
       );
       // Then nothing is left queued once the worker has answered them
-      expect(fs.existsSync(server.runtime.findings(id))).toBe(false);
-      expect(fs.existsSync(queueFile(server.runtime.taskDir(id), "WORK"))).toBe(
+      expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
+      expect(fs.existsSync(queueFile(pathsOf(server).taskDir(id), "WORK"))).toBe(
         false,
       );
 
@@ -165,14 +168,14 @@ describe("Feature: what a reviewer sends back to the worker", () => {
 
       // Then the worker was resumed in its own session, twice, never the review's
       const worked = path.join(
-        server.runtime.sessionDir(id, "worker"),
+        pathsOf(server).sessionDir(id, "worker"),
         `${id}-worker.jsonl`,
       );
       expect(server.tasks().get(id)!.workspace!.session).toBe(worked);
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         2,
       );
-      expect(promptsTo(server.runtime.sessionDir(id, "reviewer"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "reviewer"))).toHaveLength(
         2,
       );
 
@@ -207,19 +210,19 @@ describe("Feature: what a reviewer sends back to the worker", () => {
 
       // Then the reviewer saw a worktree with the work committed on it
       const head = git
-        .gitOrThrow(server.runtime.worktree(id), ["rev-parse", "HEAD"])
+        .gitOrThrow(pathsOf(server).worktree(id), ["rev-parse", "HEAD"])
         .trim();
       const base = git
-        .gitOrThrow(server.runtime.worktree(id), ["rev-parse", "master"])
+        .gitOrThrow(pathsOf(server).worktree(id), ["rev-parse", "master"])
         .trim();
       expect(head).not.toBe(base);
 
       // Then the reviewer read the work in a session of its own
       const workSessions = fs.readdirSync(
-        server.runtime.sessionDir(id, "worker"),
+        pathsOf(server).sessionDir(id, "worker"),
       );
       const reviewSessions = fs.readdirSync(
-        server.runtime.sessionDir(id, "reviewer"),
+        pathsOf(server).sessionDir(id, "reviewer"),
       );
       expect(workSessions.length).toBeGreaterThan(0);
       expect(reviewSessions.length).toBeGreaterThan(0);
@@ -258,11 +261,11 @@ describe("Feature: a review that fails twice", () => {
 
       // When the work is done, checked and reviewed once
       await until(server, () =>
-        server.transitions.read().some((e) => e.transition === "feedback"),
+        journalOf(server).read().some((e) => e.transition === "feedback"),
       );
 
       // Then the failure is counted and the work only bounced back
-      expect(readFailureCount(server.runtime.reviewFailures(id))).toBe(1);
+      expect(readFailureCount(pathsOf(server).reviewFailures(id))).toBe(1);
       expect(stateOf(server, id)).toBe("WORK");
 
       server.shutdown();
@@ -316,8 +319,8 @@ describe("Feature: a review that fails twice", () => {
       expect(body).not.toContain("finding two");
 
       // Then the count file is gone and the findings wait for the resume
-      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
-      expect(readFindings(server.runtime.findings(id))).toEqual([
+      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
+      expect(readFindings(pathsOf(server).findings(id))).toEqual([
         "finding two",
       ]);
 
@@ -360,9 +363,9 @@ describe("Feature: a review that fails twice", () => {
 
       // Then the passing review cleared the count
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
-      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
       expect(
-        server.transitions.read().some((e) => e.transition === "hold"),
+        journalOf(server).read().some((e) => e.transition === "hold"),
       ).toBe(false);
 
       server.shutdown();
@@ -415,9 +418,9 @@ describe("Feature: a review that fails twice", () => {
       // Then it is back in WORK, never held, and no review was ever counted
       expect(stateOf(server, id)).toBe("WORK");
       expect(
-        server.transitions.read().some((e) => e.transition === "hold"),
+        journalOf(server).read().some((e) => e.transition === "hold"),
       ).toBe(false);
-      expect(fs.existsSync(server.runtime.reviewFailures(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
 
       server.shutdown();
     },
@@ -467,13 +470,13 @@ describe("Feature: a review that fails twice", () => {
       // When the redo fails once
       await until(
         server,
-        () => readFailureCount(server.runtime.reviewFailures(id)) === 1,
+        () => readFailureCount(pathsOf(server).reviewFailures(id)) === 1,
       );
 
       // Then one failure only bounces it, never holds it again
       expect(stateOf(server, id)).toBe("WORK");
       expect(
-        server.transitions.read().filter((e) => e.transition === "hold"),
+        journalOf(server).read().filter((e) => e.transition === "hold"),
       ).toHaveLength(1);
 
       server.shutdown();
@@ -505,10 +508,10 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was nudged once and never held, because the second try passed
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(
-        server.transitions.read().some((e) => e.transition === "hold"),
+        journalOf(server).read().some((e) => e.transition === "hold"),
       ).toBe(false);
 
       server.shutdown();
@@ -547,12 +550,12 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was told which file it had left behind, and committed it
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("?? b.txt");
-      expect(git.uncommitted(server.runtime.worktree(id))).toEqual([]);
+      expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
       expect(
-        git.commitCount(server.runtime.worktree(id), "master"),
+        git.commitCount(pathsOf(server).worktree(id), "master"),
       ).toBeGreaterThan(0);
 
       server.shutdown();
@@ -581,7 +584,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         "the agent submitted work it never committed: nothing is committed on the branch",
       );
       expect(task.claimed_by).toBeNull();
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         5,
       );
       expect(server.agentRows()[0]!.state).toBe("IDLE");
@@ -621,7 +624,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(task.held_reason).toBe("the staging database is unreachable");
       expect(task.claimed_by).toBeNull();
 
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
 
       server.shutdown();
@@ -655,11 +658,11 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked about the command it repeated, and never held
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("zig build");
       expect(
-        server.transitions.read().some((e) => e.transition === "hold"),
+        journalOf(server).read().some((e) => e.transition === "hold"),
       ).toBe(false);
 
       server.shutdown();
@@ -682,7 +685,7 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Then the task is held, naming the command it was stuck on
       expect(server.tasks().get(id)!.held_reason).toContain("zig build");
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         ISSUES.looping.attempts + 1,
       );
 
@@ -719,10 +722,10 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked once and the task was never held
-      const prompts = promptsTo(server.runtime.sessionDir(id, "reviewer"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "reviewer"));
       expect(prompts).toHaveLength(2);
       expect(
-        server.transitions.read().some((e) => e.transition === "hold"),
+        journalOf(server).read().some((e) => e.transition === "hold"),
       ).toBe(false);
 
       server.shutdown();
@@ -749,7 +752,7 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Then it is still held, and no second agent was ever prompted
       expect(stateOf(server, id)).toBe("HELD_WORK");
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         2,
       );
 
@@ -776,7 +779,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK", 40);
 
       // Then no nudge was sent into a turn the agent was still inside
-      const sessionDir = server.runtime.sessionDir(id, "worker");
+      const sessionDir = pathsOf(server).sessionDir(id, "worker");
       expect(promptsOverlapping(sessionDir)).toEqual([]);
       expect(promptsTo(sessionDir)).toHaveLength(
         ISSUES["missing-result"].attempts + 1,
@@ -815,10 +818,10 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then what it changed was put back and only its own section survives
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       const assignment = fs.readFileSync(
-        server.runtime.assignment(id),
+        pathsOf(server).assignment(id),
         "utf-8",
       );
       expect(assignment).toContain("# The body of this task");
@@ -853,7 +856,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(task.held_reason).toContain(
         "without appending implementation notes",
       );
-      expect(promptsTo(server.runtime.sessionDir(id, "worker"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         5,
       );
 
@@ -896,14 +899,14 @@ describe("Feature: a review that comes back unusable", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the task never went back to the worker over the reviewer's mistake
-      const log = server.transitions.read();
+      const log = journalOf(server).read();
       expect(log.some((e) => e.transition === "fail")).toBe(false);
 
       // Then the reviewer was prompted again in place, and its edit was undone
-      const prompts = promptsTo(server.runtime.sessionDir(id, "reviewer"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "reviewer"));
       expect(prompts).toHaveLength(2);
       const assignment = fs.readFileSync(
-        server.runtime.assignment(id),
+        pathsOf(server).assignment(id),
         "utf-8",
       );
       expect(assignment).toContain("# The body of this task");
@@ -951,11 +954,11 @@ describe("Feature: keeping the attempts an agent already made", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the first attempt is kept in history and the second is the one that counts
-      const history = fs.readdirSync(server.runtime.history(id)).sort();
+      const history = fs.readdirSync(pathsOf(server).history(id)).sort();
       expect(history).toEqual(["ASSIGNMENT.1.md"]);
       expect(
         fs.readFileSync(
-          path.join(server.runtime.history(id), "ASSIGNMENT.1.md"),
+          path.join(pathsOf(server).history(id), "ASSIGNMENT.1.md"),
           "utf-8",
         ),
       ).toContain("attempt one");
@@ -996,7 +999,7 @@ describe("Feature: keeping the attempts an agent already made", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then both turns are in one log, so the task reads as one story
-      const log = fs.readFileSync(server.runtime.rpcLog(id), "utf-8");
+      const log = fs.readFileSync(pathsOf(server).rpcLog(id), "utf-8");
       const settled = log
         .split("\n")
         .filter((line) => line.includes(`"agent_settled"`));
@@ -1027,12 +1030,12 @@ describe("Feature: a failure while finishing with an agent", () => {
       // Then the slot is freed and the failure is logged rather than thrown away
       await server.writeViews();
       const view = JSON.parse(
-        fs.readFileSync(server.runtime.agentsView, "utf-8"),
+        fs.readFileSync(pathsOf(server).agentsView, "utf-8"),
       );
       for (const agent of view.agents as { state: string }[]) {
         expect(agent.state).toBe("IDLE");
       }
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         `on ${id} failed:`,
       );
 

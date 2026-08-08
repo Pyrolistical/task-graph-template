@@ -122,7 +122,6 @@ coverage can fall without anything failing.
 - `testing/tools-jig.ts` calls a real model and is deliberately outside the
   suite. The consequence is real and worth naming: how reliably a model ends on
   the right result tool is measured by hand, never in CI
-- the uncovered getters in `app/server.ts:53-56,73-76` are field reads
 
 ## What to do, in order
 

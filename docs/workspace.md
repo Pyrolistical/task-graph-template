@@ -96,7 +96,7 @@ So there is exactly one graph, no worktree carries a copy of it, and there is ne
 The manager-review `submit` is not a graph decision the manager can make alone — whether a branch landed is a fact about git — so the tool call does the work first and applies the transition only if it worked:
 
 ```text
-attemptMerge(task):
+submit(task), from MANAGER_REVIEW:
     fetch the base into the workspace, rebase the workspace onto it
         conflict → abort the rebase, error back to the manager
     run every check again, in the rebased workspace
@@ -108,14 +108,14 @@ attemptMerge(task):
     apply submit        → CLOSED
     remove the workspace, delete the branch
 
-attemptAbort(task):
+abort(task):
     refuse unless the task is in MANAGER_REVIEW or a held state
     refuse if the branch is already an ancestor of the base
     apply abort         → CLOSED
     (the workspace and branch are torn down when the task closes)
 ```
 
-- every failure in `attemptMerge` is an error on the tool call, and the task stays in `MANAGER_REVIEW`
+- every failure in the merge is an error on the tool call, and the task stays in `MANAGER_REVIEW`
 - the manager asked whether the branch lands; "no, and here is why" is the answer to that question, not a reason to write a todo on the manager's behalf and hand the task to an agent
 - whether a conflicted rebase is worth an agent round trip, a rewritten task or an abort is exactly the judgement `MANAGER_REVIEW` exists for, and the task is already sitting in that state when it finds out
 

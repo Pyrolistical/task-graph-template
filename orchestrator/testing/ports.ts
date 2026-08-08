@@ -2,6 +2,7 @@ import type {
   AgentSession,
   Agents,
   Assignments,
+  CreatedTask,
   Inbox,
   Journal,
   JournalEntry,
@@ -9,11 +10,13 @@ import type {
   Prompts,
   Publisher,
   Tasks,
+  ViewName,
+  Views,
   Workspaces,
 } from "../app/ports.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { AgentRow, AgentSlot } from "../domain/agents.ts";
-import type { TaskId, TaskMeta } from "../domain/task.ts";
+import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
 import type {
   TransitionArgs,
   TransitionName,
@@ -101,8 +104,19 @@ export function aSession(
 export class FakePublisher implements Publisher {
   readonly lines: string[] = [];
   rows: AgentRow[] | null = null;
+  published: Views | null = null;
 
-  publish(): void {}
+  publish(views: Views): void {
+    this.published = views;
+  }
+
+  read(name: ViewName): string {
+    const views = this.published;
+    if (views === null) {
+      return "{}";
+    }
+    return `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, null, 2)}\n`;
+  }
 
   lastAgents(): AgentRow[] | null {
     return this.rows;
@@ -115,6 +129,7 @@ export class FakePublisher implements Publisher {
 
 export class FakeTasks implements Tasks {
   readonly released: TaskId[] = [];
+  readonly bodies = new Map<TaskId, string>();
 
   constructor(private readonly tasks: Map<TaskId, TaskMeta>) {}
 
@@ -126,8 +141,19 @@ export class FakeTasks implements Tasks {
     return this.tasks.get(id) ?? null;
   }
 
-  body(): string {
-    return "the goal\n";
+  body(id: TaskId): string {
+    return this.bodies.get(id) ?? "the goal\n";
+  }
+
+  create(title: string): CreatedTask {
+    const id = formatId(this.tasks.size + 1);
+    this.tasks.set(id, { ...aTask(), id, title, state: "NEW" });
+    return { id, filePath: `/tasks/${id}.md` };
+  }
+
+  writeBody(id: TaskId, body: string): string {
+    this.bodies.set(id, body);
+    return `/tasks/${id}.md`;
   }
 
   readonly applied: { id: TaskId; name: string; args: TransitionArgs }[] = [];

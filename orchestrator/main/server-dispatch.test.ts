@@ -36,6 +36,9 @@ import { startServer } from "../testing/server-jig.ts";
 import { ISSUES } from "../domain/issues.ts";
 import {
   dispatchOnce,
+  journalOf,
+  pathsOf,
+  promptsOf,
   reaches,
   runOnce,
   runtimeOf,
@@ -67,8 +70,10 @@ describe("Feature: where a project's task graph is found", () => {
         });
 
         // Then it resolves the graph from the project's path and seeds it
-        expect(server.tasksDir).toBe(tasksDir);
-        expect(server.overridesDir).toBe(tasksDir);
+        expect(server.config.tasksDir).toBe(tasksDir);
+        expect(server.config.promptDirs.overrides).toBe(
+          path.join(tasksDir, "prompts"),
+        );
         expect(fs.existsSync(path.join(tasksDir, "agents.json"))).toBe(true);
         expect(fs.existsSync(path.join(tasksDir, "template.md"))).toBe(false);
         expect(fs.readFileSync(nextTaskIdPath(tasksDir), "utf-8")).toBe("1\n");
@@ -98,7 +103,7 @@ describe("Feature: where a project's task graph is found", () => {
       });
 
       // Then that branch is the one it will rebase onto and land work on
-      expect(server.base).toBe("trunk");
+      expect(server.config.base).toBe("trunk");
 
       server.shutdown();
     },
@@ -131,7 +136,7 @@ describe("Feature: a task that goes all the way through", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // When the manager merges it
-      const merged = await server.attemptMerge(id);
+      const merged = await server.submit(id);
 
       // Then the task closes and nothing of its workspace is left behind
       expect(merged.to).toBe("CLOSED");
@@ -139,7 +144,7 @@ describe("Feature: a task that goes all the way through", () => {
       expect(fs.existsSync(closedTaskPath(fixture.tasksDir, id))).toBe(true);
       expect(fs.existsSync(path.join(fixture.repo, "hello.txt"))).toBe(true);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
 
       server.shutdown();
     },
@@ -175,8 +180,8 @@ describe("Feature: measuring how fast an agent writes", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the agent that ran has a measured rate and an idle one has none
-      expect(server.rates.rate("pi-fake-fake")).toBeGreaterThan(0);
-      expect(server.rates.rate("pi-other-other")).toBeNull();
+      expect(server.rateOf("pi-fake-fake")).toBeGreaterThan(0);
+      expect(server.rateOf("pi-other-other")).toBeNull();
 
       server.shutdown();
     },
@@ -231,16 +236,16 @@ describe("Feature: the design and planning phases", () => {
       expect(body).toContain("## Todos");
       expect(body).toContain("1. write hello.txt");
       expect(body).toContain("2. run the check");
-      expect(fs.existsSync(server.runtime.worktree(id))).toBe(true);
-      expect(fs.existsSync(server.runtime.sessionDir(id, "designer"))).toBe(
+      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(true);
+      expect(fs.existsSync(pathsOf(server).sessionDir(id, "designer"))).toBe(
         true,
       );
-      expect(fs.existsSync(server.runtime.sessionDir(id, "planner"))).toBe(
+      expect(fs.existsSync(pathsOf(server).sessionDir(id, "planner"))).toBe(
         true,
       );
 
       // Then it went through each phase and its review in order
-      const submits = server.transitions
+      const submits = journalOf(server)
         .read()
         .filter((e) => e.task_id === id && e.transition === "submit");
       expect(submits.map((e) => `${e.from} -> ${e.to}`)).toEqual([
@@ -284,7 +289,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then the designer was told what the reviewer found, in its own words
-      const designer = server.runtime.sessionDir(id, "designer");
+      const designer = pathsOf(server).sessionDir(id, "designer");
       expect(promptsTo(designer).join("\n")).toContain(
         "the design misses the farewell",
       );
@@ -330,8 +335,8 @@ describe("Feature: the design and planning phases", () => {
       await settleTo(server, id, "PLAN_REVIEW");
 
       // Then the designer read the findings in its next prompt
-      expect(promptsTo(server.runtime.sessionDir(id, "designer"))[1]).toBe(
-        server.prompts.fragment("DESIGN-with-findings", {
+      expect(promptsTo(pathsOf(server).sessionDir(id, "designer"))[1]).toBe(
+        promptsOf(server).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
       );
@@ -345,15 +350,15 @@ describe("Feature: the design and planning phases", () => {
       expect(body).not.toContain("the design misses the farewell");
 
       const assignment = fs.readFileSync(
-        server.runtime.assignment(id),
+        pathsOf(server).assignment(id),
         "utf-8",
       );
       expect(assignment).not.toContain("the design misses the farewell");
 
       expect(
-        fs.existsSync(queueFile(server.runtime.taskDir(id), "DESIGN")),
+        fs.existsSync(queueFile(pathsOf(server).taskDir(id), "DESIGN")),
       ).toBe(false);
-      expect(fs.existsSync(server.runtime.findings(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
 
       server.shutdown();
       await server.drain();
@@ -388,8 +393,8 @@ describe("Feature: the design and planning phases", () => {
       await settleTo(server, id, "PLAN");
 
       // Then the steer it was given still carried the findings to answer
-      expect(steersTo(server.runtime.sessionDir(id, "designer"))).toEqual([
-        server.prompts.fragment("DESIGN-with-findings", {
+      expect(steersTo(pathsOf(server).sessionDir(id, "designer"))).toEqual([
+        promptsOf(server).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
       ]);
@@ -424,7 +429,7 @@ describe("Feature: the design and planning phases", () => {
         "the designer submitted without appending a design section",
       );
       expect(task.state).toBe("HELD_DESIGN");
-      expect(promptsTo(server.runtime.sessionDir(id, "designer"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "designer"))).toHaveLength(
         ISSUES["missing-design"].attempts + 1,
       );
 
@@ -458,7 +463,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
-      expect(promptsTo(server.runtime.sessionDir(id, "reviewer"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "reviewer"))).toHaveLength(
         3,
       );
 
@@ -496,7 +501,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then the planner was told what the reviewer found, in its own words
-      const planner = server.runtime.sessionDir(id, "planner");
+      const planner = pathsOf(server).sessionDir(id, "planner");
       expect(promptsTo(planner).join("\n")).toContain(
         "no todo covers the check",
       );
@@ -540,7 +545,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was asked once for the plan and never held
-      expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
         2,
       );
 
@@ -576,7 +581,7 @@ describe("Feature: the design and planning phases", () => {
         "the planner submitted without appending a todo list",
       );
       expect(task.state).toBe("HELD_PLAN");
-      expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
         ISSUES["missing-todos"].attempts + 1,
       );
 
@@ -614,7 +619,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its plan was accepted
-      expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
         2,
       );
 
@@ -687,7 +692,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
-      expect(promptsTo(server.runtime.sessionDir(id, "reviewer"))).toHaveLength(
+      expect(promptsTo(pathsOf(server).sessionDir(id, "reviewer"))).toHaveLength(
         3,
       );
 
@@ -873,7 +878,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(false);
       await server.tick();
-      expect(() => server.attemptAbort(id)).toThrow(
+      expect(() => server.abort(id)).toThrow(
         /not in MANAGER_REVIEW or HELD_DESIGN or HELD_PLAN or HELD_WORK/,
       );
 
@@ -881,7 +886,7 @@ describe("Feature: the design and planning phases", () => {
       server.transition(id, "hold", { reason: "abandoning" }, "manager");
 
       // When the manager aborts it
-      const result = server.attemptAbort(id);
+      const result = server.abort(id);
 
       // Then it closes and leaves the graph
       expect(result.to).toBe("CLOSED");
@@ -920,8 +925,10 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then the prompts came from the orchestrator's own directory
-      expect(server.orchestratorDir).toBe(path.join(import.meta.dir, ".."));
-      expect(fs.existsSync(server.runtime.assignment(id))).toBe(true);
+      expect(server.config.promptDirs.orchestrator).toBe(
+        path.join(import.meta.dir, "..", "prompts"),
+      );
+      expect(fs.existsSync(pathsOf(server).assignment(id))).toBe(true);
 
       server.shutdown();
     },
@@ -952,12 +959,12 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then the agent read the project's words, over the task's own body
-      const sessionDir = server.runtime.sessionDir(id, "worker");
+      const sessionDir = pathsOf(server).sessionDir(id, "worker");
       expect(promptsTo(sessionDir)[0]).toBe(
         "You are this project's implementer.\n",
       );
       const assignment = fs.readFileSync(
-        server.runtime.assignment(id),
+        pathsOf(server).assignment(id),
         "utf-8",
       );
       expect(assignment).toContain("# The body of this task");
@@ -979,7 +986,7 @@ describe("Feature: handing a task to an agent", () => {
       const server = await serverFor(fixture);
 
       // Then the override is named in the log, and the file it replaced is not
-      const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
+      const log = fs.readFileSync(pathsOf(server).serverLog, "utf-8");
       expect(log).toContain(
         `cached ${path.join(fixture.overridesDir, "prompts", "WORK.md")}`,
       );
@@ -1016,7 +1023,7 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then the agent read the orchestrator's own work prompt, untouched
-      const sessionDir = server.runtime.sessionDir(id, "worker");
+      const sessionDir = pathsOf(server).sessionDir(id, "worker");
       expect(promptsTo(sessionDir)[0]).toBe(
         fs.readFileSync(
           path.join(fixture.orchestratorDir, "prompts", "WORK.md"),
@@ -1048,8 +1055,8 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then it has a worktree, a branch, and its assignment beside the worktree
-      const worktree = server.runtime.worktree(id);
-      const assignment = server.runtime.assignment(id);
+      const worktree = pathsOf(server).worktree(id);
+      const assignment = pathsOf(server).assignment(id);
       expect(fs.existsSync(worktree)).toBe(true);
       expect(fs.existsSync(assignment)).toBe(true);
       expect(assignment.startsWith(worktree)).toBe(false);
@@ -1082,7 +1089,7 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then the assignment is the body plus the empty heading to fill in
-      expect(fs.readFileSync(server.runtime.assignment(id), "utf-8")).toBe(
+      expect(fs.readFileSync(pathsOf(server).assignment(id), "utf-8")).toBe(
         "\n\n# The body of this task\n\n## Design\n",
       );
 
@@ -1125,7 +1132,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(held.claimed_pid).toBeGreaterThan(0);
       expect(held.workspace!.agent).toBe("pi-fake-fake-1");
       expect(held.workspace!.branch).toBe(branchName(id));
-      expect(held.workspace!.worktree).toBe(server.runtime.worktree(id));
+      expect(held.workspace!.worktree).toBe(pathsOf(server).worktree(id));
       expect(fs.existsSync(held.workspace!.session!)).toBe(true);
 
       await reaches(server, id, "MANAGER_REVIEW");
@@ -1149,8 +1156,8 @@ describe("Feature: handing a task to an agent", () => {
       // Given work committed on a branch named by an older version of the server
       const server = await serverFor(fixture);
       const legacy = `work/${id}`;
-      const worktree = server.runtime.worktree(id);
-      server.runtime.prepare(id);
+      const worktree = pathsOf(server).worktree(id);
+      pathsOf(server).prepare(id);
       git.addWorkspace(fixture.repo, legacy, worktree, "master");
       fs.writeFileSync(path.join(worktree, "a.txt"), "a\n");
       git.gitOrThrow(worktree, ["add", "-A"]);
@@ -1179,7 +1186,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(server.tasks().get(id)!.workspace!.branch).toBe(legacy);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
 
-      expect((await server.attemptMerge(id)).to).toBe("CLOSED");
+      expect((await server.submit(id)).to).toBe("CLOSED");
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
       expect(git.branchExists(fixture.repo, legacy)).toBe(false);
 
@@ -1214,7 +1221,7 @@ describe("Feature: handing a task to an agent", () => {
       ).toHaveLength(1);
 
       await server.drain();
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).not.toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).not.toContain(
         "dispatch of",
       );
 
@@ -1310,7 +1317,7 @@ describe("Feature: landing work on the base branch", () => {
       commitGraph(fixture, "conflicting change on master");
 
       // When the manager merges it
-      const merging = server.attemptMerge(id);
+      const merging = server.submit(id);
 
       // Then the manager is told it no longer rebases, and the task is untouched
       expect(merging).rejects.toThrow(/no longer rebases/);
@@ -1344,15 +1351,15 @@ describe("Feature: landing work on the base branch", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      fs.rmSync(path.join(server.runtime.worktree(id), "wanted.txt"));
-      git.gitOrThrow(server.runtime.worktree(id), [
+      fs.rmSync(path.join(pathsOf(server).worktree(id), "wanted.txt"));
+      git.gitOrThrow(pathsOf(server).worktree(id), [
         "commit",
         "-qam",
         "remove it",
       ]);
 
       // When the manager merges it
-      const merging = server.attemptMerge(id);
+      const merging = server.submit(id);
 
       // Then the check that failed is named, and the task is untouched
       expect(merging).rejects.toThrow(/test -f wanted\.txt/);
@@ -1390,14 +1397,14 @@ describe("Feature: landing work on the base branch", () => {
 
       // Then the write is refused, and the project is untouched
       const queued = fs.readFileSync(
-        queueFile(server.runtime.taskDir(id), "WORK"),
+        queueFile(pathsOf(server).taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");
       expect(fs.existsSync(path.join(fixture.repo, "poke"))).toBe(false);
 
       expect(
-        git.gitOrThrow(server.runtime.worktree(id), ["log", "--oneline", "-1"]),
+        git.gitOrThrow(pathsOf(server).worktree(id), ["log", "--oneline", "-1"]),
       ).toContain(`work on ${id}`);
 
       server.shutdown();

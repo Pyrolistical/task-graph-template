@@ -4,13 +4,52 @@ import { type TaskMeta, rebuildDocument } from "../domain/task.ts";
 import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
+import { Prompts } from "../adapters/prompts.ts";
 import { Runtime } from "../adapters/runtime.ts";
+import { TransitionLog } from "../adapters/transition-log.ts";
+import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 import { wire } from "../main/compose.ts";
 
-export function startServer(
+interface Rig {
+  runtime: Runtime;
+  prompts: Prompts;
+}
+
+const RIGS = new WeakMap<Server, Rig>();
+
+export async function startServer(
   options: Parameters<typeof wire>[0],
 ): Promise<Server> {
-  return wire(options).start();
+  const server = await wire(options).start();
+  const orchestratorDir = options.orchestratorDir ?? ORCHESTRATOR_DIR;
+  RIGS.set(server, {
+    runtime: new Runtime(options.repo, options.serverRoot),
+    prompts: new Prompts(
+      orchestratorDir,
+      options.overridesDir ?? options.tasksDir ?? null,
+    ),
+  });
+  return server;
+}
+
+function rigOf(server: Server): Rig {
+  const rig = RIGS.get(server);
+  if (rig === undefined) {
+    throw new Error("the server was not started through the jig");
+  }
+  return rig;
+}
+
+export function pathsOf(server: Server): Runtime {
+  return rigOf(server).runtime;
+}
+
+export function promptsOf(server: Server): Prompts {
+  return rigOf(server).prompts;
+}
+
+export function journalOf(server: Server): TransitionLog {
+  return new TransitionLog(pathsOf(server).transitionLog);
 }
 
 export function runtimeOf(fixture: Fixture): Runtime {
@@ -59,7 +98,7 @@ export async function until(
   }
   if (!done()) {
     throw new Error(
-      `the server never reached the expected state in ${ticks} ticks\n${fs.readFileSync(server.runtime.serverLog, "utf-8")}`,
+      `the server never reached the expected state in ${ticks} ticks\n${fs.readFileSync(pathsOf(server).serverLog, "utf-8")}`,
     );
   }
 }
@@ -124,10 +163,12 @@ export async function reaches(
 }
 
 export function compactionsOf(server: Server, id: string): number | null {
-  if (!fs.existsSync(server.runtime.agentsView)) {
+  if (!fs.existsSync(pathsOf(server).agentsView)) {
     return null;
   }
-  const view = JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8"));
+  const view = JSON.parse(
+    fs.readFileSync(pathsOf(server).agentsView, "utf-8"),
+  );
   const busy = view.agents.find(
     (agent: { task_id: string | null }) => agent.task_id === id,
   );

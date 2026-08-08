@@ -4,19 +4,9 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
-import {
-  type TaskId,
-  detectCycles,
-  isValidId,
-} from "./orchestrator/domain/task.ts";
-import {
-  createTask,
-  writeTaskBody,
-} from "./orchestrator/adapters/task-store.ts";
-import type {
-  TransitionArgs,
-  TransitionName,
-} from "./orchestrator/domain/state-machine.ts";
+import { type TaskId, isValidId } from "./orchestrator/domain/task.ts";
+import type { ViewName } from "./orchestrator/app/ports.ts";
+import type { Manager } from "./orchestrator/app/manager.ts";
 import { Server } from "./orchestrator/app/server.ts";
 import { Runtime } from "./orchestrator/adapters/runtime.ts";
 import { wire } from "./orchestrator/main/compose.ts";
@@ -24,7 +14,7 @@ import { wire } from "./orchestrator/main/compose.ts";
 const TICK_MS = 500;
 
 export interface Startup {
-  server: Server | null;
+  server: Manager | null;
   error: string | null;
 }
 
@@ -46,7 +36,7 @@ export function build(startup: Startup): McpServer {
     { capabilities: { tools: {}, resources: {} } },
   );
 
-  function live(): Server {
+  function live(): Manager {
     if (startup.server === null) {
       throw new Error(
         startup.error ?? "the server did not start, and said nothing about why",
@@ -60,14 +50,6 @@ export function build(startup: Startup): McpServer {
     return json(result);
   }
 
-  function judge(
-    id: TaskId,
-    transition: TransitionName,
-    args: TransitionArgs = {},
-  ) {
-    return applied(live().transition(id, transition, args, "manager"));
-  }
-
   mcp.registerTool(
     "task_create",
     {
@@ -75,21 +57,7 @@ export function build(startup: Startup): McpServer {
         "Create a new task and return the path of its document. The document is yours to edit directly until it leaves NEW.",
       inputSchema: z.object({ title: z.string().min(1) }),
     },
-    async ({ title }) => {
-      const created = createTask(
-        live().tasksDir,
-        live().orchestratorDir,
-        title,
-      );
-      live().transitions.append({
-        task_id: created.id,
-        transition: "create",
-        from: "NEW",
-        to: "NEW",
-        by: "manager",
-      });
-      return applied(created);
-    },
+    async ({ title }) => applied(live().createTask(title)),
   );
 
   mcp.registerTool(
@@ -99,8 +67,7 @@ export function build(startup: Startup): McpServer {
         "Replace a task document's body under the graph lock. Use this for a task you do not hold; edit the file directly for one you do.",
       inputSchema: z.object({ id: taskId, body: z.string().min(1) }),
     },
-    async ({ id, body }) =>
-      applied({ filePath: writeTaskBody(live().tasksDir, id, body) }),
+    async ({ id, body }) => applied({ filePath: live().writeBody(id, body) }),
   );
 
   mcp.registerTool(
@@ -110,19 +77,7 @@ export function build(startup: Startup): McpServer {
         "Say the task is done with the stage it is in and move it forward. From NEW or BLOCKED it is dispatched — NEW → DESIGN, or BLOCKED while dependencies remain; BLOCKED → DESIGN once they are gone. From MANAGER_REVIEW the work is landed first (rebase, recheck, fast-forward), then the task closes.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => {
-      const tasks = live().tasks();
-      const state = tasks.get(id)?.state;
-      if (state === "MANAGER_REVIEW") {
-        return applied(await live().attemptMerge(id));
-      }
-      if (detectCycles(tasks).includes(id)) {
-        throw new Error(
-          `task "${id}" is part of a dependency cycle through ${tasks.get(id)?.depends_on.join(", ")}; it could never unblock`,
-        );
-      }
-      return judge(id, "submit");
-    },
+    async ({ id }) => applied(await live().submit(id)),
   );
 
   mcp.registerTool(
@@ -146,7 +101,7 @@ export function build(startup: Startup): McpServer {
         "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in BLOCKED instead, and a task that unblocks starts again at DESIGN.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => judge(id, "resume"),
+    async ({ id }) => applied(live().resume(id)),
   );
 
   mcp.registerTool(
@@ -156,7 +111,7 @@ export function build(startup: Startup): McpServer {
         "Park a task, whether or not an agent is holding it. It lands in the held state of the phase it was in: HELD_DESIGN from DESIGN or DESIGN_REVIEW, HELD_PLAN from PLAN or PLAN_REVIEW, HELD_WORK from WORK, CHECK or WORK_REVIEW. The document is yours to edit directly while it is held; task_resume sends it back, task_abort closes it.",
       inputSchema: z.object({ id: taskId, reason: z.string().min(1) }),
     },
-    async ({ id, reason }) => judge(id, "hold", { reason }),
+    async ({ id, reason }) => applied(live().hold(id, reason)),
   );
 
   mcp.registerTool(
@@ -166,7 +121,7 @@ export function build(startup: Startup): McpServer {
         "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => applied(live().attemptAbort(id)),
+    async ({ id }) => applied(live().abort(id)),
   );
 
   mcp.registerTool(
@@ -194,7 +149,7 @@ export function build(startup: Startup): McpServer {
     "reload_prompts",
     {
       description:
-        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the live(). Returns the absolute path of each file now cached.",
+        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
       inputSchema: z.object({}),
     },
     async () => json(live().reloadPrompts()),
@@ -242,16 +197,13 @@ export function build(startup: Startup): McpServer {
     }));
   }
 
-  function view(name: string, description: string, filePath: () => string) {
+  function view(name: ViewName, description: string) {
     resource(
       name,
       `orchestrator://${name}`,
       description,
       "application/json",
-      () => {
-        const target = filePath();
-        return fs.existsSync(target) ? fs.readFileSync(target, "utf-8") : "{}";
-      },
+      () => live().view(name),
     );
   }
 
@@ -263,64 +215,22 @@ export function build(startup: Startup): McpServer {
       "HELD_DESIGN/HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
       "NEW: author the task (edit the file: body, checks, dependencies), then task_submit.",
     ].join(" "),
-    () => live().runtime.inboxView,
   );
 
-  view(
-    "agents",
-    "every agent slot, idle ones included",
-    () => live().runtime.agentsView,
-  );
+  view("agents", "every agent slot, idle ones included");
 
-  view(
-    "checks",
-    "the check processes running right now",
-    () => live().runtime.checksView,
-  );
+  view("checks", "the check processes running right now");
 
-  view(
-    "tasks",
-    "the last 100 tasks to change state",
-    () => live().runtime.tasksView,
-  );
+  view("tasks", "the last 100 tasks to change state");
 
-  view(
-    "queue",
-    "the tasks waiting on a slot, in the order the scheduler will dispatch them",
-    () => live().runtime.queueView,
-  );
+  view("queue", "the tasks waiting on a slot, in the order the scheduler will dispatch them");
 
   resource(
     "paths",
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () =>
-      JSON.stringify(
-        {
-          repo: live().repo,
-          tasks_dir: live().tasksDir,
-          agents_file: live().agentsPath,
-          overrides_prompts_dir: path.join(live().overridesDir, "prompts"),
-          orchestrator_prompts_dir: path.join(
-            live().orchestratorDir,
-            "prompts",
-          ),
-          runtime_root: live().runtime.root,
-          server_log: live().runtime.serverLog,
-          transition_log: live().runtime.transitionLog,
-          console_command: live().runtime.consoleCommand,
-          views: {
-            agents: live().runtime.agentsView,
-            checks: live().runtime.checksView,
-            tasks: live().runtime.tasksView,
-            inbox: live().runtime.inboxView,
-            queue: live().runtime.queueView,
-          },
-        },
-        null,
-        2,
-      ),
+    () => JSON.stringify(live().paths(), null, 2),
   );
 
   resource(
@@ -341,13 +251,17 @@ export function build(startup: Startup): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => live().runtime.root,
+    () => live().paths().runtime_root,
   );
 
   return mcp;
 }
 
-async function start(): Promise<Startup> {
+interface Boot extends Startup {
+  server: Server | null;
+}
+
+async function start(): Promise<Boot> {
   const tasksDir =
     process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]);
   try {

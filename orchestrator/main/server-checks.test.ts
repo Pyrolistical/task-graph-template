@@ -18,6 +18,8 @@ import {
 import { Server } from "../app/server.ts";
 import {
   dispatchOnce,
+  journalOf,
+  pathsOf,
   reaches,
   runOnce,
   runtimeOf,
@@ -55,7 +57,7 @@ describe("Feature: running a task's checks", () => {
       const task = server.tasks().get(id)!;
       expect(task.state).toBe("WORK");
       const queued = fs.readFileSync(
-        queueFile(server.runtime.taskDir(id), "WORK"),
+        queueFile(pathsOf(server).taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("echo boom >&2; exit 3");
@@ -91,7 +93,7 @@ describe("Feature: running a task's checks", () => {
 
       // Then the agent is told about both failures, not only the first
       const queued = fs.readFileSync(
-        queueFile(server.runtime.taskDir(id), "WORK"),
+        queueFile(pathsOf(server).taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("(exit 1)");
@@ -158,11 +160,11 @@ describe("Feature: running a task's checks", () => {
       server.setSchedulerEnabled(true);
 
       // When the work is done and the check runs against it
-      await until(server, () => fs.existsSync(server.runtime.checkLog(id, 0)));
+      await until(server, () => fs.existsSync(pathsOf(server).checkLog(id, 0)));
 
       // Then the output is on disk in the task's own directory
       expect(
-        fs.readFileSync(server.runtime.checkLog(id, 0), "utf-8"),
+        fs.readFileSync(pathsOf(server).checkLog(id, 0), "utf-8"),
       ).toContain("written-to-the-log");
 
       server.shutdown();
@@ -206,11 +208,11 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the assignment was never rotated, because the session was resumed
-      const history = fs.readdirSync(server.runtime.history(id));
+      const history = fs.readdirSync(pathsOf(server).history(id));
       expect(history).toHaveLength(0);
 
       // Then the check failed exactly once, so the second attempt passed
-      const failures = server.transitions
+      const failures = journalOf(server)
         .read()
         .filter((e) => e.transition === "fail" && e.to === "WORK");
       expect(failures).toHaveLength(1);
@@ -251,7 +253,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await runOnce(server);
 
       // Then its second prompt names the command that failed and how it failed
-      const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
+      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("`test -f fixed.txt` (exit 1)");
 
@@ -283,7 +285,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await dispatchOnce(server);
       const opened = server.tasks().get(id)!.workspace!.session!;
       const legacyDir = path.join(
-        server.runtime.taskDir(id),
+        pathsOf(server).taskDir(id),
         "session",
         "work",
       );
@@ -341,11 +343,11 @@ describe("Feature: landing or abandoning finished work", () => {
       server.setSchedulerEnabled(false);
 
       // When the manager merges it
-      const result = await server.attemptMerge(id);
+      const result = await server.submit(id);
 
       // Then the task closes, the work is on the base, and nothing is left over
       expect(result.to).toBe("CLOSED");
-      expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
     },
@@ -387,13 +389,13 @@ describe("Feature: landing or abandoning finished work", () => {
       const { fixture, server, id } = await atManagerReview();
 
       // When the manager aborts it
-      const result = server.attemptAbort(id);
+      const result = server.abort(id);
 
       // Then it closes, and the work it did is thrown away with the branch
       expect(result.to).toBe("CLOSED");
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(false);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
     },
     30000,
   );
@@ -408,7 +410,7 @@ describe("Feature: landing or abandoning finished work", () => {
       server.transition(id, "hold", { reason: "abandoning" }, "manager");
 
       // When the manager aborts it
-      const result = server.attemptAbort(id);
+      const result = server.abort(id);
 
       // Then it closes, having left no branch behind at all
       expect(result.to).toBe("CLOSED");
@@ -434,7 +436,7 @@ describe("Feature: landing or abandoning finished work", () => {
       expect(stateOf(server, id)).toBe("WORK");
 
       // When the manager aborts it
-      const attempt = () => server.attemptAbort(id);
+      const attempt = () => server.abort(id);
 
       // Then it is refused, naming where a task must be to be abandoned
       expect(attempt).toThrow(
@@ -453,7 +455,7 @@ describe("Feature: landing or abandoning finished work", () => {
       git.gitOrThrow(fixture.repo, ["merge", "--ff-only", branchName(id)]);
 
       // When the manager aborts it
-      const attempt = () => server.attemptAbort(id);
+      const attempt = () => server.abort(id);
 
       // Then it is refused, because there is no longer work to throw away
       expect(attempt).toThrow(/already part of master/);
@@ -485,14 +487,14 @@ describe("Feature: landing or abandoning finished work", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      expect(fs.existsSync(server.runtime.taskDir(id))).toBe(true);
+      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(true);
 
       // When the manager merges it
-      await server.attemptMerge(id);
+      await server.submit(id);
 
       // Then the runtime directory it worked in is removed with it
       expect(stateOf(server, id)).toBe("CLOSED");
-      expect(fs.existsSync(server.runtime.taskDir(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(false);
 
       for (let i = 0; i < 101; i++) {
         const other = readyTask(fixture, `filler ${i}`);
@@ -501,7 +503,7 @@ describe("Feature: landing or abandoning finished work", () => {
       await server.writeViews();
 
       // Then it stays gone once it falls off the end of the recent list
-      expect(fs.existsSync(server.runtime.taskDir(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(false);
       const view = readView(runtimeOf(fixture));
       expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },

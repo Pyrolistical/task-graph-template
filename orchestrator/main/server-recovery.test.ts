@@ -18,6 +18,9 @@ import { Server } from "../app/server.ts";
 import {
   claimed,
   editTaskFile,
+  journalOf,
+  pathsOf,
+  promptsOf,
   reaches,
   serverFor,
   settleTo,
@@ -42,7 +45,7 @@ describe("Feature: picking a project back up at startup", () => {
       await first.tick();
       await first.drain();
       first.shutdown();
-      const worktree = first.runtime.worktree(id);
+      const worktree = pathsOf(first).worktree(id);
       expect(fs.existsSync(worktree)).toBe(true);
       fs.rmSync(worktree, { recursive: true, force: true });
 
@@ -88,14 +91,14 @@ describe("Feature: picking a project back up at startup", () => {
       // Given a server that has applied a transition and then exited
       const first = await serverFor(fixture);
       first.transition(id, "hold", { reason: "waiting on a person" }, "test");
-      const cursor = first.transitions.cursor;
+      const cursor = journalOf(first).cursor;
       first.shutdown();
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then it carries on the sequence, so the manager's cursor still means something
-      expect(second.transitions.cursor).toBe(cursor);
+      expect(journalOf(second).cursor).toBe(cursor);
 
       second.shutdown();
     },
@@ -237,7 +240,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
         meta.checks.push("sleep 2");
       });
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
-      const merging = server.attemptMerge(id);
+      const merging = server.submit(id);
       await until(server, () => server.isCheckRunning(id), 20);
 
       // When the server ticks while the check is running
@@ -280,7 +283,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 describe("Feature: an abort that races a dispatch", () => {
   function abortable(server: Server, id: string): void {
     server.transition(id, "hold", { reason: "abandoning" }, "manager");
-    server.attemptAbort(id);
+    server.abort(id);
   }
 
   testInTempDirs(
@@ -340,7 +343,7 @@ describe("Feature: an abort that races a dispatch", () => {
       expect(row.task_id).toBeNull();
       expect(
         fs
-          .readFileSync(server.runtime.serverLog, "utf-8")
+          .readFileSync(pathsOf(server).serverLog, "utf-8")
           .includes(`dispatch of ${id} to pi-fake-fake-1 failed`),
       ).toBe(true);
 
@@ -368,7 +371,7 @@ describe("Feature: an abort that races a dispatch", () => {
       // Then the agent holds the task, and the manager can no longer abort it
       expect(stateOf(server, id)).toBe("WORK");
       expect(server.tasks().get(id)!.claimed_by).toBe("pi-fake-fake-1");
-      expect(() => server.attemptAbort(id)).toThrow(/not in/);
+      expect(() => server.abort(id)).toThrow(/not in/);
 
       server.shutdown();
       await server.drain();
@@ -469,7 +472,7 @@ describe("Feature: a task document that does not parse", () => {
       const server = await serverFor(fixture);
       const logLines = () =>
         fs
-          .readFileSync(server.runtime.serverLog, "utf-8")
+          .readFileSync(pathsOf(server).serverLog, "utf-8")
           .split("\n")
           .filter((line) => line.includes(`${broken}.md`));
 
@@ -527,13 +530,13 @@ describe("Feature: an agent that compacts mid-turn", () => {
 
       // Then the worktree is reset and the agent steered back to its assignment
       expect(
-        fs.existsSync(path.join(server.runtime.worktree(id), "stray.txt")),
+        fs.existsSync(path.join(pathsOf(server).worktree(id), "stray.txt")),
       ).toBe(false);
-      expect(git.uncommitted(server.runtime.worktree(id))).toEqual([]);
-      expect(steersTo(server.runtime.sessionDir(id, "designer"))).toEqual([
-        server.prompts.fragment("DESIGN"),
+      expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
+      expect(steersTo(pathsOf(server).sessionDir(id, "designer"))).toEqual([
+        promptsOf(server).fragment("DESIGN"),
       ]);
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "compacted: worktree reset, steered back to the assignment",
       );
 
@@ -569,12 +572,12 @@ describe("Feature: an agent that compacts mid-turn", () => {
 
       // Then its work is kept, and it is only steered back to the assignment
       expect(
-        fs.existsSync(path.join(server.runtime.worktree(id), "a.txt")),
+        fs.existsSync(path.join(pathsOf(server).worktree(id), "a.txt")),
       ).toBe(true);
-      expect(steersTo(server.runtime.sessionDir(id, "worker"))).toEqual([
-        server.prompts.fragment("WORK"),
+      expect(steersTo(pathsOf(server).sessionDir(id, "worker"))).toEqual([
+        promptsOf(server).fragment("WORK"),
       ]);
-      const log = fs.readFileSync(server.runtime.serverLog, "utf-8");
+      const log = fs.readFileSync(pathsOf(server).serverLog, "utf-8");
       expect(log).toContain("compacted: steered back to the assignment");
       expect(log).not.toContain("worktree reset");
 
@@ -604,8 +607,8 @@ describe("Feature: an agent that compacts mid-turn", () => {
       await settleTo(server, id, "PLAN");
 
       // Then it is left alone to settle, rather than steered off its result
-      expect(steersTo(server.runtime.sessionDir(id, "reviewer"))).toEqual([]);
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(steersTo(pathsOf(server).sessionDir(id, "reviewer"))).toEqual([]);
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "compacted after its result: left alone to settle",
       );
 
@@ -638,7 +641,7 @@ describe("Feature: a dependency that can never be satisfied", () => {
 
       // Then each is reported once, rather than on every tick forever
       const cycles = fs
-        .readFileSync(server.runtime.serverLog, "utf-8")
+        .readFileSync(pathsOf(server).serverLog, "utf-8")
         .split("\n")
         .filter((line) => line.includes("depends on itself"));
 

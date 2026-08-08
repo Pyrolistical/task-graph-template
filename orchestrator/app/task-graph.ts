@@ -1,5 +1,6 @@
 import type {
   ClaimArgs,
+  CreatedTask,
   Inbox,
   Journal,
   Paths,
@@ -101,6 +102,14 @@ export class TaskGraph {
 
   body(taskId: TaskId): string {
     return this.tasks.body(taskId);
+  }
+
+  create(title: string): CreatedTask {
+    return this.tasks.create(title);
+  }
+
+  writeBody(taskId: TaskId, body: string): string {
+    return this.tasks.writeBody(taskId, body);
   }
 
   claim(taskId: TaskId, args: ClaimArgs): void {

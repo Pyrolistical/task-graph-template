@@ -18,6 +18,8 @@ import {
   compactionsOf,
   dispatchOnce,
   editTaskFile,
+  journalOf,
+  pathsOf,
   reaches,
   runOnce,
   runtimeOf,
@@ -76,7 +78,7 @@ describe("Feature: the views the console and the manager read", () => {
       );
       expect(busy.role).toBe("worker");
       expect(busy.pid).toBeGreaterThan(0);
-      expect(busy.log).toBe(server.runtime.rpcLog(id));
+      expect(busy.log).toBe(pathsOf(server).rpcLog(id));
 
       await server.drain();
       server.shutdown();
@@ -98,14 +100,14 @@ describe("Feature: the views the console and the manager read", () => {
 
       // Then every one of them is stamped with the same cursor
       const seqs = [
-        server.runtime.agentsView,
-        server.runtime.checksView,
-        server.runtime.tasksView,
-        server.runtime.inboxView,
+        pathsOf(server).agentsView,
+        pathsOf(server).checksView,
+        pathsOf(server).tasksView,
+        pathsOf(server).inboxView,
       ].map((file) => JSON.parse(fs.readFileSync(file, "utf-8")).seq);
 
       expect(new Set(seqs).size).toBe(1);
-      expect(seqs[0]).toBe(server.transitions.cursor);
+      expect(seqs[0]).toBe(journalOf(server).cursor);
 
       server.shutdown();
     },
@@ -246,7 +248,7 @@ describe("Feature: a pool with no agents in it", () => {
 
       // Then the agents view carries the path of that file
       expect(
-        JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8"))
+        JSON.parse(fs.readFileSync(pathsOf(server).agentsView, "utf-8"))
           .agents_file,
       ).toBe(fixture.agentsPath);
 
@@ -344,7 +346,7 @@ describe("Feature: what the agents view says about a running agent", () => {
       server.setSchedulerEnabled(false);
 
       // When the manager merges it
-      await server.attemptMerge(id);
+      await server.submit(id);
 
       // Then the closed task is still shown, so the manager sees what just landed
       await server.writeViews();
@@ -387,7 +389,7 @@ describe("Feature: the log of every transition applied", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then every transition is one numbered line, in the order it happened
-      const entries = server.transitions.read();
+      const entries = journalOf(server).read();
       expect(entries.map((e) => e.seq)).toEqual(entries.map((_, i) => i + 1));
 
       // Then each line says where the task came from, went to, and who moved it
@@ -415,20 +417,20 @@ describe("Feature: commands the console writes for the server", () => {
       const server = await serverFor(fixture);
 
       // When the console writes the first of the three commands
-      writeCommand(server.runtime, { command: "scheduler", enabled: true });
+      writeCommand(pathsOf(server), { command: "scheduler", enabled: true });
 
       // Then each is applied and the file is consumed rather than reapplied
       await applied(() => server.schedulerEnabled);
-      expect(fs.existsSync(server.runtime.consoleCommand)).toBe(false);
+      expect(fs.existsSync(pathsOf(server).consoleCommand)).toBe(false);
 
-      writeCommand(server.runtime, {
+      writeCommand(pathsOf(server), {
         command: "agent",
         agent: "pi-fake-fake",
         enabled: false,
       });
       await applied(() => !server.agentRows()[0]!.enabled);
 
-      writeCommand(server.runtime, { command: "scheduler", enabled: false });
+      writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
       await applied(() => !server.schedulerEnabled);
 
       server.shutdown();
@@ -443,14 +445,14 @@ describe("Feature: commands the console writes for the server", () => {
       const fixture = makeFixture();
       const first = await serverFor(fixture);
       first.shutdown();
-      writeCommand(first.runtime, { command: "scheduler", enabled: true });
+      writeCommand(pathsOf(first), { command: "scheduler", enabled: true });
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then it applies the waiting command and consumes it
       expect(second.schedulerEnabled).toBe(true);
-      expect(fs.existsSync(second.runtime.consoleCommand)).toBe(false);
+      expect(fs.existsSync(pathsOf(second).consoleCommand)).toBe(false);
 
       second.shutdown();
     },
@@ -465,7 +467,7 @@ describe("Feature: commands the console writes for the server", () => {
       const server = await serverFor(fixture);
 
       // When the console names an agent that is not in the pool
-      writeCommand(server.runtime, {
+      writeCommand(pathsOf(server), {
         command: "agent",
         agent: "pi-nobody-nothing",
         enabled: false,
@@ -475,11 +477,11 @@ describe("Feature: commands the console writes for the server", () => {
       await eventually(
         () =>
           fs
-            .readFileSync(server.runtime.serverLog, "utf-8")
+            .readFileSync(pathsOf(server).serverLog, "utf-8")
             .includes("refused"),
         "logged the refusal",
       );
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "no agent named",
       );
       expect(server.agentRows()[0]!.enabled).toBe(true);
@@ -707,7 +709,7 @@ describe("Feature: aborting the command an agent is running", () => {
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
       expect(stateOf(server, id)).not.toBe("WORK");
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "aborted bash: git status",
       );
 
@@ -796,7 +798,7 @@ describe("Feature: aborting the command an agent is running", () => {
       expect(stateOf(server, id)).toBe("WORK");
 
       // When the console writes an abort for that slot
-      writeCommand(server.runtime, {
+      writeCommand(pathsOf(server), {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
@@ -805,14 +807,14 @@ describe("Feature: aborting the command an agent is running", () => {
       await eventually(
         () =>
           fs
-            .readFileSync(server.runtime.serverLog, "utf-8")
+            .readFileSync(pathsOf(server).serverLog, "utf-8")
             .includes("aborted bash"),
         "killed the command",
       );
       server.setSchedulerEnabled(false);
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "aborted bash: git status",
       );
 
@@ -829,7 +831,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the console writes an abort for that slot
-      writeCommand(server.runtime, {
+      writeCommand(pathsOf(server), {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
@@ -838,11 +840,11 @@ describe("Feature: aborting the command an agent is running", () => {
       await eventually(
         () =>
           fs
-            .readFileSync(server.runtime.serverLog, "utf-8")
+            .readFileSync(pathsOf(server).serverLog, "utf-8")
             .includes("refused"),
         "logged the refusal",
       );
-      expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
+      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "not running",
       );
 
@@ -859,7 +861,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       // Given a running server that has applied a console command already
       const fixture = makeFixture();
       const server = await serverFor(fixture);
-      writeCommand(server.runtime, { command: "scheduler", enabled: true });
+      writeCommand(pathsOf(server), { command: "scheduler", enabled: true });
       await eventually(() => server.schedulerEnabled, "started its scheduler");
       expect(server.schedulerEnabled).toBe(true);
 
@@ -867,13 +869,13 @@ describe("Feature: a manager that exits while its agents run on", () => {
       server.detach();
 
       // Then a command written afterwards is neither consumed nor applied
-      writeCommand(server.runtime, { command: "scheduler", enabled: false });
+      writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
       await Bun.sleep(200);
-      expect(fs.existsSync(server.runtime.consoleCommand)).toBe(true);
+      expect(fs.existsSync(pathsOf(server).consoleCommand)).toBe(true);
       expect(server.schedulerEnabled).toBe(true);
 
       // Then the views it published are left on disk for the next manager
-      expect(fs.existsSync(server.runtime.agentsView)).toBe(true);
+      expect(fs.existsSync(pathsOf(server).agentsView)).toBe(true);
 
       server.shutdown();
     },

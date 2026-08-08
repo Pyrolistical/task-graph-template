@@ -1,11 +1,14 @@
 import type {
   ClaimArgs,
   Console,
+  CreatedTask,
   Journal,
   Paths,
   Prompts,
   Publisher,
+  ViewName,
 } from "./ports.ts";
+import type { Manager, PathReport } from "./manager.ts";
 import { Dispatch } from "./dispatch.ts";
 import { Land } from "./land.ts";
 import { Pool } from "./pool.ts";
@@ -14,8 +17,7 @@ import { RunChecks } from "./run-checks.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Command } from "../domain/command.ts";
 import type { AgentRow } from "../domain/agents.ts";
-import type { Rates } from "../domain/rates.ts";
-import type { TaskId, TaskMeta } from "../domain/task.ts";
+import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import type {
   TransitionArgs,
   TransitionName,
@@ -28,12 +30,11 @@ export interface ServerConfig {
   repo: string;
   base: string;
   tasksDir: string;
-  orchestratorDir: string;
-  overridesDir: string;
   agentsPath: string;
+  promptDirs: { orchestrator: string; overrides: string };
 }
 
-export class Server {
+export class Server implements Manager {
   private watcher: { close(): void } | null = null;
   private scheduling = false;
   private dispatching = false;
@@ -50,56 +51,41 @@ export class Server {
     private readonly console: Console,
     private readonly journal: Journal,
     private readonly promptStore: Prompts,
-    private readonly paths: Paths,
+    private readonly layout: Paths,
     private readonly publisher: Publisher,
   ) {}
-
-  get repo(): string {
-    return this.config.repo;
-  }
-
-  get base(): string {
-    return this.config.base;
-  }
-
-  get tasksDir(): string {
-    return this.config.tasksDir;
-  }
-
-  get orchestratorDir(): string {
-    return this.config.orchestratorDir;
-  }
-
-  get overridesDir(): string {
-    return this.config.overridesDir;
-  }
-
-  get agentsPath(): string {
-    return this.config.agentsPath;
-  }
-
-  get runtime(): Paths {
-    return this.paths;
-  }
-
-  get prompts(): Prompts {
-    return this.promptStore;
-  }
-
-  get transitions(): Journal {
-    return this.journal;
-  }
-
-  get rates(): Rates {
-    return this.pool.rates;
-  }
 
   isCheckRunning(taskId: TaskId): boolean {
     return this.checker.isRunning(taskId);
   }
 
+  view(name: ViewName): string {
+    return this.publisher.read(name);
+  }
+
+  paths(): PathReport {
+    return {
+      repo: this.config.repo,
+      tasks_dir: this.config.tasksDir,
+      agents_file: this.config.agentsPath,
+      overrides_prompts_dir: this.config.promptDirs.overrides,
+      orchestrator_prompts_dir: this.config.promptDirs.orchestrator,
+      runtime_root: this.layout.root,
+      server_log: this.layout.serverLog,
+      transition_log: this.layout.transitionLog,
+      console_command: this.layout.consoleCommand,
+      views: {
+        agents: this.layout.agentsView,
+        checks: this.layout.checksView,
+        tasks: this.layout.tasksView,
+        inbox: this.layout.inboxView,
+        queue: this.layout.queueView,
+      },
+    };
+  }
+
   async start(): Promise<Server> {
-    this.runtime.takeLock();
+    this.layout.takeLock();
     this.publisher.log(
       `starting against ${this.config.repo} (base ${this.config.base})`,
     );
@@ -136,11 +122,44 @@ export class Server {
     return this.graph.feedback(taskId, findings, by);
   }
 
-  attemptMerge(taskId: TaskId): Promise<TransitionResult> {
-    return this.lander.merge(taskId);
+  createTask(title: string): CreatedTask {
+    const created = this.graph.create(title);
+    this.journal.append({
+      task_id: created.id,
+      transition: "create",
+      from: "NEW",
+      to: "NEW",
+      by: "manager",
+    });
+    return created;
   }
 
-  attemptAbort(taskId: TaskId): TransitionResult {
+  writeBody(taskId: TaskId, body: string): string {
+    return this.graph.writeBody(taskId, body);
+  }
+
+  async submit(taskId: TaskId): Promise<TransitionResult> {
+    const tasks = this.tasks();
+    if (tasks.get(taskId)?.state === "MANAGER_REVIEW") {
+      return this.lander.merge(taskId);
+    }
+    if (detectCycles(tasks).includes(taskId)) {
+      throw new Error(
+        `task "${taskId}" is part of a dependency cycle through ${tasks.get(taskId)?.depends_on.join(", ")}; it could never unblock`,
+      );
+    }
+    return this.transition(taskId, "submit", {}, "manager");
+  }
+
+  hold(taskId: TaskId, reason: string): TransitionResult {
+    return this.transition(taskId, "hold", { reason }, "manager");
+  }
+
+  resume(taskId: TaskId): TransitionResult {
+    return this.transition(taskId, "resume", {}, "manager");
+  }
+
+  abort(taskId: TaskId): TransitionResult {
     return this.lander.abort(taskId);
   }
 
@@ -185,6 +204,10 @@ export class Server {
 
   agentRows(): AgentRow[] {
     return this.pool.rows();
+  }
+
+  rateOf(agent: string): number | null {
+    return this.pool.rates.rate(agent);
   }
 
   async tick(): Promise<void> {
@@ -261,7 +284,7 @@ export class Server {
 
   detach(): void {
     this.watcher?.close();
-    this.runtime.clearLock();
+    this.layout.clearLock();
     this.publisher.log(
       "manager exited; agents left running, views left on disk",
     );
@@ -269,7 +292,7 @@ export class Server {
 
   shutdown(): void {
     this.watcher?.close();
-    this.runtime.clearLock();
+    this.layout.clearLock();
     this.pool.shutdown();
   }
 }

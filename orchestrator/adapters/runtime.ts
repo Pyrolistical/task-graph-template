@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ViewName } from "../app/ports.ts";
 import type { TaskId } from "../domain/task.ts";
 import { ALL_ROLES, type Role } from "../domain/state-machine.ts";
 import { isProcessAlive } from "./task-store.ts";
@@ -90,24 +91,28 @@ export class Runtime {
     return path.join(this.root, "transitions.jsonl");
   }
 
+  view(name: ViewName): string {
+    return path.join(this.root, `${name}.json`);
+  }
+
   get agentsView(): string {
-    return path.join(this.root, "agents.json");
+    return this.view("agents");
   }
 
   get checksView(): string {
-    return path.join(this.root, "checks.json");
+    return this.view("checks");
   }
 
   get tasksView(): string {
-    return path.join(this.root, "tasks.json");
+    return this.view("tasks");
   }
 
   get inboxView(): string {
-    return path.join(this.root, "inbox.json");
+    return this.view("inbox");
   }
 
   get queueView(): string {
-    return path.join(this.root, "queue.json");
+    return this.view("queue");
   }
 
   get consoleCommand(): string {

@@ -55,9 +55,11 @@ import {
   sandbox,
 } from "../adapters/sandbox.ts";
 import {
+  createTask,
   findTaskFile,
   isProcessAlive,
   readTaskFile,
+  writeTaskBody,
 } from "../adapters/task-store.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
 import { applyTransition } from "../adapters/transition-store.ts";
@@ -92,13 +94,16 @@ export function wire(options: WiringOptions): Server {
   }
 
   const orchestratorDir = options.orchestratorDir ?? ORCHESTRATOR_DIR;
+  const overridesDir = options.overridesDir ?? tasksDir;
   const config: ServerConfig = {
     repo,
     tasksDir,
-    orchestratorDir,
-    overridesDir: options.overridesDir ?? tasksDir,
     agentsPath: options.agentsPath ?? defaultAgentsPath(tasksDir),
     base: options.base ?? git.defaultBranch(repo),
+    promptDirs: {
+      orchestrator: path.join(orchestratorDir, "prompts"),
+      overrides: path.join(overridesDir, "prompts"),
+    },
   };
 
   const runtime = new Runtime(repo, options.serverRoot);
@@ -121,6 +126,8 @@ export function wire(options: WiringOptions): Server {
       return filePath === null ? null : readTaskFile(filePath).meta;
     },
     body: (id) => readTaskBody(tasksDir, id),
+    create: (title) => createTask(tasksDir, orchestratorDir, title),
+    writeBody: (id, body) => writeTaskBody(tasksDir, id, body),
     apply: (id, name, args) => applyTransition(tasksDir, id, name, args),
     claim: (id, args) => {
       takeClaim(tasksDir, id, args);
@@ -210,7 +217,7 @@ export function wire(options: WiringOptions): Server {
       ),
   };
 
-  const prompts = new Prompts(orchestratorDir, config.overridesDir);
+  const prompts = new Prompts(orchestratorDir, overridesDir);
 
   const inbox: Inbox = {
     queue: (taskId, state, entry) =>
@@ -262,6 +269,10 @@ export function wire(options: WiringOptions): Server {
           scheduling: views.scheduling,
         }),
       );
+    },
+    read: (name) => {
+      const filePath = runtime.view(name);
+      return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "{}";
     },
     lastAgents: () => {
       if (!fs.existsSync(runtime.agentsView)) {
