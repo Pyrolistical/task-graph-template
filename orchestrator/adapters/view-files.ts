@@ -42,15 +42,13 @@ export class ViewFiles implements Publisher {
     if (!fs.existsSync(this.runtime.slotsView)) {
       return null;
     }
-    try {
-      return (
-        JSON.parse(fs.readFileSync(this.runtime.slotsView, "utf-8")) as {
-          slots: SlotRow[];
-        }
-      ).slots;
-    } catch {
-      return null;
+    const view = JSON.parse(
+      fs.readFileSync(this.runtime.slotsView, "utf-8"),
+    ) as { slots?: SlotRow[] };
+    if (!Array.isArray(view.slots)) {
+      throw new Error(`${this.runtime.slotsView} has no slots array`);
     }
+    return view.slots;
   }
 
   log(line: string): void {
