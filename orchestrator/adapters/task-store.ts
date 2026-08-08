@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { CreatedTask } from "../app/ports.ts";
 import {
   type TaskId,
   type TaskMeta,
@@ -67,11 +68,6 @@ export function writeTaskBody(
     writeTaskFile(filePath, meta, normalizeBody(body));
     return filePath;
   });
-}
-
-export interface CreatedTask {
-  id: TaskId;
-  filePath: string;
 }
 
 export function templatePath(
