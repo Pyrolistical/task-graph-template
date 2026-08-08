@@ -6,7 +6,6 @@ import {
   aSession,
   aSlot,
   fakeAgents,
-  fakePaths,
 } from "../testing/ports.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
@@ -17,7 +16,6 @@ function aPool(slots: Slot[] = [aSlot()], alive = true) {
   const pool = new Pool(
     fakeAgents(slots),
     workspaces,
-    fakePaths(),
     publisher,
     () => alive,
   );

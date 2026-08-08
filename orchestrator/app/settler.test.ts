@@ -45,7 +45,6 @@ function aRig(live = DISPATCHED) {
   const pool = new Pool(
     fakeAgents([aSlot()]),
     workspaces,
-    paths,
     publisher,
     () => false,
   );

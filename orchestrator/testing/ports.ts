@@ -367,10 +367,6 @@ export class FakePaths implements Paths {
     return `/runtime/${id}/sessions/${role}`;
   }
 
-  rpcLog(id: TaskId): string {
-    return `/rpc/${id}.jsonl`;
-  }
-
   checkLog(id: TaskId, index: number): string {
     return `/runtime/${id}/checks/${index}.log`;
   }

@@ -18,7 +18,6 @@ export interface Paths {
   findings(id: TaskId): string;
   reviewFailures(id: TaskId): string;
   sessionDir(id: TaskId, role: Role): string;
-  rpcLog(id: TaskId): string;
   checkLog(id: TaskId, index: number): string;
   messagesDir(id: TaskId): string;
   prepare(id: TaskId): void;

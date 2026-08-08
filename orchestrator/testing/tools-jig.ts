@@ -170,7 +170,6 @@ async function trial(
     scenario.name,
     String(trialNumber),
   );
-  const log = path.join(sessionDir, "agent-rpc.jsonl");
   const worktree = path.join(sessionDir, "worktree");
   fs.mkdirSync(worktree, { recursive: true });
   fs.writeFileSync(
@@ -190,7 +189,6 @@ async function trial(
         ORCHESTRATOR_DIR,
         `result-tools-${STAGE_OF[state].tools}.ts`,
       ),
-      log,
     },
     "pi",
     [],

@@ -42,6 +42,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 - `state-machine.ts` declares the eight stages once, and a stage carries everything the pipeline knows about it: state, phase, role, result-tool extension, the section its agent appends, the issue raised when it appends nothing, the guard its worktree is held to, where its findings send the task back to, and whether its `submit` hands the assignment in as the new task body
 - everything else is derived from that one array — `NEXT_STATE`, `CLAIM_STATES`, `STAGE_OF`, the scheduler's `RANKS`, the issue table's state lists, and the settle
 - adding a stage is an entry in the array, not an edit to six lookup tables that have to agree
+- a row is a union keyed by its role, so the combinations that exist are the only ones that compile: a `designer`, `planner` or `worker` has an extension, the section it appends and the issue for appending nothing, and no `back`; a `reviewer` has an extension and a `back`; a stage with no role has neither extension nor section
 - the two stages with a `null` role (`CHECK`, `MANAGER_REVIEW`) fall out of the agent-facing derivations by construction, so nothing claims them and no dispatcher special-cases them
 
 ## Why the review is split in two

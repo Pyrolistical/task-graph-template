@@ -37,7 +37,6 @@ function aRig(tasks: TaskMeta[]) {
   const pool = new Pool(
     fakeAgents([aSlot()]),
     workspaces,
-    paths,
     publisher,
     (pid) => pid === LIVE_PID,
   );

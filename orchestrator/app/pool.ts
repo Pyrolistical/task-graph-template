@@ -1,5 +1,4 @@
 import type { AgentProcess, AgentSpec, Agents } from "./ports/agents.ts";
-import type { Paths } from "./ports/paths.ts";
 import type { Publisher } from "./ports/publisher.ts";
 import type { Workspaces } from "./ports/workspaces.ts";
 import {
@@ -99,7 +98,6 @@ export class Pool {
   constructor(
     private readonly agents: Agents,
     private readonly workspaces: Workspaces,
-    private readonly paths: Paths,
     private readonly publisher: Publisher,
     private readonly alive: (pid: number) => boolean,
   ) {
@@ -298,7 +296,6 @@ export class Pool {
         context_percent: runner.contextPercent,
         compactions: runner.compactions,
         session: runner.session,
-        log: runner.taskId === null ? null : this.paths.rpcLog(runner.taskId),
         retry: runner.retry,
       };
     });

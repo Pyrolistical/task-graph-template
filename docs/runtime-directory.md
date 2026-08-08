@@ -32,7 +32,6 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
     session/
       worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl
       reviewer/019fb1d4-2a0c-7c19-9e11-77c0a5b1e332.jsonl
-    agent-rpc.jsonl       # pi's rpc stream, appended across every process
     check-1.log           # stdout + stderr of checks[1]
 ```
 
@@ -112,8 +111,7 @@ Five snapshots, one per question a reader asks.
       "activity": "tool: bash — bun test",
       "tokens": 105000,
       "context_percent": 30,
-      "session": "/tmp/task-graph-server/-home-model-task-graph-template/000042/session/worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl",
-      "log": "/tmp/task-graph-server/-home-model-task-graph-template/000042/agent-rpc.jsonl"
+      "session": "/tmp/task-graph-server/-home-model-task-graph-template/000042/session/worker/019fac03-fee6-7444-89f7-e643e848eba4.jsonl"
     },
     {
       "name": "pi-llama.cpp-rocm-rocm-1",
@@ -270,7 +268,7 @@ on every applied transition:
 `CLOSED` is terminal:
 
 - no agent is ever dispatched against that task again, and the branch is either in `master` or thrown away
-- so the sessions, the rotated assignments, the rpc log and the check logs go at that moment, rather than sitting in `/tmp` until a hundred other tasks have pushed the id off the recent list
+- so the sessions, the rotated assignments and the check logs go at that moment, rather than sitting in `/tmp` until a hundred other tasks have pushed the id off the recent list
 - the row survives — `tasks.json` still shows it as `CLOSED` out of the in-memory archive, with `worktree` null — but nothing on disk backs it
 
 The retention sweep is the second half of the same rule:

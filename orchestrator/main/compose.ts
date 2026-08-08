@@ -117,7 +117,7 @@ export function wire(options: WiringOptions): Server {
     publisher,
     runtime,
   );
-  const pool = new Pool(agents, workspaces, runtime, publisher, isProcessAlive);
+  const pool = new Pool(agents, workspaces, publisher, isProcessAlive);
   const settler = new Settler(
     graph,
     pool,

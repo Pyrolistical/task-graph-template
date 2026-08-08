@@ -41,7 +41,6 @@ export function busyRow(
     tokens: 12300,
     context_percent: 41.6,
     session: "/tmp/session.jsonl",
-    log: "/tmp/agent-rpc.jsonl",
     ...overrides,
   };
 }

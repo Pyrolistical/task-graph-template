@@ -17,7 +17,6 @@ export class PiProcess implements AgentProcess {
   readonly pid: number;
 
   private readonly proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
-  private readonly log: number;
   private nextId = 0;
   private closed = false;
   private abortRequested = false;
@@ -33,7 +32,6 @@ export class PiProcess implements AgentProcess {
   ) {
     this.stream = new PiStream(onUsage, onCompaction, onResult);
     fs.mkdirSync(options.sessionDir, { recursive: true });
-    this.log = fs.openSync(options.log, "a");
 
     this.proc = Bun.spawn([...launch, command, ...spawnArgs(options)], {
       cwd: options.cwd,
@@ -53,7 +51,6 @@ export class PiProcess implements AgentProcess {
     const decoder = new TextDecoder();
     for await (const chunk of this.proc.stdout) {
       const text = decoder.decode(chunk, { stream: true });
-      fs.writeSync(this.log, text);
       this.stream.feed(text);
       if (this.stream.state.looping !== null) {
         this.interrupt();
@@ -62,7 +59,6 @@ export class PiProcess implements AgentProcess {
     this.stream.fail(
       `the pi process closed its stdout${this.stderr === "" ? "" : `: ${this.stderr.trim()}`}`,
     );
-    fs.closeSync(this.log);
   }
 
   private async pumpErrors(): Promise<void> {

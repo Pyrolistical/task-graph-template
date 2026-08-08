@@ -33,17 +33,34 @@ export type TaskState = (typeof ALL_STATES)[number];
 
 export type Guard = "none" | "untouched" | "committed";
 
-interface StageFields {
+type StageFields = {
   state: ValidState;
   phase: Phase;
-  role: Role | null;
-  tools: string | null;
-  section: string | null;
-  missing: string | null;
   guard: Guard;
-  back: ValidState | null;
   body: boolean;
-}
+} & (
+  | {
+      role: Exclude<Role, "reviewer">;
+      tools: string;
+      section: string;
+      missing: string;
+      back: null;
+    }
+  | {
+      role: "reviewer";
+      tools: string;
+      section: null;
+      missing: null;
+      back: ValidState;
+    }
+  | {
+      role: null;
+      tools: null;
+      section: null;
+      missing: null;
+      back: ValidState;
+    }
+);
 
 export const STAGE_OF = {
   DESIGN: {

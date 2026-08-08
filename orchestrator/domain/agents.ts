@@ -129,7 +129,6 @@ export const SlotRow = z.strictObject({
   context_percent: z.number().nullable(),
   compactions: z.int(),
   session: z.string().nullable(),
-  log: z.string().nullable(),
   retry: Retry.nullable(),
 });
 
@@ -159,7 +158,6 @@ export function idleRow(slot: Slot, enabled = true): SlotRow {
     context_percent: null,
     compactions: 0,
     session: null,
-    log: null,
     retry: null,
   };
 }

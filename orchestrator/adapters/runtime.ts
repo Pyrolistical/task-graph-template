@@ -201,10 +201,6 @@ export class Runtime {
     return path.join(this.taskRoot(id), "session", role);
   }
 
-  rpcLog(id: TaskId): string {
-    return path.join(this.taskRoot(id), "agent-rpc.jsonl");
-  }
-
   checkLog(id: TaskId, index: number): string {
     return path.join(this.taskRoot(id), `check-${index}.log`);
   }

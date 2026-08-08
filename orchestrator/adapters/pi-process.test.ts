@@ -73,7 +73,6 @@ function deadProcess(): PiProcess {
       name: "000001 work",
       cwd: dir,
       extension: path.join(dir, "result-tools-worker.ts"),
-      log: path.join(dir, "rpc.jsonl"),
     },
     command,
     ["bun"],
@@ -353,7 +352,6 @@ describe("Feature: matching a reply to what was asked", () => {
         name: "test",
         cwd: dir,
         extension: path.join(dir, "result-tools-worker.ts"),
-        log: path.join(dir, "rpc.jsonl"),
       },
       script,
       ["bun"],
@@ -665,7 +663,6 @@ describe("Feature: how an agent is spawned", () => {
         name: "000042 worker",
         cwd: "/tmp/wt",
         extension: "/repo/orchestrator/result-tools-worker.ts",
-        log: "/tmp/rpc.jsonl",
       };
 
       // When the command line is built

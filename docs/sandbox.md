@@ -18,7 +18,7 @@ pi --mode rpc \
 - the extension is the claimed state's too, chosen through the stage table's `tools`. The path is absolute and points into the orchestrator's own checkout, because the child's cwd is the worktree and the extensions do not live in the driven repo.
 - that first prompt stays short on purpose. The work lives in `ASSIGNMENT.md`, where it can be re-read after compaction; a brief pasted into the conversation cannot be re-read once it scrolls out.
 - `pi` has no MCP client — the project rejects MCP by design and expects agents to drive CLI tools over bash. That and the manager-owns-the-graph rule point the same way: the agent's interface to the outside world is a file, not a tool.
-- spawn detached, tee stdout to `/tmp/task-graph-server/<repo>/000042/agent-rpc.jsonl`, appending. Every process that ever ran against this task writes to that one file, in order, so the record of an assignment that took four attempts across four roles reads as one stream.
+- spawn detached, and read stdout as it comes: the stream is parsed into records and nothing else keeps it.
 
 ## The sandbox
 

@@ -81,7 +81,6 @@ describe("Feature: the views the console and the manager read", () => {
       );
       expect(busy.role).toBe("worker");
       expect(busy.pid).toBeGreaterThan(0);
-      expect(busy.log).toBe(pathsOf(server).rpcLog(id));
 
       await server.drain();
       server.shutdown();

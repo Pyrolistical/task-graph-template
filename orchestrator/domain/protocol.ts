@@ -281,7 +281,6 @@ export interface SpawnOptions {
   name: string;
   cwd: string;
   extension: string;
-  log: string;
 }
 
 export function spawnArgs(options: SpawnOptions): string[] {

@@ -983,42 +983,6 @@ describe("Feature: keeping the attempts an agent already made", () => {
     },
     30000,
   );
-
-  testInTempDirs(
-    "every process against one task appends to a single rpc log",
-    async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
-        [id]: {
-          WORK: [
-            {
-              submit: true,
-              notes: "did the work",
-              commit: { path: "a.txt", contents: "a" },
-            },
-          ],
-          WORK_REVIEW: [{ submit: true }],
-        },
-      });
-
-      // Given a task worked on by one agent and reviewed by another
-      const server = await serverFor(fixture);
-
-      // When the task runs to the manager
-      await walkTo(server, id, "MANAGER_REVIEW");
-
-      // Then both turns are in one log, so the task reads as one story
-      const log = fs.readFileSync(pathsOf(server).rpcLog(id), "utf-8");
-      const settled = log
-        .split("\n")
-        .filter((line) => line.includes(`"agent_settled"`));
-      expect(settled.length).toBeGreaterThanOrEqual(2);
-
-      server.shutdown();
-    },
-    30000,
-  );
 });
 
 describe("Feature: a failure while finishing with an agent", () => {

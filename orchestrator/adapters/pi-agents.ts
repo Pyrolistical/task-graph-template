@@ -45,7 +45,6 @@ export class PiAgents implements Agents {
           this.orchestratorDir,
           `result-tools-${STAGE_OF[spec.state].tools}.ts`,
         ),
-        log: this.paths.rpcLog(spec.taskId),
       },
       this.piCommand,
       sandbox(
