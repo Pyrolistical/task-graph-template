@@ -43,7 +43,7 @@ export const COLLAPSED_WIDTH = 8;
 
 export type Local = { command: "hide_disabled" } | { command: "show_disabled" };
 
-export interface View {
+export interface ConsoleView {
   agentsFile: string;
   slots: SlotRow[];
   tasks: TaskRow[];
@@ -59,7 +59,7 @@ export interface Pane {
   sinceMs: number | null;
 }
 
-export function panes(view: View): Pane[] {
+export function panes(view: ConsoleView): Pane[] {
   const tasks = new Map<TaskId, TaskRow>(
     view.tasks.map((row) => [row.id, row]),
   );
@@ -122,7 +122,7 @@ export function abortButton(pane: Pane): Line {
 }
 
 export function queueHeader(
-  view: View,
+  view: ConsoleView,
   columns: number,
 ): { line: Line; hits: Hit[] } {
   const scheduler = toggle(view.scheduling, "scheduler");

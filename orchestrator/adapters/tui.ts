@@ -16,7 +16,7 @@ import {
   type Layout,
   type Region,
   type Scroll,
-  type View,
+  type ConsoleView,
   PaneLines,
   emptyPool,
   errorFrame,
@@ -191,7 +191,7 @@ function readRows<T>(filePath: string, key: string): T[] {
   return rowsOf<T>(readEnvelope(filePath), filePath, key);
 }
 
-export function readView(runtime: Runtime): View {
+export function readView(runtime: Runtime): ConsoleView {
   if (!fs.existsSync(runtime.slotsView)) {
     throw new Error(`console: no server state at ${runtime.root}`);
   }

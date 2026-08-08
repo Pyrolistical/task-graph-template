@@ -2,7 +2,12 @@ import { type SlotRow, idleRow, parseAgents } from "../domain/agents.ts";
 import type { TaskRow } from "../domain/graph.ts";
 import type { Entry } from "../domain/session.ts";
 import type { Line } from "../domain/text.ts";
-import { type Layout, type Pane, type View, panes } from "../policy/console.ts";
+import {
+  type Layout,
+  type Pane,
+  type ConsoleView,
+  panes,
+} from "../policy/console.ts";
 import type { Candidate } from "../policy/scheduler.ts";
 
 export const SLOTS = parseAgents({
@@ -56,7 +61,7 @@ export function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
   };
 }
 
-export function viewOf(overrides: Partial<View> = {}): View {
+export function viewOf(overrides: Partial<ConsoleView> = {}): ConsoleView {
   return {
     agentsFile: "/tmp/tasks/agents.json",
     slots: [busyRow()],
@@ -91,7 +96,7 @@ export function layoutOf(overrides: Partial<Layout> = {}): Layout {
   };
 }
 
-export function paneOf(view: Partial<View> = {}): Pane {
+export function paneOf(view: Partial<ConsoleView> = {}): Pane {
   return panes(viewOf(view))[0]!;
 }
 
