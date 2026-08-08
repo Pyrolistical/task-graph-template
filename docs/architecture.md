@@ -93,8 +93,10 @@ bag of dependencies: a module names what it needs, and gets exactly that.
 | `Console`     | the command channel the TUI writes on                   | `command`                         |
 | `Paths`       | the runtime directory layout                            | `runtime`                         |
 
-Two of these earn their keep immediately: `Agents` and `Checks` are what make
-the integration tests slow, and they are now one object away from being faked.
+`Agents` and `Checks` are the two that reach a subprocess. `main/` drives the
+real ones — that is what those suites are for — so a port here buys a seam, not
+a faster suite: the whole `main/` tier is 27s, spread evenly, and no test in it
+is waiting on anything but `git` and `pi` doing real work.
 
 ## What the layers are not
 

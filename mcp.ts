@@ -9,7 +9,7 @@ import type { ViewName } from "./orchestrator/app/ports.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
 import { Server } from "./orchestrator/app/server.ts";
 import { Runtime } from "./orchestrator/adapters/runtime.ts";
-import { wire } from "./orchestrator/main/compose.ts";
+import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
 
 const TICK_MS = 500;
 
@@ -129,6 +129,7 @@ export function build(startup: Startup): McpServer {
     { description: "Begin dispatching queued work. Returns immediately." },
     async () => {
       live().setSchedulerEnabled(true);
+      await live().writeViews();
       return text("the scheduler is dispatching");
     },
   );
@@ -141,6 +142,7 @@ export function build(startup: Startup): McpServer {
     },
     async () => {
       live().setSchedulerEnabled(false);
+      await live().writeViews();
       return text("the scheduler is paused; running work still settles");
     },
   );
@@ -257,26 +259,28 @@ export function build(startup: Startup): McpServer {
   return mcp;
 }
 
-interface Boot extends Startup {
+export interface Boot extends Startup {
   server: Server | null;
 }
 
-async function start(): Promise<Boot> {
-  const tasksDir =
-    process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]);
+export async function boot(options: WiringOptions): Promise<Boot> {
   try {
-    const server = await wire({
-      repo: process.cwd(),
-      tasksDir,
-      serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
-    }).start();
-    return { server, error: null };
+    return { server: await wire(options).start(), error: null };
   } catch (err) {
     return {
       server: null,
       error: `the server failed to start: ${(err as Error).message}`,
     };
   }
+}
+
+function start(): Promise<Boot> {
+  return boot({
+    repo: process.cwd(),
+    tasksDir:
+      process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]),
+    serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
+  });
 }
 
 async function main(): Promise<void> {

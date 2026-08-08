@@ -26,6 +26,7 @@ import {
   serverFor,
   settle,
   stateOf,
+  ticksUntil,
   until,
   walkTo,
 } from "../testing/server-jig.ts";
@@ -286,7 +287,6 @@ describe("Feature: what the agents view says about a running agent", () => {
       expect(busy).not.toHaveProperty("cost");
       expect(busy.session).toContain("session/worker");
 
-      await server.drain();
       server.shutdown();
     },
     30000,
@@ -310,12 +310,11 @@ describe("Feature: what the agents view says about a running agent", () => {
       server.setSchedulerEnabled(true);
 
       // When it is dispatched and runs until it compacts
-      await until(server, () => compactionsOf(server, id) === 1);
+      await ticksUntil(server, () => compactionsOf(server, id) === 1);
 
       // Then the console can see how often it has compacted on this task
       expect(compactionsOf(server, id)).toBe(1);
 
-      await server.drain();
       server.shutdown();
     },
     30000,

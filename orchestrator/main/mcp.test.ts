@@ -1,7 +1,7 @@
 import { afterEach, describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import { Client } from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/transition-store.ts";
@@ -26,16 +26,22 @@ import {
   runtimeOf,
   serverFor,
 } from "../testing/server-jig.ts";
+import type { Server } from "../app/server.ts";
+import { boot, build } from "../../mcp.ts";
 
 const openClients: Client[] = [];
+const openServers: Server[] = [];
 
 afterEach(async () => {
   for (const client of openClients.splice(0)) {
     await client.close().catch(() => {});
   }
+  for (const server of openServers.splice(0)) {
+    server.shutdown();
+  }
 });
 
-async function connect(fixture: Fixture, cwd = fixture.repo) {
+async function connect(fixture: Fixture) {
   fs.mkdirSync(fixture.tasksDir, { recursive: true });
   const agentsPath = defaultAgentsPath(fixture.tasksDir);
   if (!fs.existsSync(agentsPath)) {
@@ -46,19 +52,22 @@ async function connect(fixture: Fixture, cwd = fixture.repo) {
       }),
     );
   }
+
+  const started = await boot({
+    repo: fixture.repo,
+    tasksDir: fixture.tasksDir,
+    serverRoot: fixture.serverRoot,
+  });
+  if (started.server !== null) {
+    openServers.push(started.server);
+  }
+
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await build(started).connect(serverSide);
+
   const client = new Client({ name: "test", version: "1.0.0" });
   openClients.push(client);
-  await client.connect(
-    new StdioClientTransport({
-      command: "bun",
-      args: [path.join(import.meta.dir, "../../mcp.ts"), fixture.tasksDir],
-      cwd,
-      env: {
-        ...(process.env as Record<string, string>),
-        TASK_GRAPH_SERVER_ROOT: fixture.serverRoot,
-      },
-    }),
-  );
+  await client.connect(clientSide);
   return client;
 }
 
@@ -72,15 +81,7 @@ async function resourceOf(client: Client, uri: string) {
 }
 
 async function schedulingBecomes(client: Client, wanted: boolean) {
-  let seen: unknown = null;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    seen = (await resourceOf(client, "orchestrator://queue")).scheduling;
-    if (seen === wanted) {
-      break;
-    }
-    await Bun.sleep(250);
-  }
-  return seen;
+  return (await resourceOf(client, "orchestrator://queue")).scheduling;
 }
 
 describe("Feature: the tool surface the manager works through", () => {

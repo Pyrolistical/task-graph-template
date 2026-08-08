@@ -66,7 +66,7 @@ What it does is declared, not coded. A `Plan` maps task id → claimed state →
 | `app/*.test.ts`                       | the pool, the reaper and the settle path over the fakes in `testing/ports.ts`         |
 | `adapters/*.test.ts`                  | transitions against a task directory, the pi protocol, pool loading, prompts, the tty |
 | `main/server-*.test.ts`               | the wired server against the fake pi: dispatch, settle, checks, views, recovery       |
-| `main/mcp.test.ts`                    | the tool surface over a real stdio client, in a subprocess                            |
+| `main/mcp.test.ts`                    | the tool surface over a real MCP client, linked to the server in process              |
 | `architecture.test.ts`, `bdd.test.ts` | the dependency rule, and the Given/When/Then style itself                             |
 
 A test lives in the layer it exercises. The pure layers need no fixture, no

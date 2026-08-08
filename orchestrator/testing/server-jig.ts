@@ -103,6 +103,22 @@ export async function until(
   }
 }
 
+export async function ticksUntil(
+  server: Server,
+  done: () => boolean,
+  ticks = 40,
+): Promise<void> {
+  for (let i = 0; i < ticks && !done(); i++) {
+    await server.tick();
+    await Bun.sleep(25);
+  }
+  if (!done()) {
+    throw new Error(
+      `the server never reached the expected state in ${ticks} ticks\n${fs.readFileSync(pathsOf(server).serverLog, "utf-8")}`,
+    );
+  }
+}
+
 export async function walkTo(
   server: Server,
   id: string,
