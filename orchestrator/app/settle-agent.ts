@@ -5,7 +5,13 @@ import type {
   Publisher,
   Workspaces,
 } from "./ports.ts";
-import { type Worker, BACKOFF_START_MS, Pool } from "./pool.ts";
+import {
+  type Running,
+  type Worker,
+  BACKOFF_START_MS,
+  Pool,
+  running,
+} from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { diffAssignment, restored } from "../domain/assignment.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
@@ -44,9 +50,9 @@ export class SettleAgent {
     });
   }
 
-  async prompt(worker: Worker, message: string): Promise<void> {
-    worker.results = [];
-    await worker.process!.prompt(message);
+  async prompt(run: Running, message: string): Promise<void> {
+    run.worker.results = [];
+    await run.process.prompt(message);
   }
 
   watch(worker: Worker): void {
@@ -54,56 +60,55 @@ export class SettleAgent {
   }
 
   async settled(worker: Worker): Promise<void> {
-    const process = worker.process;
-    if (process === null) {
+    const run = running(worker);
+    if (run === null) {
       return;
     }
 
-    await process.stream.settled();
+    await run.process.stream.settled();
 
-    if (!process.alive) {
+    if (!run.process.alive) {
       this.publisher.log(
-        `${worker.slot.name} on ${worker.task_id}: the process exited without settling: ${process.stream.state.failure}`,
+        `${worker.slot.name} on ${run.taskId}: the process exited without settling: ${run.process.stream.state.failure}`,
       );
       this.pool.finish(worker);
       return;
     }
 
     worker.state = "SETTLED";
-    const stopReason = process.stream.state.stopReason;
+    const stopReason = run.process.stream.state.stopReason;
 
-    const closing = await process.lastAssistantText().catch(() => null);
+    const closing = await run.process.lastAssistantText().catch(() => null);
     if (closing !== null) {
       this.publisher.log(
-        `${worker.slot.name} on ${worker.task_id} settled (${stopReason}): ${closing.split("\n")[0]}`,
+        `${worker.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
       );
     }
 
-    await this.apply(worker, decideSettle(this.observe(worker)));
+    await this.apply(run, decideSettle(this.observe(run)));
   }
 
-  private observe(worker: Worker): Settlement {
-    const process = worker.process!;
-    const stage = STAGE_OF[worker.stage!];
-    const live = this.assignments.read(worker.task_id!);
+  private observe(run: Running): Settlement {
+    const stage = STAGE_OF[run.stage];
+    const live = this.assignments.read(run.taskId);
 
     return {
-      state: worker.stage!,
-      alive: process.alive,
-      stopReason: process.stream.state.stopReason,
-      looping: process.stream.state.looping,
-      calls: worker.results,
-      diff: diffAssignment(worker.dispatched!, live),
+      state: run.stage,
+      alive: run.process.alive,
+      stopReason: run.process.stream.state.stopReason,
+      looping: run.process.stream.state.looping,
+      calls: run.worker.results,
+      diff: diffAssignment(run.checkout.dispatched, live),
       worktree:
         stage.guard === "none"
           ? { dirty: [], commits: 0 }
-          : this.git.status(worker.worktree!, this.base),
+          : this.git.status(run.checkout.worktree, this.base),
       base: this.base,
     };
   }
 
-  private async apply(worker: Worker, intents: Intent[]): Promise<void> {
-    const taskId = worker.task_id!;
+  private async apply(run: Running, intents: Intent[]): Promise<void> {
+    const { worker, taskId } = run;
 
     for (const intent of intents) {
       switch (intent.kind) {
@@ -112,14 +117,14 @@ export class SettleAgent {
           return;
         }
         case "back-off": {
-          await this.backOff(worker);
+          await this.backOff(run);
           return;
         }
         case "restore": {
           this.assignments.write(
             taskId,
             restored(
-              worker.dispatched!,
+              run.checkout.dispatched,
               this.assignments.read(taskId),
               intent.section,
             ),
@@ -128,12 +133,12 @@ export class SettleAgent {
         }
         case "raise": {
           worker.backoff = BACKOFF_START_MS;
-          await this.raise(worker, intent.issue, intent.detail, intent.vars);
+          await this.raise(run, intent.issue, intent.detail, intent.vars);
           return;
         }
         case "feedback": {
           worker.backoff = BACKOFF_START_MS;
-          worker.process!.close();
+          run.process.close();
           this.graph.feedback(taskId, intent.findings, "server");
           this.pool.finish(worker);
           return;
@@ -141,7 +146,7 @@ export class SettleAgent {
         case "submit": {
           worker.backoff = BACKOFF_START_MS;
           const live = this.assignments.read(taskId);
-          worker.process!.close();
+          run.process.close();
           this.inbox.clearFindings(taskId);
           this.graph.transition(
             taskId,
@@ -157,36 +162,34 @@ export class SettleAgent {
   }
 
   async compacted(worker: Worker): Promise<void> {
-    const process = worker.process;
-    if (process === null || !process.alive) {
+    const run = running(worker);
+    if (run === null || !run.process.alive) {
       return;
     }
 
     if (worker.results.length > 0) {
       this.publisher.log(
-        `${worker.slot.name} on ${worker.task_id} compacted after its result: left alone to settle`,
+        `${worker.slot.name} on ${run.taskId} compacted after its result: left alone to settle`,
       );
       return;
     }
 
-    const resetting =
-      worker.role !== "worker" &&
-      worker.worktree !== null &&
-      worker.head !== null;
+    const resetting = worker.role !== "worker";
 
     if (resetting) {
-      this.git.resetTo(worker.worktree!, worker.head!);
+      this.git.resetTo(run.checkout.worktree, run.checkout.head);
     }
 
     this.publisher.log(
-      `${worker.slot.name} on ${worker.task_id} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
+      `${worker.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
     );
 
-    await process.steer(this.nudge(worker.task_id!, worker.stage!));
+    await run.process.steer(this.nudge(run.taskId, run.stage));
   }
 
-  private async backOff(worker: Worker): Promise<void> {
-    const message = worker.process?.stream.state.errorMessage ?? "";
+  private async backOff(run: Running): Promise<void> {
+    const { worker } = run;
+    const message = run.process.stream.state.errorMessage ?? "";
     const loading = /503/.test(message) && /load/i.test(message);
     const delay = loading
       ? MODEL_LOADING_MS
@@ -207,24 +210,24 @@ export class SettleAgent {
     );
 
     await Bun.sleep(delay);
-    if (worker.process === null || !worker.process.alive) {
+    if (!run.process.alive) {
       this.pool.finish(worker);
       return;
     }
 
     worker.state = "BUSY";
     worker.retry = null;
-    await this.prompt(worker, this.nudge(worker.task_id!, worker.stage!));
+    await this.prompt(run, this.nudge(run.taskId, run.stage));
     this.watch(worker);
   }
 
   private async raise(
-    worker: Worker,
+    run: Running,
     name: IssueName,
     detail: string,
     vars: TemplateVars = {},
   ): Promise<void> {
-    const taskId = worker.task_id!;
+    const { worker, taskId } = run;
     const issue = ISSUES[name];
     const used = worker.issues.get(name) ?? 0;
 
@@ -233,7 +236,7 @@ export class SettleAgent {
     );
 
     if (used >= issue.attempts) {
-      worker.process?.close();
+      run.process.close();
       this.graph.transition(
         taskId,
         "hold",
@@ -244,14 +247,14 @@ export class SettleAgent {
       return;
     }
 
-    if (worker.process === null || !worker.process.alive) {
+    if (!run.process.alive) {
       this.pool.finish(worker);
       return;
     }
 
     worker.issues.set(name, used + 1);
     worker.state = "BUSY";
-    await this.prompt(worker, this.prompts.issue(name, worker.stage!, vars));
+    await this.prompt(run, this.prompts.issue(name, run.stage, vars));
     this.watch(worker);
   }
 }

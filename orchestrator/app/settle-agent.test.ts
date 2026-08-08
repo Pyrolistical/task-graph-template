@@ -65,9 +65,12 @@ function aRig(live = DISPATCHED) {
   worker.task_id = task.id;
   worker.stage = "WORK";
   worker.role = "worker";
-  worker.worktree = "/runtime/000042/worktree";
-  worker.branch = "task/000042";
-  worker.dispatched = DISPATCHED;
+  worker.checkout = {
+    branch: "task/000042",
+    worktree: "/runtime/000042/worktree",
+    head: "abc1234",
+    dispatched: DISPATCHED,
+  };
   worker.process = aSession({ kind: "none" }, true, prompted);
 
   return { settle, pool, worker, store, assignments, prompted, publisher };

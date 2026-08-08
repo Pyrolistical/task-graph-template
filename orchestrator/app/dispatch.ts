@@ -10,7 +10,7 @@ import { SettleAgent } from "./settle-agent.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { AgentSlot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
-import { STAGE_OF } from "../domain/state-machine.ts";
+import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
 import { type Candidate, plan } from "../policy/scheduler.ts";
 
@@ -80,7 +80,7 @@ export class Dispatch {
     worker.issues.clear();
 
     if (candidate.rank === "resume") {
-      await this.resume(task, worker);
+      await this.resume(task, worker, candidate.role);
       return;
     }
 
@@ -88,23 +88,25 @@ export class Dispatch {
     this.paths.prepare(task.id);
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
-    worker.worktree = worktree;
-    worker.branch = branch;
 
     if (!this.git.exists(worktree)) {
       this.git.create(branch, worktree, this.base);
     }
-    worker.head = this.git.head(worktree);
 
     const section = STAGE_OF[stage].section;
-    worker.dispatched =
-      section === null && this.assignments.exists(task.id)
-        ? this.assignments.read(task.id)
-        : this.writeAssignment(task, section);
+    worker.checkout = {
+      branch,
+      worktree,
+      head: this.git.head(worktree),
+      dispatched:
+        section === null && this.assignments.exists(task.id)
+          ? this.assignments.read(task.id)
+          : this.writeAssignment(task, section),
+    };
 
     const process = this.pool.spawn(
       worker,
-      { taskId: task.id, state: stage, role: worker.role!, cwd: worktree },
+      { taskId: task.id, state: stage, role: candidate.role, cwd: worktree },
       (settling) => this.settle.compacted(settling),
     );
     worker.process = process;
@@ -124,25 +126,32 @@ export class Dispatch {
     const queued = this.inbox.drain(task.id, stage);
     const message = this.settle.nudge(task.id, stage);
     await this.settle.prompt(
-      worker,
+      this.pool.runOf(worker),
       queued === "" ? message : `${queued}\n\n${message}`,
     );
     this.settle.watch(worker);
   }
 
-  private async resume(task: TaskMeta, worker: Worker): Promise<void> {
+  private async resume(
+    task: TaskMeta,
+    worker: Worker,
+    role: Role,
+  ): Promise<void> {
     const slot = worker.slot;
     const workspace = task.workspace!;
-    worker.worktree = workspace.worktree;
-    worker.branch = workspace.branch;
-    worker.head = this.git.head(workspace.worktree);
+    worker.checkout = {
+      branch: workspace.branch,
+      worktree: workspace.worktree,
+      head: this.git.head(workspace.worktree),
+      dispatched: this.assignments.read(task.id),
+    };
 
     const process = this.pool.spawn(
       worker,
       {
         taskId: task.id,
         state: "WORK",
-        role: worker.role!,
+        role,
         cwd: workspace.worktree,
       },
       (settling) => this.settle.compacted(settling),
@@ -160,12 +169,11 @@ export class Dispatch {
       session: workspace.session!,
     });
 
-    worker.dispatched = this.assignments.read(task.id);
     worker.state = "BUSY";
 
     const queued = this.inbox.drain(task.id, "WORK");
     await this.settle.prompt(
-      worker,
+      this.pool.runOf(worker),
       queued === "" ? this.settle.nudge(task.id, "WORK") : queued,
     );
     this.settle.watch(worker);

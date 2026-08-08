@@ -205,8 +205,12 @@ describe("Feature: releasing a slot when its work ends", () => {
     const worker = pool.worker("pi-fake-fake-1");
     worker.state = "BUSY";
     worker.task_id = "000042";
-    worker.branch = "task/000042";
-    worker.worktree = "/tmp/000042/worktree";
+    worker.checkout = {
+      branch: "task/000042",
+      worktree: "/tmp/000042/worktree",
+      head: "abc1234",
+      dispatched: "the assignment\n",
+    };
     worker.process = aSession({ kind: "none" });
 
     // When the worker is finished with

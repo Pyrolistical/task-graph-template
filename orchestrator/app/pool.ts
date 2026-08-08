@@ -22,18 +22,22 @@ import type { TaskId } from "../domain/task.ts";
 
 export const BACKOFF_START_MS = 1000;
 
+export interface Checkout {
+  branch: string;
+  worktree: string;
+  head: string;
+  dispatched: string;
+}
+
 export interface Worker {
   slot: AgentSlot;
   state: AgentState;
   task_id: TaskId | null;
   stage: ClaimState | null;
   role: Role | null;
-  branch: string | null;
-  worktree: string | null;
-  head: string | null;
+  checkout: Checkout | null;
   process: AgentSession | null;
   started_at: string | null;
-  dispatched: string | null;
   detachedPid: number | null;
   session: string | null;
   tokens: number | null;
@@ -52,12 +56,9 @@ function freshWorker(slot: AgentSlot): Worker {
     task_id: null,
     stage: null,
     role: null,
-    branch: null,
-    worktree: null,
-    head: null,
+    checkout: null,
     process: null,
     started_at: null,
-    dispatched: null,
     detachedPid: null,
     session: null,
     tokens: null,
@@ -70,9 +71,25 @@ function freshWorker(slot: AgentSlot): Worker {
   };
 }
 
-export interface Checkout {
-  branch: string;
-  worktree: string;
+export interface Running {
+  worker: Worker;
+  process: AgentSession;
+  taskId: TaskId;
+  stage: ClaimState;
+  checkout: Checkout;
+}
+
+export function running(worker: Worker): Running | null {
+  const { process, task_id, stage, checkout } = worker;
+  if (
+    process === null ||
+    task_id === null ||
+    stage === null ||
+    checkout === null
+  ) {
+    return null;
+  }
+  return { worker, process, taskId: task_id, stage, checkout };
 }
 
 export class Pool {
@@ -204,6 +221,16 @@ export class Pool {
     );
   }
 
+  runOf(worker: Worker): Running {
+    const run = running(worker);
+    if (run === null) {
+      throw new Error(
+        `${worker.slot.name} has no session to work in: it holds ${worker.task_id ?? "no task"}`,
+      );
+    }
+    return run;
+  }
+
   track(worker: Worker, work: Promise<void>): void {
     const taskId = worker.task_id;
     const tracked = work
@@ -227,7 +254,7 @@ export class Pool {
     return Promise.all([...this.inflight]);
   }
 
-  harvest(workspace: Checkout | null): void {
+  harvest(workspace: { branch: string; worktree: string } | null): void {
     if (workspace === null || !this.git.exists(workspace.worktree)) {
       return;
     }
@@ -246,11 +273,9 @@ export class Pool {
   }
 
   finish(worker: Worker): void {
-    const { branch, worktree } = worker;
+    const { checkout } = worker;
     this.stop(worker);
-    if (branch !== null && worktree !== null) {
-      this.harvest({ branch, worktree });
-    }
+    this.harvest(checkout);
   }
 
   release(name: string): void {
