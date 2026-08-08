@@ -3,6 +3,8 @@ import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { takeClaim } from "../adapters/claim.ts";
+import { branchName } from "../domain/workspace.ts";
+import { activeTaskPath } from "../adapters/task-store.ts";
 import * as git from "../adapters/git.ts";
 import {
   type Fixture,
@@ -52,6 +54,27 @@ describe("Feature: picking a project back up at startup", () => {
       expect(fs.existsSync(path.join(worktree, ".git"))).toBe(true);
 
       second.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
+    "a second server against a live one refuses to start",
+    async () => {
+      const fixture = makeFixture();
+
+      // Given a server already running against a project
+      const first = await serverFor(fixture);
+
+      // When another server starts against the same project
+      const attempt = serverFor(fixture);
+
+      // Then it refuses, naming the server that holds the runtime directory
+      await expect(attempt).rejects.toThrow(
+        `already in use by server ${process.pid}`,
+      );
+
+      first.shutdown();
     },
     30000,
   );
@@ -112,7 +135,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       takeClaim(fixture.tasksDir, id, {
         agentName: "pi-fake-fake-1",
         pid: dead.pid,
-        branch: `task/${id}`,
+        branch: branchName(id),
         worktree: "/tmp/gone",
       });
 
@@ -356,7 +379,7 @@ describe("Feature: an abort that races a dispatch", () => {
 
 describe("Feature: a task document that does not parse", () => {
   function corrupt(fixture: Fixture, id: string): void {
-    const filePath = path.join(fixture.tasksDir, `${id}.md`);
+    const filePath = activeTaskPath(fixture.tasksDir, id);
     fs.writeFileSync(
       filePath,
       fs
@@ -412,7 +435,7 @@ describe("Feature: a task document that does not parse", () => {
       takeClaim(fixture.tasksDir, claimed, {
         agentName: "pi-fake-fake-1",
         pid: dead.pid,
-        branch: `task/${claimed}`,
+        branch: branchName(claimed),
         worktree: "/tmp/gone",
       });
       corrupt(fixture, broken);
@@ -438,7 +461,7 @@ describe("Feature: a task document that does not parse", () => {
       const fixture = makeFixture();
       const broken = readyTask(fixture, "A task with bad frontmatter");
       const good = fs.readFileSync(
-        path.join(fixture.tasksDir, `${broken}.md`),
+        activeTaskPath(fixture.tasksDir, broken),
         "utf-8",
       );
       corrupt(fixture, broken);
@@ -459,7 +482,7 @@ describe("Feature: a task document that does not parse", () => {
       ).toHaveLength(1);
 
       // Given the document is repaired
-      fs.writeFileSync(path.join(fixture.tasksDir, `${broken}.md`), good);
+      fs.writeFileSync(activeTaskPath(fixture.tasksDir, broken), good);
 
       // When the server ticks five times more
       for (let i = 0; i < 5; i++) await server.tick();

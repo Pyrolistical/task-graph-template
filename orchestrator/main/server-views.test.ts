@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/transition-store.ts";
 import { takeClaim } from "../adapters/claim.ts";
-import { repoKey } from "../adapters/runtime.ts";
+import { snapshot, writeAtomic } from "../adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
@@ -12,6 +12,7 @@ import {
   setPlan,
 } from "../testing/fixture.ts";
 import { writeCommand } from "../adapters/command.ts";
+import { readView } from "../adapters/tui.ts";
 import { eventually } from "../testing/wait.ts";
 import {
   compactionsOf,
@@ -19,6 +20,7 @@ import {
   editTaskFile,
   reaches,
   runOnce,
+  runtimeOf,
   serverFor,
   settle,
   stateOf,
@@ -38,13 +40,11 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then every slot is a row, so the console shows the whole pool
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.agentsView, "utf-8"),
-      );
+      const view = readView(runtimeOf(fixture));
       expect(view.agents).toHaveLength(2);
-      expect(view.agents[0].state).toBe("IDLE");
-      expect(view.agents[0].task_id).toBeNull();
-      expect(view.agents[1].name).toBe("pi-fake-fake-2");
+      expect(view.agents[0]!.state).toBe("IDLE");
+      expect(view.agents[0]!.task_id).toBeNull();
+      expect(view.agents[1]!.name).toBe("pi-fake-fake-2");
 
       server.shutdown();
     },
@@ -68,12 +68,8 @@ describe("Feature: the views the console and the manager read", () => {
       await server.tick();
 
       // Then its row names the task, the role, the process and what it is doing
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.agentsView, "utf-8"),
-      );
-      const busy = view.agents.find(
-        (agent: { task_id: string | null }) => agent.task_id === id,
-      );
+      const view = readView(runtimeOf(fixture));
+      const busy = view.agents.find((agent) => agent.task_id === id)!;
       expect(busy).toBeDefined();
       expect(["tool-call", "thinking", "compacting", "none"]).toContain(
         busy.activity.kind,
@@ -139,10 +135,8 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then its row says how much it blocks and what it is waiting on
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.tasksView, "utf-8"),
-      );
-      const row = view.tasks.find((task: { id: string }) => task.id === dep);
+      const view = readView(runtimeOf(fixture));
+      const row = view.tasks.find((task) => task.id === dep)!;
       expect(row.blocking).toBe(1);
       expect(row.held_reason).toBe("waiting on a person");
       expect(row.state).toBe("HELD_WORK");
@@ -175,22 +169,17 @@ describe("Feature: the queue view", () => {
       await server.writeViews();
 
       // Then the queue holds only what could be dispatched, with its own rank
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.queueView, "utf-8"),
-      );
+      const view = readView(runtimeOf(fixture));
       expect(view.scheduling).toBe(false);
       expect(view.queue).toHaveLength(1);
-      expect(view.queue[0].task_id).toBe(first);
-      expect(view.queue[0].rank).toBe("WORK_FRESH");
-      expect(view.queue[0].blocking).toBe(1);
+      expect(view.queue[0]!.task_id).toBe(first);
+      expect(view.queue[0]!.rank).toBe("WORK_FRESH");
+      expect(view.queue[0]!.blocking).toBe(1);
 
       // Then the switch in the view follows the scheduler it draws
       server.setSchedulerEnabled(true);
       await server.writeViews();
-      expect(
-        JSON.parse(fs.readFileSync(server.runtime.queueView, "utf-8"))
-          .scheduling,
-      ).toBe(true);
+      expect(readView(runtimeOf(fixture)).scheduling).toBe(true);
 
       server.shutdown();
     },
@@ -236,15 +225,9 @@ describe("Feature: a pool with no agents in it", () => {
       await server.writeViews();
 
       // Then the task is queued, waiting for an agent to be added
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.queueView, "utf-8"),
-      );
-      expect(view.queue.map((one: { task_id: string }) => one.task_id)).toEqual(
-        [id],
-      );
-      expect(
-        JSON.parse(fs.readFileSync(server.runtime.agentsView, "utf-8")).agents,
-      ).toEqual([]);
+      const view = readView(runtimeOf(fixture));
+      expect(view.queue.map((one) => one.task_id)).toEqual([id]);
+      expect(view.agents).toEqual([]);
 
       server.shutdown();
     },
@@ -293,12 +276,8 @@ describe("Feature: what the agents view says about a running agent", () => {
       await server.tick();
 
       // Then the console can show how much context is left and where to read it
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.agentsView, "utf-8"),
-      );
-      const busy = view.agents.find(
-        (agent: { task_id: string | null }) => agent.task_id === id,
-      );
+      const view = readView(runtimeOf(fixture));
+      const busy = view.agents.find((agent) => agent.task_id === id)!;
       expect(busy.state).toBe("BUSY");
       expect(busy.tokens).toBe(105000);
       expect(busy.context_percent).toBe(30);
@@ -369,10 +348,8 @@ describe("Feature: what the agents view says about a running agent", () => {
 
       // Then the closed task is still shown, so the manager sees what just landed
       await server.writeViews();
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.tasksView, "utf-8"),
-      );
-      const row = view.tasks.find((task: { id: string }) => task.id === id);
+      const view = readView(runtimeOf(fixture));
+      const row = view.tasks.find((task) => task.id === id)!;
       expect(row).toBeDefined();
       expect(row.state).toBe("CLOSED");
       expect(row.title).toBe("A task");
@@ -910,33 +887,28 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const id = readyTask(fixture, "A task");
 
       const alive = Bun.spawn(["sleep", "30"]);
-      const runtimeDir = path.join(fixture.serverRoot, repoKey(fixture.repo));
-      fs.mkdirSync(runtimeDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(runtimeDir, "agents.json"),
-        JSON.stringify({
-          at: new Date().toISOString(),
-          seq: 1,
-          agents: [
-            {
-              name: "pi-fake-fake-1",
-              type: "pi",
-              provider: "fake",
-              model: "fake",
-              slot: 1,
-              state: "BUSY",
-              task_id: id,
-              role: "worker",
-              pid: alive.pid,
-              started_at: new Date().toISOString(),
-              activity: { kind: "none" },
-              tokens: null,
-              context_percent: null,
-              session: "/tmp/s.jsonl",
-              log: null,
-            },
-          ],
-        }),
+      const runtime = runtimeOf(fixture);
+      writeAtomic(
+        runtime.agentsView,
+        snapshot(1, "agents", [
+          {
+            name: "pi-fake-fake-1",
+            type: "pi",
+            provider: "fake",
+            model: "fake",
+            slot: 1,
+            state: "BUSY",
+            task_id: id,
+            role: "worker",
+            pid: alive.pid,
+            started_at: new Date().toISOString(),
+            activity: { kind: "none" },
+            tokens: null,
+            context_percent: null,
+            session: "/tmp/s.jsonl",
+            log: null,
+          },
+        ]),
       );
 
       takeClaim(fixture.tasksDir, id, {
@@ -954,11 +926,9 @@ describe("Feature: a manager that exits while its agents run on", () => {
       await settle(second, 1);
 
       // Then the slot is reattached rather than dispatched to again
-      const view = JSON.parse(
-        fs.readFileSync(second.runtime.agentsView, "utf-8"),
-      );
-      expect(view.agents[0].state).toBe("BUSY");
-      expect(view.agents[0].pid).toBe(alive.pid);
+      const view = readView(runtimeOf(fixture));
+      expect(view.agents[0]!.state).toBe("BUSY");
+      expect(view.agents[0]!.pid).toBe(alive.pid);
       expect(stateOf(second, id)).toBe("WORK");
 
       alive.kill();

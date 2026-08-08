@@ -10,11 +10,23 @@ import {
   rebuildDocument,
 } from "../domain/task.ts";
 
+export function activeTaskPath(tasksDir: string, id: string): string {
+  return path.join(tasksDir, `${id}.md`);
+}
+
+export function closedTaskPath(tasksDir: string, id: string): string {
+  return path.join(tasksDir, "closed", `${id}.md`);
+}
+
+export function nextTaskIdPath(tasksDir: string): string {
+  return path.join(tasksDir, "next-task-id");
+}
+
 export function findTaskFile(id: string, tasksDir: string): string | null {
-  const activePath = path.join(tasksDir, `${id}.md`);
+  const activePath = activeTaskPath(tasksDir, id);
   if (fs.existsSync(activePath)) return activePath;
 
-  const closedPath = path.join(tasksDir, "closed", `${id}.md`);
+  const closedPath = closedTaskPath(tasksDir, id);
   if (fs.existsSync(closedPath)) return closedPath;
 
   return null;
@@ -62,11 +74,6 @@ export interface CreatedTask {
   filePath: string;
 }
 
-export interface CreatedTask {
-  id: TaskId;
-  filePath: string;
-}
-
 export function templatePath(
   tasksDir: string,
   orchestratorDir: string,
@@ -87,8 +94,8 @@ export function createTask(
   }
 
   return withLock(tasksDir, () => {
-    const nextTaskIdPath = path.join(tasksDir, "next-task-id");
-    const rawNext = fs.readFileSync(nextTaskIdPath, "utf-8").trim();
+    const counter = nextTaskIdPath(tasksDir);
+    const rawNext = fs.readFileSync(counter, "utf-8").trim();
     const nextId = Number.parseInt(rawNext, 10);
 
     if (!Number.isInteger(nextId) || nextId < 1) {
@@ -104,13 +111,13 @@ export function createTask(
     raw.state_entered = new Date().toISOString();
 
     const meta = parseTaskMeta(raw, template);
-    const filePath = path.join(tasksDir, `${id}.md`);
+    const filePath = activeTaskPath(tasksDir, id);
 
     fs.writeFileSync(filePath, rebuildDocument(meta, body), {
       encoding: "utf-8",
       flag: "wx",
     });
-    fs.writeFileSync(nextTaskIdPath, `${nextId + 1}\n`, "utf-8");
+    fs.writeFileSync(counter, `${nextId + 1}\n`, "utf-8");
 
     return { id, filePath };
   });
@@ -122,10 +129,9 @@ export function closeTaskFile(
   meta: TaskMeta,
   body: string,
 ): string {
-  const closedDir = path.join(tasksDir, "closed");
-  fs.mkdirSync(closedDir, { recursive: true });
+  const closedPath = closedTaskPath(tasksDir, path.basename(activePath, ".md"));
+  fs.mkdirSync(path.dirname(closedPath), { recursive: true });
 
-  const closedPath = path.join(closedDir, path.basename(activePath));
   writeTaskFile(closedPath, meta, body);
   fs.unlinkSync(activePath);
   return closedPath;

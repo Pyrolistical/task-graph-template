@@ -6,8 +6,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/transition-store.ts";
 import { takeClaim } from "../adapters/claim.ts";
-import { readTaskFile } from "../adapters/task-store.ts";
-import { repoKey } from "../adapters/runtime.ts";
+import {
+  activeTaskPath,
+  closedTaskPath,
+  readTaskFile,
+} from "../adapters/task-store.ts";
+import { defaultAgentsPath } from "../adapters/runtime.ts";
 import { readFindings } from "../adapters/findings.ts";
 import {
   type Fixture,
@@ -16,7 +20,12 @@ import {
   setPlan,
   writeOverride,
 } from "../testing/fixture.ts";
-import { editTaskFile, reaches, serverFor } from "../testing/server-jig.ts";
+import {
+  editTaskFile,
+  reaches,
+  runtimeOf,
+  serverFor,
+} from "../testing/server-jig.ts";
 
 const openClients: Client[] = [];
 
@@ -28,7 +37,7 @@ afterEach(async () => {
 
 async function connect(fixture: Fixture, cwd = fixture.repo) {
   fs.mkdirSync(fixture.tasksDir, { recursive: true });
-  const agentsPath = path.join(fixture.tasksDir, "agents.json");
+  const agentsPath = defaultAgentsPath(fixture.tasksDir);
   if (!fs.existsSync(agentsPath)) {
     fs.writeFileSync(
       agentsPath,
@@ -149,9 +158,7 @@ describe("Feature: the tool surface the manager works through", () => {
         (paths.contents as { text: string }[])[0]!.text,
       ) as Record<string, unknown>;
       expect(parsed.tasks_dir).toBe(fixture.tasksDir);
-      expect(parsed.agents_file).toBe(
-        path.join(fixture.tasksDir, "agents.json"),
-      );
+      expect(parsed.agents_file).toBe(defaultAgentsPath(fixture.tasksDir));
       expect(parsed.overrides_prompts_dir).toBe(
         path.join(fixture.tasksDir, "prompts"),
       );
@@ -172,7 +179,7 @@ describe("Feature: the tool surface the manager works through", () => {
         pid: process.pid,
       });
       applyTransition(fixture.tasksDir, id, "submit", {
-        body: readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body,
+        body: readTaskFile(activeTaskPath(fixture.tasksDir, id)).body,
       });
       applyTransition(fixture.tasksDir, id, "pass", {});
       takeClaim(fixture.tasksDir, id, {
@@ -190,19 +197,12 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the task goes back to work with the finding written into its body
       expect(textOf(result)).toContain('"WORK"');
-      const body = readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body;
+      const body = readTaskFile(activeTaskPath(fixture.tasksDir, id)).body;
       expect(body).toContain("# Review findings");
       expect(body).toContain("- the null case is untested");
 
       // Then the finding is also left where the next dispatch will read it
-      const found = readFindings(
-        path.join(
-          fixture.serverRoot,
-          repoKey(fixture.repo),
-          id,
-          "findings.json",
-        ),
-      );
+      const found = readFindings(runtimeOf(fixture).findings(id));
       expect(found).toEqual(["the null case is untested"]);
 
       await client.close();
@@ -287,7 +287,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the prose is replaced and the task stays where it was
       const document = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(document).toContain("Rewritten by the manager.");
@@ -320,7 +320,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the document is untouched, so a refusal changes nothing
       const document = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(document).toContain("state: WORK");
@@ -449,7 +449,7 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(textOf(refused)).toContain("dependency cycle");
       expect(textOf(refused)).toContain(second.id);
       expect(
-        readTaskFile(path.join(fixture.tasksDir, `${first.id}.md`)).meta.state,
+        readTaskFile(activeTaskPath(fixture.tasksDir, first.id)).meta.state,
       ).toBe("NEW");
 
       await client.close();
@@ -479,7 +479,7 @@ describe("Feature: the tool surface the manager works through", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      server.shutdown();
       const client = await connect(fixture);
 
       // When the manager accepts it
@@ -491,13 +491,10 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the task closes and its work is on the base branch
       expect(result.to).toBe("CLOSED");
-      expect(
-        fs.existsSync(path.join(fixture.tasksDir, "closed", `${id}.md`)),
-      ).toBe(true);
+      expect(fs.existsSync(closedTaskPath(fixture.tasksDir, id))).toBe(true);
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
 
       await client.close();
-      server.shutdown();
     },
     60000,
   );
@@ -543,7 +540,7 @@ describe("Feature: the tool surface the manager works through", () => {
       // Given a pool of two agents, one of them with two slots
       const fixture = makeFixture();
       fs.writeFileSync(
-        path.join(fixture.tasksDir, "agents.json"),
+        defaultAgentsPath(fixture.tasksDir),
         JSON.stringify({
           agents: [
             { type: "pi", provider: "a", model: "a", slots: 2 },
@@ -602,7 +599,7 @@ describe("Feature: the tool surface the manager works through", () => {
       // Given a pool file written into the project's task directory
       const fixture = makeFixture();
       fs.writeFileSync(
-        path.join(fixture.tasksDir, "agents.json"),
+        defaultAgentsPath(fixture.tasksDir),
         JSON.stringify({
           agents: [{ type: "pi", provider: "tasks", model: "tasks", slots: 2 }],
         }),
@@ -646,7 +643,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the reason it was parked is on the document for a person to read
       const document = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(document).toContain("the staging database is unreachable");
@@ -808,7 +805,7 @@ describe("Feature: a server that could not start", () => {
     const fixture = makeFixture();
     fs.mkdirSync(fixture.tasksDir, { recursive: true });
     fs.writeFileSync(
-      path.join(fixture.tasksDir, "agents.json"),
+      defaultAgentsPath(fixture.tasksDir),
       '{ "agents": [{ "type": "pi" }] }',
     );
     return fixture;

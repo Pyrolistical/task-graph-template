@@ -40,6 +40,7 @@ import { Prompts } from "../adapters/prompts.ts";
 import { append, drain, queueFile } from "../adapters/queue.ts";
 import {
   Runtime,
+  defaultAgentsPath,
   defaultTasksDir,
   snapshot,
   writeAtomic,
@@ -96,7 +97,7 @@ export function wire(options: WiringOptions): Server {
     tasksDir,
     orchestratorDir,
     overridesDir: options.overridesDir ?? tasksDir,
-    agentsPath: options.agentsPath ?? path.join(tasksDir, "agents.json"),
+    agentsPath: options.agentsPath ?? defaultAgentsPath(tasksDir),
     base: options.base ?? git.defaultBranch(repo),
   };
 

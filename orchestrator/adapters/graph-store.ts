@@ -7,6 +7,7 @@ import {
   parseTaskMeta,
   splitDocument,
 } from "../domain/task.ts";
+import { activeTaskPath } from "./task-store.ts";
 
 export interface Scan {
   tasks: Map<TaskId, TaskMeta>;
@@ -35,6 +36,6 @@ export function readActiveTasks(tasksDir: string): Scan {
 }
 
 export function readTaskBody(tasksDir: string, id: TaskId): string {
-  const filePath = path.join(tasksDir, `${id}.md`);
+  const filePath = activeTaskPath(tasksDir, id);
   return splitDocument(fs.readFileSync(filePath, "utf-8")).body.trim();
 }

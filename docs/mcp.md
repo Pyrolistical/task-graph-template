@@ -66,6 +66,7 @@ A crash at startup is a crash loop: the client restarts the server, it reads the
 - the process still serves the tool surface: every tool and every other resource comes back as an error carrying that message, rather than the connection dropping
 - `error` is where the manager reads it, and where a failure the server hits later — a tick, or publishing the views the console draws — shows up too
 - if serving that resource is itself what crashes, the process dies as any other program would, with the reason in `server.log`
+- a second `claude` in the same checkout lands here too: its server refuses the runtime directory the first one holds, and `error` names the pid holding it — see [One server at a time](runtime-directory.md#one-server-at-a-time)
 
 ## The manager owns what it holds
 

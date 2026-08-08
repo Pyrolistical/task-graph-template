@@ -14,7 +14,6 @@ import { isProcessAlive } from "./task-store.ts";
 import { splitDocument } from "../domain/task.ts";
 import {
   Runtime,
-  branchName,
   defaultTasksDir,
   graphKey,
   repoKey,
@@ -24,6 +23,7 @@ import * as git from "./git.ts";
 import { STATUS_SHOWN_LINES, statusOf } from "../domain/guard.ts";
 import type { TaskState } from "../domain/state-machine.ts";
 import { commitIn, tempRepo } from "../testing/orchestrator-jig.ts";
+import { deadPid } from "../testing/graph-jig.ts";
 
 beforeAll(() => {
   setSystemTime(new Date("2026-01-01").getTime());
@@ -33,8 +33,13 @@ afterAll(() => {
   setSystemTime();
 });
 
-function runtimeFor(repo = "/home/model/project"): Runtime {
-  return new Runtime(repo, tempDir("orchestrator-"));
+const REPO = "/home/model/project";
+
+function runtimeFor(
+  repo = REPO,
+  serverRoot = tempDir("orchestrator-"),
+): Runtime {
+  return new Runtime(repo, serverRoot);
 }
 
 describe("Feature: where a project's runtime state lives", () => {
@@ -155,17 +160,6 @@ describe("Feature: where a project's runtime state lives", () => {
     expect(fs.readFileSync(target, "utf-8")).toBe('{"agents":[1]}');
     expect(fs.readdirSync(dir)).toEqual(["agents.json"]);
   });
-
-  testInTempDirs("a task's branch is named for the task it does", () => {
-    // Given the id of a task
-    const id = "000042";
-
-    // When its branch name is worked out
-    const branch = branchName(id);
-
-    // Then it names the task, so the branch reads as work in the repository
-    expect(branch).toBe("task/000042");
-  });
 });
 
 describe("Feature: where a project's task graph lives", () => {
@@ -261,6 +255,71 @@ describe("Feature: where a project's task graph lives", () => {
         path.join(TEST_ROOT, "task-graph-root", "-tmp-whatever"),
       );
       expect(dir).not.toContain(path.join(os.homedir(), "task-graph"));
+    },
+  );
+});
+
+describe("Feature: keeping a second server out of the runtime directory", () => {
+  testInTempDirs("the first server to start takes the directory", () => {
+    // Given a runtime directory no server has started against
+    const runtime = runtimeFor();
+
+    // When the server takes the lock
+    runtime.takeLock();
+
+    // Then the lock names the server, so others can see who holds it
+    expect(runtime.lockHolder()).toBe(process.pid);
+  });
+
+  testInTempDirs("a server holding the directory keeps another out", () => {
+    // Given a runtime directory a live server already holds
+    const serverRoot = tempDir("orchestrator-");
+    runtimeFor(REPO, serverRoot).takeLock();
+
+    // When another server tries to take the lock
+    const attempt = () => runtimeFor(REPO, serverRoot).takeLock();
+
+    // Then it refuses, naming the server that holds the directory
+    expect(attempt).toThrow(`already in use by server ${process.pid}`);
+  });
+
+  testInTempDirs("a stale lock from a dead server is taken over", async () => {
+    // Given a runtime directory whose last server died without clearing its lock
+    const runtime = runtimeFor();
+    fs.writeFileSync(runtime.lockFile, `${await deadPid()}`);
+
+    // When a new server takes the lock
+    runtime.takeLock();
+
+    // Then the lock names the new server
+    expect(runtime.lockHolder()).toBe(process.pid);
+  });
+
+  testInTempDirs("a server clears the lock it holds", () => {
+    // Given a runtime directory the server holds
+    const runtime = runtimeFor();
+    runtime.takeLock();
+
+    // When the server is done with it
+    runtime.clearLock();
+
+    // Then nothing is left to keep another server out
+    expect(runtime.lockHolder()).toBe(null);
+  });
+
+  testInTempDirs(
+    "a server does not clear a lock it does not hold",
+    async () => {
+      // Given a lock some other server holds
+      const runtime = runtimeFor();
+      const other = await deadPid();
+      fs.writeFileSync(runtime.lockFile, `${other}`);
+
+      // When the server clears the lock
+      runtime.clearLock();
+
+      // Then the other server's lock stays, still naming its holder
+      expect(runtime.lockHolder()).toBe(other);
     },
   );
 });

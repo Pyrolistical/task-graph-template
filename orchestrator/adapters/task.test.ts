@@ -14,7 +14,12 @@ import {
   rebuildDocument,
   splitDocument,
 } from "../domain/task.ts";
-import { createTask, readTaskFile, writeTaskBody } from "./task-store.ts";
+import {
+  createTask,
+  nextTaskIdPath,
+  readTaskFile,
+  writeTaskBody,
+} from "./task-store.ts";
 import {
   ORCHESTRATOR_DIR,
   TASK_STORE_PATH,
@@ -677,9 +682,7 @@ describe("Feature: creating a task", () => {
 
     // Then it takes the id 000001, and the counter reads two for the next one
     expect(first.id).toBe("000001");
-    expect(
-      fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
-    ).toBe("2");
+    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("2");
   });
 
   testInTempDirs("the second task created takes the id 000002", () => {
@@ -692,9 +695,7 @@ describe("Feature: creating a task", () => {
 
     // Then it takes the id 000002, and the counter reads three for the next one
     expect(second.id).toBe("000002");
-    expect(
-      fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
-    ).toBe("3");
+    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("3");
   });
 
   testInTempDirs("the third task created takes the id 000003", () => {
@@ -708,9 +709,7 @@ describe("Feature: creating a task", () => {
 
     // Then it takes the id 000003, and the counter reads four for the next one
     expect(third.id).toBe("000003");
-    expect(
-      fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
-    ).toBe("4");
+    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("4");
   });
 
   testInTempDirs("a new task's body is the template's, unchanged", () => {
@@ -747,7 +746,7 @@ describe("Feature: creating a task", () => {
   testInTempDirs("a counter someone has corrupted fails loudly", () => {
     // Given a task directory whose counter is not a number
     const dir = makeTasksDir();
-    fs.writeFileSync(path.join(dir, "next-task-id"), "not-a-number\n");
+    fs.writeFileSync(nextTaskIdPath(dir), "not-a-number\n");
 
     // When a task is created
     const attempt = () => createTask(dir, ORCHESTRATOR_DIR, "t");
@@ -762,7 +761,7 @@ describe("Feature: creating a task", () => {
       // Given a task directory whose counter has been wound back over a task
       const dir = makeTasksDir();
       createTask(dir, ORCHESTRATOR_DIR, "first");
-      fs.writeFileSync(path.join(dir, "next-task-id"), "1\n");
+      fs.writeFileSync(nextTaskIdPath(dir), "1\n");
 
       // When a task is created at the id that is already taken
       const attempt = () => createTask(dir, ORCHESTRATOR_DIR, "collision");
@@ -804,9 +803,9 @@ describe("Feature: creating a task", () => {
       expect(files.at(-1)).toBe(`${String(count).padStart(6, "0")}.md`);
 
       // Then the counter is left where the next create expects it
-      expect(
-        fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
-      ).toBe(String(count + 1));
+      expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe(
+        String(count + 1),
+      );
 
       // Then every task that was asked for is on disk, none written over
       const titles = files.map(

@@ -2,8 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ClaimState } from "../domain/state-machine.ts";
 
+export function queueDir(taskDir: string): string {
+  return path.join(taskDir, "queue");
+}
+
 export function queueFile(taskDir: string, state: ClaimState): string {
-  return path.join(taskDir, "queue", `${state}.md`);
+  return path.join(queueDir(taskDir), `${state}.md`);
 }
 
 export function append(

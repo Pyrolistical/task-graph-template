@@ -8,7 +8,7 @@ One `bun` process, started by the manager over stdio, owning every mutation of t
 stateDiagram-v2
     [*] --> STARTING
     STARTING --> RUNNING : load agents.json, reclone missing workspaces, reattach live pids, write views
-    STARTING --> FAILED : bad config, or not a git repository
+    STARTING --> FAILED : runtime directory taken, bad config, or not a git repository
     RUNNING --> RUNNING : tick — settle checks, reap, check, apply reviews, dispatch, write views
     RUNNING --> PAUSED : disable_scheduler
     PAUSED --> PAUSED : tick — everything but dispatch
@@ -21,12 +21,13 @@ stateDiagram-v2
 
 ## STARTING
 
+- take the [runtime directory's lock](runtime-directory.md#one-server-at-a-time) before anything else is touched, so a second server never writes over a live one
 - load `agents.json` and build the fixed pool — every slot exists from this moment, idle ones included
 - reject the config outright if anything in it is wrong; a config that would fail on the tenth dispatch should fail on startup
 - reclone any task whose `workspace.worktree` is gone, from its branch in the repo
 - reattach to live pids: read the graph, find claims whose `claimed_pid` is still alive, and pick their rpc streams back up
 - write the five views once, so a console or a manager attaching immediately sees a whole document
-- `FAILED` is a bad config or a directory that is not a git repository — both are conditions no tick could recover from
+- `FAILED` is a runtime directory another server holds, a bad config, or a directory that is not a git repository — none of them is a condition a tick could recover from
 
 ## The tick
 

@@ -64,7 +64,7 @@ function rejectOnce(
   run(dir, id, "feedback", finding);
 }
 
-function walkThroughReviews(dir: string, id: string): string[] {
+function walkThroughReviews(dir: string, id: string) {
   const walked = [run(dir, id, "pass").to];
   claim(dir, id, "reviewer");
   walked.push(run(dir, id, "submit").to, run(dir, id, "submit").to);

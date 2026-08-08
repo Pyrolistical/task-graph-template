@@ -3,6 +3,10 @@ import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { takeClaim } from "../adapters/claim.ts";
+import { branchName } from "../domain/workspace.ts";
+import { queueFile } from "../adapters/queue.ts";
+import { readView } from "../adapters/tui.ts";
+import { activeTaskPath } from "../adapters/task-store.ts";
 import * as git from "../adapters/git.ts";
 import {
   type Fixture,
@@ -16,6 +20,7 @@ import {
   dispatchOnce,
   reaches,
   runOnce,
+  runtimeOf,
   serverFor,
   stateOf,
   until,
@@ -50,7 +55,7 @@ describe("Feature: running a task's checks", () => {
       const task = server.tasks().get(id)!;
       expect(task.state).toBe("WORK");
       const queued = fs.readFileSync(
-        path.join(server.runtime.queueDir(id), "WORK.md"),
+        queueFile(server.runtime.taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("echo boom >&2; exit 3");
@@ -86,7 +91,7 @@ describe("Feature: running a task's checks", () => {
 
       // Then the agent is told about both failures, not only the first
       const queued = fs.readFileSync(
-        path.join(server.runtime.queueDir(id), "WORK.md"),
+        queueFile(server.runtime.taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("(exit 1)");
@@ -285,7 +290,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       const legacy = path.join(legacyDir, path.basename(opened));
       fs.mkdirSync(legacyDir, { recursive: true });
       fs.renameSync(opened, legacy);
-      const taskFile = path.join(fixture.tasksDir, `${id}.md`);
+      const taskFile = activeTaskPath(fixture.tasksDir, id);
       fs.writeFileSync(
         taskFile,
         fs.readFileSync(taskFile, "utf-8").replace(opened, legacy),
@@ -299,11 +304,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
 
       // Then the session is reopened where the document says it lies
       expect(stateOf(server, id)).toBe("WORK");
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.agentsView, "utf-8"),
-      );
-      expect(view.agents[0].state).toBe("BUSY");
-      expect(view.agents[0].session).toBe(legacy);
+      const view = readView(runtimeOf(fixture));
+      expect(view.agents[0]!.state).toBe("BUSY");
+      expect(view.agents[0]!.session).toBe(legacy);
       expect(server.tasks().get(id)!.workspace!.session).toBe(legacy);
 
       server.shutdown();
@@ -343,7 +346,7 @@ describe("Feature: landing or abandoning finished work", () => {
       // Then the task closes, the work is on the base, and nothing is left over
       expect(result.to).toBe("CLOSED");
       expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
     },
     30000,
@@ -389,7 +392,7 @@ describe("Feature: landing or abandoning finished work", () => {
       // Then it closes, and the work it did is thrown away with the branch
       expect(result.to).toBe("CLOSED");
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(false);
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
       expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
     },
     30000,
@@ -409,7 +412,7 @@ describe("Feature: landing or abandoning finished work", () => {
 
       // Then it closes, having left no branch behind at all
       expect(result.to).toBe("CLOSED");
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
     },
     30000,
   );
@@ -422,7 +425,7 @@ describe("Feature: landing or abandoning finished work", () => {
       takeClaim(fixture.tasksDir, id, {
         agentName: "pi-fake-fake-1",
         pid: process.pid,
-        branch: `task/${id}`,
+        branch: branchName(id),
         worktree: "/tmp/gone",
       });
 
@@ -447,7 +450,7 @@ describe("Feature: landing or abandoning finished work", () => {
     async () => {
       // Given work whose branch has already been merged into the base
       const { fixture, server, id } = await atManagerReview();
-      git.gitOrThrow(fixture.repo, ["merge", "--ff-only", `task/${id}`]);
+      git.gitOrThrow(fixture.repo, ["merge", "--ff-only", branchName(id)]);
 
       // When the manager aborts it
       const attempt = () => server.attemptAbort(id);
@@ -499,10 +502,8 @@ describe("Feature: landing or abandoning finished work", () => {
 
       // Then it stays gone once it falls off the end of the recent list
       expect(fs.existsSync(server.runtime.taskDir(id))).toBe(false);
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.tasksView, "utf-8"),
-      );
-      expect(view.tasks.some((t: { id: string }) => t.id === id)).toBe(false);
+      const view = readView(runtimeOf(fixture));
+      expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },
     60000,
   );

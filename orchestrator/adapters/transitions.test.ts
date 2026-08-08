@@ -2,7 +2,12 @@ import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { createTask, readTaskFile } from "./task-store.ts";
+import {
+  activeTaskPath,
+  closedTaskPath,
+  createTask,
+  readTaskFile,
+} from "./task-store.ts";
 import { parseTaskMeta } from "../domain/task.ts";
 import {
   type TransitionArgs,
@@ -291,7 +296,7 @@ describe("Feature: what a review writes into the task body", () => {
 
       // Then the worker gets the task back with the finding written into it
       expect(result.to).toBe("WORK");
-      const body = bodyOf(path.join(dir, `${id}.md`));
+      const body = bodyOf(activeTaskPath(dir, id));
       expect(body).toContain("# Review findings");
       expect(body).toContain("- fix null handling");
     },
@@ -305,7 +310,7 @@ describe("Feature: what a review writes into the task body", () => {
     run(dir, id, "feedback", "first", "second");
 
     // Then both are written in, so none is lost between reviews
-    const body = bodyOf(path.join(dir, `${id}.md`));
+    const body = bodyOf(activeTaskPath(dir, id));
     expect(body).toContain("- first");
     expect(body).toContain("- second");
   });
@@ -319,7 +324,7 @@ describe("Feature: what a review writes into the task body", () => {
 
     // Then the worker reads it exactly as it reads an agent reviewer's
     expect(result.to).toBe("WORK");
-    const body = bodyOf(path.join(dir, `${id}.md`));
+    const body = bodyOf(activeTaskPath(dir, id));
     expect(body).toContain("# Review findings");
     expect(body).toContain("- restructure the parser");
   });
@@ -331,7 +336,7 @@ describe("Feature: what a review writes into the task body", () => {
       const { dir, id } = toAgentReview();
       run(dir, id, "feedback", "first");
       claim(dir, id, "agent-1");
-      run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+      run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
       run(dir, id, "pass");
       claim(dir, id, "reviewer");
 
@@ -339,7 +344,7 @@ describe("Feature: what a review writes into the task body", () => {
       run(dir, id, "feedback", "second");
 
       // Then both rounds are in the body, so the history of the task is one file
-      const body = bodyOf(path.join(dir, `${id}.md`));
+      const body = bodyOf(activeTaskPath(dir, id));
       expect(body.match(/# Review findings/g)).toHaveLength(2);
       expect(body).toContain("- second");
     },
@@ -351,27 +356,27 @@ describe("Feature: what a review writes into the task body", () => {
     claim(dir, id, "planner");
     run(dir, id, "submit");
     claim(dir, id, "plan-reviewer");
-    const before = bodyOf(path.join(dir, `${id}.md`));
+    const before = bodyOf(activeTaskPath(dir, id));
 
     // When the reviewer sends it back
     const result = run(dir, id, "feedback", "the list is missing");
 
     // Then the planner rewrites the body itself, so nothing is appended
     expect(result.to).toBe("PLAN");
-    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(before);
+    expect(bodyOf(activeTaskPath(dir, id))).toBe(before);
   });
 
   testInTempDirs("a review with no findings at all is refused", () => {
     // Given finished work under review
     const { dir, id } = toAgentReview();
-    const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
+    const before = fs.readFileSync(activeTaskPath(dir, id), "utf-8");
 
     // When the reviewer sends it back with an empty list
     const attempt = () => apply(dir, id, "feedback", { findings: [] });
 
     // Then it is refused, and the document is untouched
     expect(attempt).toThrow(/non-empty/);
-    expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+    expect(fs.readFileSync(activeTaskPath(dir, id), "utf-8")).toBe(before);
   });
 
   testInTempDirs("an accepted plan becomes the task's body", () => {
@@ -385,7 +390,7 @@ describe("Feature: what a review writes into the task body", () => {
     run(dir, id, "submit", "\n# accepted plan");
 
     // Then what was accepted is what the task carries from here on
-    expect(bodyOf(path.join(dir, `${id}.md`))).toBe("\n# accepted plan");
+    expect(bodyOf(activeTaskPath(dir, id))).toBe("\n# accepted plan");
   });
 
   testInTempDirs("a worker's notes become the task's body", () => {
@@ -399,7 +404,7 @@ describe("Feature: what a review writes into the task body", () => {
 
     // Then the task carries the notes into its checks
     expect(result.to).toBe("CHECK");
-    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(accepted);
+    expect(bodyOf(activeTaskPath(dir, id))).toBe(accepted);
   });
 
   testInTempDirs("a task in WORK cannot submit without a body", () => {
@@ -446,7 +451,7 @@ describe("Feature: what a review writes into the task body", () => {
         dir,
         id,
         "submit",
-        `${bodyOf(path.join(dir, `${id}.md`))}\n\n## Implementation Notes\n\nI fixed it`,
+        `${bodyOf(activeTaskPath(dir, id))}\n\n## Implementation Notes\n\nI fixed it`,
       );
       run(dir, id, "pass");
       claim(dir, id, "reviewer");
@@ -549,8 +554,8 @@ describe("Feature: closing a task", () => {
 
     // Then the document leaves the active graph for the closed directory
     expect(result.to).toBe("CLOSED");
-    expect(fs.existsSync(path.join(dir, `${id}.md`))).toBe(false);
-    expect(fs.existsSync(path.join(dir, "closed", `${id}.md`))).toBe(true);
+    expect(fs.existsSync(activeTaskPath(dir, id))).toBe(false);
+    expect(fs.existsSync(closedTaskPath(dir, id))).toBe(true);
     expect(readTaskFile(closedPath(result)).meta.state).toBe("CLOSED");
   });
 
@@ -745,7 +750,7 @@ describe("Feature: a transition that is refused writes nothing", () => {
     () => {
       // Given a task an agent is working on, and its document as it stands
       const { dir, id } = toWorking();
-      const filePath = path.join(dir, `${id}.md`);
+      const filePath = activeTaskPath(dir, id);
       const before = fs.readFileSync(filePath, "utf-8");
 
       // When transitions are applied with arguments the machine refuses
@@ -768,7 +773,7 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the body changes only where a stage hands one in", () => {
     // Given a new task, and the whole pipeline it will be walked through
     const { dir, id } = newTask();
-    const filePath = path.join(dir, `${id}.md`);
+    const filePath = activeTaskPath(dir, id);
     const original = bodyOf(filePath);
     const steps: [string[], TransitionName, string[], string][] = [
       [[], "submit", [], original],

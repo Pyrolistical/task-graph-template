@@ -196,4 +196,6 @@ export interface Paths {
   prepare(id: TaskId): void;
   discard(id: TaskId): void;
   log(line: string): void;
+  takeLock(): void;
+  clearLock(): void;
 }

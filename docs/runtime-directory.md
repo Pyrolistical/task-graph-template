@@ -17,6 +17,7 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
   tasks.json              # the last 100 tasks to change state
   queue.json              # what the scheduler would dispatch next, and whether it is
   console-command         # a switch the console flipped, deleted as it is applied
+  lock                    # the pid of the server that owns this directory
   000042/
     ASSIGNMENT.md         # the live assignment for this task
     history/
@@ -40,6 +41,14 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
 - a file at the tree root shows up as untracked in every `git status` the agent runs, and eventually gets committed
 - outside the tree it cannot be
 - the diff stays clean without a `.gitignore` entry in the project or per-task `info/exclude` bookkeeping
+
+## One server at a time
+
+The client spawns `mcp.ts`, so a second `claude` in the same checkout spawns a second server against this directory. `lock` is what stops them: the server creates it exclusively at startup and writes its pid.
+
+- a second server refuses to start, naming the pid that holds the directory, and serves that as its `error` resource rather than dispatching alongside the first
+- the lock is cleared when the manager exits, and taken over when the pid in it is dead — a server killed outright leaves a lock nothing has to clean up
+- the console never takes it: it is a reader, and any number of them can watch the directory at once
 
 Everything here is disposable:
 

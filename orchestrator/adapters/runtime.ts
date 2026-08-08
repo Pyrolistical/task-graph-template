@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { TaskId } from "../domain/task.ts";
 import { ALL_ROLES, type Role } from "../domain/state-machine.ts";
+import { isProcessAlive } from "./task-store.ts";
+import { queueDir } from "./queue.ts";
 
 export const SERVER_ROOT = "/tmp/task-graph-server";
 
@@ -33,6 +35,10 @@ export function taskGraphRoot(): string {
 
 export function defaultTasksDir(repoPath: string): string {
   return path.join(taskGraphRoot(), graphKey(repoPath));
+}
+
+export function defaultAgentsPath(tasksDir: string): string {
+  return path.join(tasksDir, "agents.json");
 }
 
 export function writeAtomic(filePath: string, contents: string): void {
@@ -108,6 +114,56 @@ export class Runtime {
     return path.join(this.root, "console-command");
   }
 
+  get lockFile(): string {
+    return path.join(this.root, "lock");
+  }
+
+  takeLock(): void {
+    if (this.claimLock()) {
+      return;
+    }
+    const holder = this.lockHolder();
+    if (holder !== null && isProcessAlive(holder)) {
+      throw new Error(`${this.root} is already in use by server ${holder}`);
+    }
+    fs.rmSync(this.lockFile, { force: true });
+    if (!this.claimLock()) {
+      throw new Error(`${this.root} was just taken by another server`);
+    }
+  }
+
+  clearLock(): void {
+    if (this.lockHolder() === process.pid) {
+      fs.rmSync(this.lockFile, { force: true });
+    }
+  }
+
+  lockHolder(): number | null {
+    let held: string;
+    try {
+      held = fs.readFileSync(this.lockFile, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw err;
+    }
+    const holder = Number.parseInt(held, 10);
+    return Number.isInteger(holder) ? holder : null;
+  }
+
+  private claimLock(): boolean {
+    try {
+      fs.writeFileSync(this.lockFile, `${process.pid}`, { flag: "wx" });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   taskDir(id: TaskId): string {
     return path.join(this.root, id);
   }
@@ -145,7 +201,7 @@ export class Runtime {
   }
 
   queueDir(id: TaskId): string {
-    return path.join(this.taskDir(id), "queue");
+    return queueDir(this.taskDir(id));
   }
 
   prepare(id: TaskId): void {
@@ -169,8 +225,4 @@ export class Runtime {
     );
     trimToLastBytes(this.serverLog, cap);
   }
-}
-
-export function branchName(id: TaskId): string {
-  return `task/${id}`;
 }

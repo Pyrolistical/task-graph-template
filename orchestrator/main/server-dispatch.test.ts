@@ -8,11 +8,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/transition-store.ts";
 import { takeClaim } from "../adapters/claim.ts";
+import { branchName } from "../domain/workspace.ts";
 import {
+  activeTaskPath,
+  closedTaskPath,
   findTaskFile,
+  nextTaskIdPath,
   readTaskFile,
   writeTaskBody,
 } from "../adapters/task-store.ts";
+import { queueFile } from "../adapters/queue.ts";
+import { readView } from "../adapters/tui.ts";
 import { defaultTasksDir } from "../adapters/runtime.ts";
 import * as git from "../adapters/git.ts";
 import {
@@ -32,6 +38,7 @@ import {
   dispatchOnce,
   reaches,
   runOnce,
+  runtimeOf,
   serverFor,
   settle,
   settleTo,
@@ -64,9 +71,7 @@ describe("Feature: where a project's task graph is found", () => {
         expect(server.overridesDir).toBe(tasksDir);
         expect(fs.existsSync(path.join(tasksDir, "agents.json"))).toBe(true);
         expect(fs.existsSync(path.join(tasksDir, "template.md"))).toBe(false);
-        expect(
-          fs.readFileSync(path.join(tasksDir, "next-task-id"), "utf-8"),
-        ).toBe("1\n");
+        expect(fs.readFileSync(nextTaskIdPath(tasksDir), "utf-8")).toBe("1\n");
 
         server.shutdown();
       });
@@ -131,11 +136,9 @@ describe("Feature: a task that goes all the way through", () => {
       // Then the task closes and nothing of its workspace is left behind
       expect(merged.to).toBe("CLOSED");
       expect(server.tasks().has(id)).toBe(false);
-      expect(
-        fs.existsSync(path.join(fixture.tasksDir, "closed", `${id}.md`)),
-      ).toBe(true);
+      expect(fs.existsSync(closedTaskPath(fixture.tasksDir, id))).toBe(true);
       expect(fs.existsSync(path.join(fixture.repo, "hello.txt"))).toBe(true);
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
       expect(fs.existsSync(server.runtime.worktree(id))).toBe(false);
 
       server.shutdown();
@@ -221,7 +224,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then the design and the plan are both in the task body
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("## Design");
@@ -288,7 +291,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then only the design that was accepted is what the task carries
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("structure B");
@@ -335,7 +338,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then the findings are nowhere in the task body or the assignment
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("structure B");
@@ -348,7 +351,7 @@ describe("Feature: the design and planning phases", () => {
       expect(assignment).not.toContain("the design misses the farewell");
 
       expect(
-        fs.existsSync(path.join(server.runtime.queueDir(id), "DESIGN.md")),
+        fs.existsSync(queueFile(server.runtime.taskDir(id), "DESIGN")),
       ).toBe(false);
       expect(fs.existsSync(server.runtime.findings(id))).toBe(false);
 
@@ -500,7 +503,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then only the plan that was accepted is what the task carries
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("1. run the check");
@@ -847,10 +850,8 @@ describe("Feature: the design and planning phases", () => {
       await server.tick();
 
       // Then work outranks planning, and a review outranks its own fresh stage
-      const view = JSON.parse(
-        fs.readFileSync(server.runtime.queueView, "utf-8"),
-      ) as { queue: { rank: string }[] };
-      expect(view.queue.map((r) => r.rank)).toEqual([
+      const view = readView(runtimeOf(fixture));
+      expect(view.queue.map((one) => one.rank)).toEqual([
         "WORK_FRESH",
         "PLAN_REVIEW",
         "PLAN_FRESH",
@@ -1052,7 +1053,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(fs.existsSync(worktree)).toBe(true);
       expect(fs.existsSync(assignment)).toBe(true);
       expect(assignment.startsWith(worktree)).toBe(false);
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(true);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(true);
 
       const body = fs.readFileSync(assignment, "utf-8");
       expect(body).toContain("# The body of this task");
@@ -1123,7 +1124,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(held.claimed_by).toBe("pi-fake-fake-1");
       expect(held.claimed_pid).toBeGreaterThan(0);
       expect(held.workspace!.agent).toBe("pi-fake-fake-1");
-      expect(held.workspace!.branch).toBe(`task/${id}`);
+      expect(held.workspace!.branch).toBe(branchName(id));
       expect(held.workspace!.worktree).toBe(server.runtime.worktree(id));
       expect(fs.existsSync(held.workspace!.session!)).toBe(true);
 
@@ -1156,7 +1157,7 @@ describe("Feature: handing a task to an agent", () => {
       git.gitOrThrow(worktree, ["commit", "-q", "-m", "work from before"]);
       git.harvest(fixture.repo, worktree, legacy);
 
-      const body = readTaskFile(path.join(fixture.tasksDir, `${id}.md`)).body;
+      const body = readTaskFile(activeTaskPath(fixture.tasksDir, id)).body;
       takeClaim(fixture.tasksDir, id, {
         agentName: "pi-old-1",
         pid: process.pid,
@@ -1176,7 +1177,7 @@ describe("Feature: handing a task to an agent", () => {
 
       // Then the branch it recorded is the one used, not the one it would pick
       expect(server.tasks().get(id)!.workspace!.branch).toBe(legacy);
-      expect(git.branchExists(fixture.repo, `task/${id}`)).toBe(false);
+      expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
 
       expect((await server.attemptMerge(id)).to).toBe("CLOSED");
       expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
@@ -1389,7 +1390,7 @@ describe("Feature: landing work on the base branch", () => {
 
       // Then the write is refused, and the project is untouched
       const queued = fs.readFileSync(
-        path.join(server.runtime.queueDir(id), "WORK.md"),
+        queueFile(server.runtime.taskDir(id), "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");

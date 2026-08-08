@@ -2,6 +2,8 @@ import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
+import { queueFile } from "../adapters/queue.ts";
+import { activeTaskPath } from "../adapters/task-store.ts";
 import * as git from "../adapters/git.ts";
 import {
   makeFixture,
@@ -57,7 +59,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
 
       // Then the finding is written into the task body for the worker to read
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("# Review findings");
@@ -120,9 +122,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       );
       // Then nothing is left queued once the worker has answered them
       expect(fs.existsSync(server.runtime.findings(id))).toBe(false);
-      expect(
-        fs.existsSync(path.join(server.runtime.queueDir(id), "WORK.md")),
-      ).toBe(false);
+      expect(fs.existsSync(queueFile(server.runtime.taskDir(id), "WORK"))).toBe(
+        false,
+      );
 
       server.shutdown();
     },
@@ -309,7 +311,7 @@ describe("Feature: a review that fails twice", () => {
       expect(task.claimed_by).toBeNull();
 
       // Then only the first round's findings reached the body
-      const body = bodyOf(path.join(fixture.tasksDir, `${id}.md`));
+      const body = bodyOf(activeTaskPath(fixture.tasksDir, id));
       expect(body).toContain("- finding one");
       expect(body).not.toContain("finding two");
 
@@ -959,7 +961,7 @@ describe("Feature: keeping the attempts an agent already made", () => {
       ).toContain("attempt one");
 
       const body = fs.readFileSync(
-        path.join(fixture.tasksDir, `${id}.md`),
+        activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("attempt two");

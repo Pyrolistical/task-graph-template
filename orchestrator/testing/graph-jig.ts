@@ -7,7 +7,12 @@ import {
   rebuildDocument,
   splitDocument,
 } from "../domain/task.ts";
-import { createTask, readTaskFile } from "../adapters/task-store.ts";
+import {
+  activeTaskPath,
+  createTask,
+  nextTaskIdPath,
+  readTaskFile,
+} from "../adapters/task-store.ts";
 import {
   type TransitionArgs,
   type TransitionName,
@@ -28,7 +33,7 @@ export const TASK_STORE_PATH = path.join(
 
 export function makeTasksDir(): string {
   const dir = tempDir("task-graph-");
-  fs.writeFileSync(path.join(dir, "next-task-id"), "1\n");
+  fs.writeFileSync(nextTaskIdPath(dir), "1\n");
   return dir;
 }
 
@@ -65,7 +70,7 @@ export function raw(meta: TaskMeta): Record<string, unknown> {
 export function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
   const meta = baseMeta(overrides);
   fs.writeFileSync(
-    path.join(dir, `${meta.id}.md`),
+    activeTaskPath(dir, meta.id),
     rebuildDocument(meta, "\n\n# Goal\n"),
   );
 
@@ -73,7 +78,7 @@ export function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
     .readdirSync(dir)
     .filter((f) => /^\d{6}\.md$/.test(f))
     .reduce((max, f) => Math.max(max, Number.parseInt(f, 10)), 0);
-  fs.writeFileSync(path.join(dir, "next-task-id"), `${highest + 1}\n`);
+  fs.writeFileSync(nextTaskIdPath(dir), `${highest + 1}\n`);
 
   return meta.id;
 }
@@ -83,7 +88,7 @@ export function editTask(
   id: string,
   edit: (meta: TaskMeta) => void,
 ): void {
-  const filePath = path.join(dir, `${id}.md`);
+  const filePath = activeTaskPath(dir, id);
   const { meta, body } = readTaskFile(filePath);
   edit(meta);
   fs.writeFileSync(filePath, rebuildDocument(meta, body));
@@ -138,7 +143,7 @@ export function unclaim(dir: string, id: string): void {
 }
 
 export function metaOf(dir: string, id: string) {
-  return readTaskFile(path.join(dir, `${id}.md`)).meta;
+  return readTaskFile(activeTaskPath(dir, id)).meta;
 }
 
 export function newTask(title = "a task"): { dir: string; id: string } {
@@ -171,7 +176,7 @@ export function toDesignReview(): { dir: string; id: string } {
 
 export function designThrough(): { dir: string; id: string } {
   const { dir, id } = toDesignReview();
-  run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+  run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
@@ -190,7 +195,7 @@ export function toPlanReview(): { dir: string; id: string } {
 
 export function planThrough(): { dir: string; id: string } {
   const { dir, id } = toPlanReview();
-  run(dir, id, "submit", bodyOf(path.join(dir, `${id}.md`)));
+  run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
@@ -248,9 +253,7 @@ export function documentOf(
   id: string,
   result: TransitionResult,
 ): string {
-  return result.to === "CLOSED"
-    ? closedPath(result)
-    : path.join(dir, `${id}.md`);
+  return result.to === "CLOSED" ? closedPath(result) : activeTaskPath(dir, id);
 }
 
 export function closedPath(result: TransitionResult): string {

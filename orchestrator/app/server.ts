@@ -99,6 +99,7 @@ export class Server {
   }
 
   async start(): Promise<Server> {
+    this.runtime.takeLock();
     this.publisher.log(
       `starting against ${this.config.repo} (base ${this.config.base})`,
     );
@@ -260,6 +261,7 @@ export class Server {
 
   detach(): void {
     this.watcher?.close();
+    this.runtime.clearLock();
     this.publisher.log(
       "manager exited; agents left running, views left on disk",
     );
@@ -267,6 +269,7 @@ export class Server {
 
   shutdown(): void {
     this.watcher?.close();
+    this.runtime.clearLock();
     this.pool.shutdown();
   }
 }

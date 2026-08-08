@@ -1,15 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type TaskMeta, rebuildDocument } from "../domain/task.ts";
-import { readTaskFile } from "../adapters/task-store.ts";
+import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
+import { Runtime } from "../adapters/runtime.ts";
 import { wire } from "../main/compose.ts";
 
 export function startServer(
   options: Parameters<typeof wire>[0],
 ): Promise<Server> {
   return wire(options).start();
+}
+
+export function runtimeOf(fixture: Fixture): Runtime {
+  return new Runtime(fixture.repo, fixture.serverRoot);
 }
 
 export function serverFor(fixture: Fixture): Promise<Server> {
@@ -30,7 +35,7 @@ export function editTaskFile(
   id: string,
   edit: (meta: TaskMeta) => void,
 ): void {
-  const filePath = path.join(fixture.tasksDir, `${id}.md`);
+  const filePath = activeTaskPath(fixture.tasksDir, id);
   const { meta, body } = readTaskFile(filePath);
   edit(meta);
   fs.writeFileSync(filePath, rebuildDocument(meta, body));

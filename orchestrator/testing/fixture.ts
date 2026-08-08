@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   createTask,
   findTaskFile,
+  nextTaskIdPath,
   readTaskFile,
   withLock,
   writeTaskFile,
@@ -405,7 +406,7 @@ export function makeFixture(slots = 1): Fixture {
   const overridesDir = path.join(repo, "orchestrator");
 
   fs.mkdirSync(tasksDir);
-  fs.writeFileSync(path.join(tasksDir, "next-task-id"), "1\n");
+  fs.writeFileSync(nextTaskIdPath(tasksDir), "1\n");
 
   fs.cpSync(
     path.join(REPO_ROOT, "orchestrator", "prompts"),
