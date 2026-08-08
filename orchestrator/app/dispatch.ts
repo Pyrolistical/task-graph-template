@@ -1,6 +1,6 @@
 import type {
   Assignments,
-  Inbox,
+  Messages,
   Paths,
   Publisher,
   Workspaces,
@@ -19,9 +19,9 @@ export class Dispatch {
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
     private readonly settle: SettleAgent,
-    private readonly git: Workspaces,
+    private readonly workspaces: Workspaces,
     private readonly assignments: Assignments,
-    private readonly inbox: Inbox,
+    private readonly messages: Messages,
     private readonly paths: Paths,
     private readonly publisher: Publisher,
     private readonly base: string,
@@ -35,7 +35,7 @@ export class Dispatch {
         task.claimed_by === null &&
         task.workspace?.session != null &&
         this.pool.hasSession(task.workspace.session) &&
-        this.inbox.queued(id, "WORK")
+        this.messages.queued(id, "WORK")
       ) {
         ids.add(id);
       }
@@ -89,15 +89,15 @@ export class Dispatch {
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
 
-    if (!this.git.exists(worktree)) {
-      this.git.create(branch, worktree, this.base);
+    if (!this.workspaces.exists(worktree)) {
+      this.workspaces.create(branch, worktree, this.base);
     }
 
     const section = STAGE_OF[stage].section;
     runner.checkout = {
       branch,
       worktree,
-      head: this.git.head(worktree),
+      head: this.workspaces.head(worktree),
       dispatched:
         section === null && this.assignments.exists(task.id)
           ? this.assignments.read(task.id)
@@ -123,7 +123,7 @@ export class Dispatch {
     });
 
     runner.state = "BUSY";
-    const queued = this.inbox.drain(task.id, stage);
+    const queued = this.messages.drain(task.id, stage);
     const message = this.settle.nudge(task.id, stage);
     await this.settle.prompt(
       this.pool.requireRun(runner),
@@ -142,7 +142,7 @@ export class Dispatch {
     runner.checkout = {
       branch: workspace.branch,
       worktree: workspace.worktree,
-      head: this.git.head(workspace.worktree),
+      head: this.workspaces.head(workspace.worktree),
       dispatched: this.assignments.read(task.id),
     };
 
@@ -171,7 +171,7 @@ export class Dispatch {
 
     runner.state = "BUSY";
 
-    const queued = this.inbox.drain(task.id, "WORK");
+    const queued = this.messages.drain(task.id, "WORK");
     await this.settle.prompt(
       this.pool.requireRun(runner),
       queued === "" ? this.settle.nudge(task.id, "WORK") : queued,

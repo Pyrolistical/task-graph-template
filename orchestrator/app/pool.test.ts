@@ -12,16 +12,21 @@ import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
 
 function aPool(slots: Slot[] = [aSlot()], alive = true) {
-  const git = new FakeWorkspaces();
+  const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
   const pool = new Pool(
     fakeAgents(slots),
-    git,
+    workspaces,
     fakePaths(),
     publisher,
     () => alive,
   );
-  return { pool, log: publisher.lines, harvested: git.harvested, git };
+  return {
+    pool,
+    log: publisher.lines,
+    harvested: workspaces.harvested,
+    workspaces,
+  };
 }
 
 describe("Feature: the pool of agent slots", () => {
@@ -200,8 +205,8 @@ describe("Feature: aborting the tool call an agent is inside", () => {
 describe("Feature: releasing a slot when its work ends", () => {
   test("finishing a worker harvests its worktree and returns the slot to idle", () => {
     // Given a slot busy on a task in its own worktree
-    const { pool, harvested, git } = aPool();
-    git.present.add("/tmp/000042/worktree");
+    const { pool, harvested, workspaces } = aPool();
+    workspaces.present.add("/tmp/000042/worktree");
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
     runner.taskId = "000042";

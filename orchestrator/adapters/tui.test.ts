@@ -10,7 +10,7 @@ import {
   watchCommands,
   writeCommand,
 } from "./command.ts";
-import { Runtime, snapshot, writeAtomic } from "./runtime.ts";
+import { Runtime, viewJson, writeAtomic } from "./runtime.ts";
 import { idleRow } from "../domain/agents.ts";
 import { HIDE, SHOW } from "../policy/console.ts";
 import {
@@ -294,13 +294,13 @@ describe("Feature: reading the views the server publishes", () => {
     const runtime: Runtime = new Runtime(path.join(root, "repo"), root);
     writeAtomic(
       runtime.slotsView,
-      snapshot(1, "slots", [busyRow()], { agents_file: AGENTS_FILE }),
+      viewJson(1, "slots", [busyRow()], { agents_file: AGENTS_FILE }),
     );
-    writeAtomic(runtime.tasksView, snapshot(1, "tasks", [taskRowOf()]));
-    writeAtomic(runtime.checksView, snapshot(1, "checks", []));
+    writeAtomic(runtime.tasksView, viewJson(1, "tasks", [taskRowOf()]));
+    writeAtomic(runtime.checksView, viewJson(1, "checks", []));
     writeAtomic(
       runtime.queueView,
-      snapshot(1, "queue", [candidateOf()], { scheduling: true }),
+      viewJson(1, "queue", [candidateOf()], { scheduling: true }),
     );
     return runtime;
   }
@@ -323,7 +323,7 @@ describe("Feature: reading the views the server publishes", () => {
   testInTempDirs("a queue view without the scheduler flag is refused", () => {
     // Given a queue view written without the flag the switch is drawn from
     const runtime = seed(tempDir("console-"));
-    writeAtomic(runtime.queueView, snapshot(1, "queue", []));
+    writeAtomic(runtime.queueView, viewJson(1, "queue", []));
 
     // When the console reads the views
     const attempt = () => readView(runtime);
@@ -381,15 +381,15 @@ describe("Feature: reading the views the server publishes", () => {
     write(session, [assistant("hi")]);
     writeAtomic(
       runtime.slotsView,
-      snapshot(1, "slots", [busyRow({ session })], {
+      viewJson(1, "slots", [busyRow({ session })], {
         agents_file: AGENTS_FILE,
       }),
     );
-    writeAtomic(runtime.tasksView, snapshot(1, "tasks", [taskRowOf()]));
-    writeAtomic(runtime.checksView, snapshot(1, "checks", []));
+    writeAtomic(runtime.tasksView, viewJson(1, "tasks", [taskRowOf()]));
+    writeAtomic(runtime.checksView, viewJson(1, "checks", []));
     writeAtomic(
       runtime.queueView,
-      snapshot(1, "queue", [candidateOf({ task_id: "000456" })], {
+      viewJson(1, "queue", [candidateOf({ task_id: "000456" })], {
         scheduling: true,
       }),
     );
@@ -418,7 +418,7 @@ describe("Feature: reading the views the server publishes", () => {
       const runtime = seed(tempDir("console-"));
       writeAtomic(
         runtime.slotsView,
-        snapshot(
+        viewJson(
           1,
           "slots",
           SLOTS.map((slot) => idleRow(slot, false)),

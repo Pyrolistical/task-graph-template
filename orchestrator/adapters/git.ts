@@ -47,10 +47,10 @@ export function identity(repo: string): string[] {
   });
 }
 
-export function addWorkspace(
+export function createWorkspace(
   repo: string,
   branch: string,
-  target: string,
+  worktree: string,
   base: string,
 ): void {
   const existing = branchExists(repo, branch);
@@ -61,21 +61,21 @@ export function addWorkspace(
     "--branch",
     existing ? branch : base,
     repo,
-    target,
+    worktree,
   ]);
 
   const inherited = identity(repo);
   for (let at = 0; at < inherited.length; at += 2) {
-    gitOrThrow(target, ["config", inherited[at]!, inherited[at + 1]!]);
+    gitOrThrow(worktree, ["config", inherited[at]!, inherited[at + 1]!]);
   }
 
   if (!existing) {
-    gitOrThrow(target, ["checkout", "--quiet", "-b", branch]);
+    gitOrThrow(worktree, ["checkout", "--quiet", "-b", branch]);
   }
 }
 
-export function removeWorkspace(target: string): void {
-  fs.rmSync(target, { recursive: true, force: true });
+export function removeWorkspace(worktree: string): void {
+  fs.rmSync(worktree, { recursive: true, force: true });
 }
 
 export function head(worktree: string): string {
@@ -95,25 +95,25 @@ export function commonDir(cwd: string): string {
   ]).trim();
 }
 
-export function sharesRefs(repo: string, target: string): boolean {
-  return commonDir(target) === commonDir(repo);
+export function sharesRefs(repo: string, worktree: string): boolean {
+  return commonDir(worktree) === commonDir(repo);
 }
 
-export function harvest(repo: string, target: string, branch: string): void {
-  if (sharesRefs(repo, target)) {
+export function harvest(repo: string, worktree: string, branch: string): void {
+  if (sharesRefs(repo, worktree)) {
     return;
   }
   gitOrThrow(repo, [
     "fetch",
     "--quiet",
     "--force",
-    target,
+    worktree,
     `${branch}:${branch}`,
   ]);
 }
 
-export function syncBase(target: string, base: string): void {
-  gitOrThrow(target, [
+export function syncBase(worktree: string, base: string): void {
+  gitOrThrow(worktree, [
     "fetch",
     "--quiet",
     "--force",

@@ -356,7 +356,7 @@ describe("Feature: discarding a task that is finished with", () => {
     runtime.discard("000042");
 
     // Then nothing of it is left behind on disk
-    expect(fs.existsSync(runtime.taskDir("000042"))).toBe(false);
+    expect(fs.existsSync(runtime.taskRoot("000042"))).toBe(false);
   });
 
   testInTempDirs("discarding a task that was never started is harmless", () => {
@@ -594,7 +594,7 @@ describe("Feature: the workspace an agent works in", () => {
     const workspace = path.join(tempDir("clone-"), "worktree");
 
     // When a workspace is cloned from it
-    git.addWorkspace(repo, "work/000001", workspace, "master");
+    git.createWorkspace(repo, "work/000001", workspace, "master");
 
     // Then it points at the repository's objects instead of copying them
     expect(
@@ -617,7 +617,7 @@ describe("Feature: the workspace an agent works in", () => {
       const workspace = path.join(tempDir("clone-"), "worktree");
 
       // When a workspace is cloned from it
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
 
       // Then the agent's commits carry that author, which a plain clone would not
       expect(
@@ -636,7 +636,7 @@ describe("Feature: the workspace an agent works in", () => {
       const workspace = path.join(tempDir("clone-"), "worktree");
 
       // When a workspace is cloned for a task
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
 
       // Then it is on the task's own branch, standing where the base does
       expect(
@@ -654,7 +654,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace whose commits were harvested before it was removed
       const repo = tempRepo();
       const first = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", first, "master");
+      git.createWorkspace(repo, "work/000001", first, "master");
       commitIn(first, "b.txt", "work\n");
       git.harvest(repo, first, "work/000001");
       git.removeWorkspace(first);
@@ -663,7 +663,7 @@ describe("Feature: the workspace an agent works in", () => {
       const second = path.join(tempDir("clone-"), "worktree");
 
       // When it is cloned again for the same task
-      git.addWorkspace(repo, "work/000001", second, "master");
+      git.createWorkspace(repo, "work/000001", second, "master");
 
       // Then it checks out the branch that survived, not the base it was cut from
       expect(
@@ -679,7 +679,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace with a commit the repository has never seen
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
       commitIn(workspace, "b.txt", "work\n");
       expect(git.branchExists(repo, "work/000001")).toBe(false);
 
@@ -733,7 +733,7 @@ describe("Feature: the workspace an agent works in", () => {
     const workspace = path.join(tempDir("clone-"), "worktree");
 
     // When a workspace is cloned from it
-    git.addWorkspace(repo, "work/000001", workspace, "master");
+    git.createWorkspace(repo, "work/000001", workspace, "master");
 
     // Then it does not share the repository's refs, so harvesting is a real fetch
     expect(git.sharesRefs(repo, workspace)).toBe(false);
@@ -745,7 +745,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a harvested branch whose base has since moved on, and a rebase onto it
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
       commitIn(workspace, "b.txt", "work\n");
       git.harvest(repo, workspace, "work/000001");
       commitIn(repo, "c.txt", "moved on\n");
@@ -769,7 +769,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace whose base has moved on in the repository
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
       commitIn(repo, "c.txt", "moved on\n");
       expect(git.gitOrThrow(workspace, ["rev-parse", "master"])).not.toBe(
         git.gitOrThrow(repo, ["rev-parse", "master"]),
@@ -793,7 +793,7 @@ describe("Feature: the workspace an agent works in", () => {
     const workspace = path.join(tempDir("clone-"), "worktree");
 
     // When a workspace is cloned from it
-    git.addWorkspace(repo, "work/000001", workspace, "master");
+    git.createWorkspace(repo, "work/000001", workspace, "master");
 
     // Then the guard sees nothing committed and nothing changed
     expect(git.commitCount(workspace, "master")).toBe(0);
@@ -806,7 +806,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace with nothing committed in it
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
 
       // When the agent commits in it
       commitIn(workspace, "b.txt", "work\n");
@@ -822,7 +822,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace with one file added and one changed
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
       fs.writeFileSync(path.join(workspace, "b.txt"), "untracked\n");
       fs.writeFileSync(path.join(workspace, "a.txt"), "modified\n");
 
@@ -838,7 +838,7 @@ describe("Feature: the workspace an agent works in", () => {
     // Given a workspace whose changes have been staged but not committed
     const repo = tempRepo();
     const workspace = path.join(tempDir("clone-"), "worktree");
-    git.addWorkspace(repo, "work/000001", workspace, "master");
+    git.createWorkspace(repo, "work/000001", workspace, "master");
     fs.writeFileSync(path.join(workspace, "b.txt"), "untracked\n");
     fs.writeFileSync(path.join(workspace, "a.txt"), "modified\n");
     git.gitOrThrow(workspace, ["add", "-A"]);
@@ -879,12 +879,12 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace recloned from a branch that had already been harvested
       const repo = tempRepo();
       const first = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", first, "master");
+      git.createWorkspace(repo, "work/000001", first, "master");
       commitIn(first, "b.txt", "work\n");
       git.harvest(repo, first, "work/000001");
       git.removeWorkspace(first);
       const second = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", second, "master");
+      git.createWorkspace(repo, "work/000001", second, "master");
 
       // When its commits are counted against the base
       const count = git.commitCount(second, "master");
@@ -901,7 +901,7 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a workspace with one commit, and a base that has moved on since
       const repo = tempRepo();
       const workspace = path.join(tempDir("clone-"), "worktree");
-      git.addWorkspace(repo, "work/000001", workspace, "master");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
       commitIn(workspace, "b.txt", "work\n");
       commitIn(repo, "c.txt", "moved on\n");
       git.syncBase(workspace, "master");
@@ -918,7 +918,7 @@ describe("Feature: the workspace an agent works in", () => {
     // Given a workspace cloned from a repository
     const repo = tempRepo();
     const workspace = path.join(tempDir("clone-"), "worktree");
-    git.addWorkspace(repo, "work/000001", workspace, "master");
+    git.createWorkspace(repo, "work/000001", workspace, "master");
 
     // When the workspace is removed, and removed again
     git.removeWorkspace(workspace);

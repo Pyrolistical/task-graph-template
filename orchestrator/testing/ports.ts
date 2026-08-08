@@ -3,9 +3,10 @@ import type {
   Agents,
   Assignments,
   CreatedTask,
-  Inbox,
-  Journal,
-  JournalEntry,
+  Messages,
+  Reviews,
+  Transitions,
+  TransitionEntry,
   Paths,
   Prompts,
   Publisher,
@@ -243,18 +244,18 @@ export class FakeWorkspaces implements Workspaces {
   }
 }
 
-export class FakeJournal implements Journal {
-  readonly entries: JournalEntry[] = [];
+export class FakeJournal implements Transitions {
+  readonly entries: TransitionEntry[] = [];
 
   get cursor(): number {
     return this.entries.length;
   }
 
-  read(): JournalEntry[] {
+  read(): TransitionEntry[] {
     return this.entries;
   }
 
-  append(entry: Omit<JournalEntry, "seq" | "at">): void {
+  append(entry: Omit<TransitionEntry, "seq" | "at">): void {
     this.entries.push({
       ...entry,
       seq: this.entries.length + 1,
@@ -263,24 +264,24 @@ export class FakeJournal implements Journal {
   }
 }
 
-export class FakeInbox implements Inbox {
-  private readonly entries = new Map<string, string>();
+export class FakeTaskFiles implements Messages, Reviews {
+  private readonly messages = new Map<string, string>();
   private readonly found = new Map<TaskId, string[]>();
-  private readonly failures = new Map<TaskId, number>();
+  private readonly rejections = new Map<TaskId, number>();
 
-  queue(taskId: TaskId, state: string, entry: string): void {
-    this.entries.set(`${taskId}/${state}`, entry);
+  queue(taskId: TaskId, state: string, message: string): void {
+    this.messages.set(`${taskId}/${state}`, message);
   }
 
   drain(taskId: TaskId, state: string): string {
     const key = `${taskId}/${state}`;
-    const entry = this.entries.get(key) ?? "";
-    this.entries.delete(key);
-    return entry;
+    const message = this.messages.get(key) ?? "";
+    this.messages.delete(key);
+    return message;
   }
 
   queued(taskId: TaskId, state: string): boolean {
-    return this.entries.has(`${taskId}/${state}`);
+    return this.messages.has(`${taskId}/${state}`);
   }
 
   findings(taskId: TaskId): string[] {
@@ -295,16 +296,16 @@ export class FakeInbox implements Inbox {
     this.found.delete(taskId);
   }
 
-  reviewFailures(taskId: TaskId): number {
-    return this.failures.get(taskId) ?? 0;
+  failures(taskId: TaskId): number {
+    return this.rejections.get(taskId) ?? 0;
   }
 
-  setReviewFailures(taskId: TaskId, failures: number): void {
-    this.failures.set(taskId, failures);
+  setFailures(taskId: TaskId, failures: number): void {
+    this.rejections.set(taskId, failures);
   }
 
-  clearReviewFailures(taskId: TaskId): void {
-    this.failures.delete(taskId);
+  clearFailures(taskId: TaskId): void {
+    this.rejections.delete(taskId);
   }
 }
 

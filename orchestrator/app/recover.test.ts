@@ -3,7 +3,7 @@ import { Pool } from "./pool.ts";
 import { Recover } from "./recover.ts";
 import { TaskGraph } from "./task-graph.ts";
 import {
-  FakeInbox,
+  FakeTaskFiles,
   FakeJournal,
   FakePublisher,
   FakeTasks,
@@ -22,21 +22,21 @@ const LIVE_PID = 9002;
 function aRig(tasks: TaskMeta[]) {
   const byId = new Map<TaskId, TaskMeta>(tasks.map((task) => [task.id, task]));
   const store = new FakeTasks(byId);
-  const git = new FakeWorkspaces();
+  const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
   const paths = fakePaths();
 
   const graph = new TaskGraph(
     store,
-    git,
-    new FakeInbox(),
+    workspaces,
+    new FakeTaskFiles(),
     new FakeJournal(),
     publisher,
     paths,
   );
   const pool = new Pool(
     fakeAgents([aSlot()]),
-    git,
+    workspaces,
     paths,
     publisher,
     (pid) => pid === LIVE_PID,
@@ -44,14 +44,14 @@ function aRig(tasks: TaskMeta[]) {
   const recover = new Recover(
     graph,
     pool,
-    git,
+    workspaces,
     paths,
     publisher,
     (pid) => pid === LIVE_PID,
     "master",
   );
 
-  return { recover, pool, git, store, log: publisher.lines, publisher };
+  return { recover, pool, workspaces, store, log: publisher.lines, publisher };
 }
 
 describe("Feature: reaping claims whose process is gone", () => {
@@ -139,14 +139,14 @@ describe("Feature: reaping claims whose process is gone", () => {
         session: null,
       },
     });
-    const { recover, git } = aRig([task]);
-    git.present.add("/runtime/000042/worktree");
+    const { recover, workspaces } = aRig([task]);
+    workspaces.present.add("/runtime/000042/worktree");
 
     // When the reaper runs over the graph
     recover.reap(new Map([[task.id, task]]));
 
     // Then the commits in the worktree are harvested before the claim is dropped
-    expect(git.harvested).toEqual(["/runtime/000042/worktree"]);
+    expect(workspaces.harvested).toEqual(["/runtime/000042/worktree"]);
   });
 });
 
@@ -221,14 +221,14 @@ describe("Feature: recloning a workspace that went missing", () => {
         session: null,
       },
     });
-    const { recover, git } = aRig([task]);
-    git.branches.add("task/000042");
+    const { recover, workspaces } = aRig([task]);
+    workspaces.branches.add("task/000042");
 
     // When the server recovers its workspaces
-    recover.workspaces();
+    recover.reclone();
 
     // Then the worktree is recloned, so the work is not lost
-    expect(git.created).toEqual(["/runtime/000042/worktree"]);
+    expect(workspaces.created).toEqual(["/runtime/000042/worktree"]);
   });
 
   test("a task that lost both its worktree and its branch is only reported", () => {
@@ -241,13 +241,13 @@ describe("Feature: recloning a workspace that went missing", () => {
         session: null,
       },
     });
-    const { recover, git, log } = aRig([task]);
+    const { recover, workspaces, log } = aRig([task]);
 
     // When the server recovers its workspaces
-    recover.workspaces();
+    recover.reclone();
 
     // Then nothing is recloned, and the loss is written to the log
-    expect(git.created).toEqual([]);
+    expect(workspaces.created).toEqual([]);
     expect(log).toEqual([
       "task 000042 lost both its worktree and branch task/000042",
     ]);
@@ -263,13 +263,13 @@ describe("Feature: recloning a workspace that went missing", () => {
         session: null,
       },
     });
-    const { recover, git } = aRig([task]);
-    git.present.add("/runtime/000042/worktree");
+    const { recover, workspaces } = aRig([task]);
+    workspaces.present.add("/runtime/000042/worktree");
 
     // When the server recovers its workspaces
-    recover.workspaces();
+    recover.reclone();
 
     // Then nothing is recloned over it
-    expect(git.created).toEqual([]);
+    expect(workspaces.created).toEqual([]);
   });
 });

@@ -124,7 +124,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       );
       // Then nothing is left queued once the runner has answered them
       expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
-      expect(fs.existsSync(pathsOf(server).queueFile(id, "WORK"))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).messageFile(id, "WORK"))).toBe(
+        false,
+      );
 
       server.shutdown();
     },
@@ -264,7 +266,7 @@ describe("Feature: a review that fails twice", () => {
       );
 
       // Then the failure is counted and the work only bounced back
-      expect(filesOf(fixture).reviewFailures(id)).toBe(1);
+      expect(filesOf(fixture).failures(id)).toBe(1);
       expect(stateOf(server, id)).toBe("WORK");
 
       server.shutdown();
@@ -469,7 +471,7 @@ describe("Feature: a review that fails twice", () => {
       server.setSchedulerEnabled(true);
 
       // When the redo fails once
-      await until(server, () => filesOf(fixture).reviewFailures(id) === 1);
+      await until(server, () => filesOf(fixture).failures(id) === 1);
 
       // Then one failure only bounces it, never holds it again
       expect(stateOf(server, id)).toBe("WORK");

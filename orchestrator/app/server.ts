@@ -1,8 +1,8 @@
 import type {
   ClaimArgs,
-  Console,
+  CommandChannel,
   CreatedTask,
-  Journal,
+  Transitions,
   Paths,
   Prompts,
   Publisher,
@@ -48,8 +48,8 @@ export class Server implements Manager {
     private readonly checker: RunChecks,
     private readonly lander: Land,
     private readonly recovery: Recover,
-    private readonly console: Console,
-    private readonly journal: Journal,
+    private readonly commands: CommandChannel,
+    private readonly transitions: Transitions,
     private readonly promptStore: Prompts,
     private readonly layout: Paths,
     private readonly publisher: Publisher,
@@ -92,7 +92,7 @@ export class Server implements Manager {
     for (const filePath of this.promptStore.cachedFiles()) {
       this.publisher.log(`cached ${filePath}`);
     }
-    this.recovery.workspaces();
+    this.recovery.reclone();
     this.recovery.reattach();
     this.listen();
     this.graph.rememberMostRecent();
@@ -124,7 +124,7 @@ export class Server implements Manager {
 
   createTask(title: string): CreatedTask {
     const created = this.graph.create(title);
-    this.journal.append({
+    this.transitions.append({
       task_id: created.id,
       transition: "create",
       from: "NEW",
@@ -238,7 +238,7 @@ export class Server implements Manager {
     const snapshot = this.graph.snapshot();
 
     this.publisher.publish({
-      seq: this.journal.cursor,
+      seq: this.transitions.cursor,
       agentsFile: this.config.agentsPath,
       slots: this.pool.rows(),
       checks: this.checker.view,
@@ -254,11 +254,11 @@ export class Server implements Manager {
   }
 
   private listen(): void {
-    const stale = this.console.take();
+    const stale = this.commands.take();
     if (stale !== null) {
       this.applyCommand(stale);
     }
-    this.watcher = this.console.watch((command) => {
+    this.watcher = this.commands.watch((command) => {
       this.applyCommand(command);
     });
   }

@@ -354,7 +354,7 @@ describe("Feature: the design and planning phases", () => {
       );
       expect(assignment).not.toContain("the design misses the farewell");
 
-      expect(fs.existsSync(pathsOf(server).queueFile(id, "DESIGN"))).toBe(
+      expect(fs.existsSync(pathsOf(server).messageFile(id, "DESIGN"))).toBe(
         false,
       );
       expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
@@ -1157,7 +1157,7 @@ describe("Feature: handing a task to an agent", () => {
       const legacy = `work/${id}`;
       const worktree = pathsOf(server).worktree(id);
       pathsOf(server).prepare(id);
-      git.addWorkspace(fixture.repo, legacy, worktree, "master");
+      git.createWorkspace(fixture.repo, legacy, worktree, "master");
       fs.writeFileSync(path.join(worktree, "a.txt"), "a\n");
       git.gitOrThrow(worktree, ["add", "-A"]);
       git.gitOrThrow(worktree, ["commit", "-q", "-m", "work from before"]);
@@ -1396,7 +1396,7 @@ describe("Feature: landing work on the base branch", () => {
 
       // Then the write is refused, and the project is untouched
       const queued = fs.readFileSync(
-        pathsOf(server).queueFile(id, "WORK"),
+        pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");

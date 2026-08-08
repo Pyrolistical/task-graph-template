@@ -56,7 +56,7 @@ describe("Feature: running a task's checks", () => {
       const task = server.tasks().get(id)!;
       expect(task.state).toBe("WORK");
       const queued = fs.readFileSync(
-        pathsOf(server).queueFile(id, "WORK"),
+        pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("echo boom >&2; exit 3");
@@ -92,7 +92,7 @@ describe("Feature: running a task's checks", () => {
 
       // Then the agent is told about both failures, not only the first
       const queued = fs.readFileSync(
-        pathsOf(server).queueFile(id, "WORK"),
+        pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("(exit 1)");
@@ -284,7 +284,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await dispatchOnce(server);
       const opened = server.tasks().get(id)!.workspace!.session!;
       const legacyDir = path.join(
-        pathsOf(server).taskDir(id),
+        pathsOf(server).taskRoot(id),
         "session",
         "work",
       );
@@ -486,14 +486,14 @@ describe("Feature: landing or abandoning finished work", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(true);
+      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(true);
 
       // When the manager merges it
       await server.submit(id);
 
       // Then the runtime directory it worked in is removed with it
       expect(stateOf(server, id)).toBe("CLOSED");
-      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(false);
 
       for (let i = 0; i < 101; i++) {
         const other = readyTask(fixture, `filler ${i}`);
@@ -502,7 +502,7 @@ describe("Feature: landing or abandoning finished work", () => {
       await server.writeViews();
 
       // Then it stays gone once it falls off the end of the recent list
-      expect(fs.existsSync(pathsOf(server).taskDir(id))).toBe(false);
+      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(false);
       const view = readView(runtimeOf(fixture));
       expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },

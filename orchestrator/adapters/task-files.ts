@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Assignments, Inbox } from "../app/ports.ts";
+import type { Assignments, Messages, Reviews } from "../app/ports.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
 import { Runtime } from "./runtime.ts";
@@ -38,20 +38,20 @@ function write(filePath: string, contents: string): void {
   fs.writeFileSync(filePath, contents, "utf-8");
 }
 
-export class TaskFiles implements Inbox, Assignments {
+export class TaskFiles implements Messages, Reviews, Assignments {
   constructor(private readonly runtime: Runtime) {}
 
-  queue(taskId: TaskId, state: ClaimState, entry: string): void {
-    const filePath = this.runtime.queueFile(taskId, state);
+  queue(taskId: TaskId, state: ClaimState, message: string): void {
+    const filePath = this.runtime.messageFile(taskId, state);
     const previous = fs.existsSync(filePath)
       ? fs.readFileSync(filePath, "utf-8")
       : "";
     const separator = previous.trim().length === 0 ? "" : "\n\n---\n\n";
-    write(filePath, `${previous}${separator}${entry.trim()}\n`);
+    write(filePath, `${previous}${separator}${message.trim()}\n`);
   }
 
   drain(taskId: TaskId, state: ClaimState): string {
-    const filePath = this.runtime.queueFile(taskId, state);
+    const filePath = this.runtime.messageFile(taskId, state);
     if (!fs.existsSync(filePath)) {
       return "";
     }
@@ -61,7 +61,7 @@ export class TaskFiles implements Inbox, Assignments {
   }
 
   queued(taskId: TaskId, state: ClaimState): boolean {
-    return fs.existsSync(this.runtime.queueFile(taskId, state));
+    return fs.existsSync(this.runtime.messageFile(taskId, state));
   }
 
   findings(taskId: TaskId): string[] {
@@ -83,7 +83,7 @@ export class TaskFiles implements Inbox, Assignments {
     fs.rmSync(this.runtime.findings(taskId), { force: true });
   }
 
-  reviewFailures(taskId: TaskId): number {
+  failures(taskId: TaskId): number {
     const filePath = this.runtime.reviewFailures(taskId);
     if (!fs.existsSync(filePath)) {
       return 0;
@@ -96,11 +96,11 @@ export class TaskFiles implements Inbox, Assignments {
     return count;
   }
 
-  setReviewFailures(taskId: TaskId, failures: number): void {
+  setFailures(taskId: TaskId, failures: number): void {
     write(this.runtime.reviewFailures(taskId), `${failures}\n`);
   }
 
-  clearReviewFailures(taskId: TaskId): void {
+  clearFailures(taskId: TaskId): void {
     fs.rmSync(this.runtime.reviewFailures(taskId), { force: true });
   }
 

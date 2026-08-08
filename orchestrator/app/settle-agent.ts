@@ -1,6 +1,6 @@
 import type {
   Assignments,
-  Inbox,
+  Reviews,
   Prompts,
   Publisher,
   Workspaces,
@@ -33,15 +33,15 @@ export class SettleAgent {
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
     private readonly assignments: Assignments,
-    private readonly inbox: Inbox,
+    private readonly reviews: Reviews,
     private readonly prompts: Prompts,
     private readonly publisher: Publisher,
-    private readonly git: Workspaces,
+    private readonly workspaces: Workspaces,
     private readonly base: string,
   ) {}
 
   nudge(taskId: TaskId, state: ClaimState): string {
-    const findings = this.inbox.findings(taskId);
+    const findings = this.reviews.findings(taskId);
     if (findings.length === 0) {
       return this.prompts.fragment(state);
     }
@@ -102,7 +102,7 @@ export class SettleAgent {
       worktree:
         stage.guard === "none"
           ? { dirty: [], commits: 0 }
-          : this.git.status(run.checkout.worktree, this.base),
+          : this.workspaces.status(run.checkout.worktree, this.base),
       base: this.base,
     };
   }
@@ -147,7 +147,7 @@ export class SettleAgent {
           runner.backoff = BACKOFF_START_MS;
           const live = this.assignments.read(taskId);
           run.process.close();
-          this.inbox.clearFindings(taskId);
+          this.reviews.clearFindings(taskId);
           this.graph.transition(
             taskId,
             "submit",
@@ -177,7 +177,7 @@ export class SettleAgent {
     const resetting = runner.role !== "worker";
 
     if (resetting) {
-      this.git.resetTo(run.checkout.worktree, run.checkout.head);
+      this.workspaces.resetTo(run.checkout.worktree, run.checkout.head);
     }
 
     this.publisher.log(

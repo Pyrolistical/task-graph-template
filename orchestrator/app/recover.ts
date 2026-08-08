@@ -7,27 +7,27 @@ export class Recover {
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
-    private readonly git: Workspaces,
+    private readonly workspaces: Workspaces,
     private readonly paths: Paths,
     private readonly publisher: Publisher,
     private readonly alive: (pid: number) => boolean,
     private readonly base: string,
   ) {}
 
-  workspaces(): void {
+  reclone(): void {
     for (const [id, task] of this.graph.list()) {
       const workspace = task.workspace;
-      if (workspace === null || this.git.exists(workspace.worktree)) {
+      if (workspace === null || this.workspaces.exists(workspace.worktree)) {
         continue;
       }
-      if (!this.git.branchExists(workspace.branch)) {
+      if (!this.workspaces.branchExists(workspace.branch)) {
         this.publisher.log(
           `task ${id} lost both its worktree and branch ${workspace.branch}`,
         );
         continue;
       }
       this.paths.prepare(id);
-      this.git.create(workspace.branch, workspace.worktree, this.base);
+      this.workspaces.create(workspace.branch, workspace.worktree, this.base);
       this.publisher.log(
         `recloned the workspace for ${id} from ${workspace.branch}`,
       );

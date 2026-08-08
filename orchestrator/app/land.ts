@@ -13,7 +13,7 @@ export class Land {
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
     private readonly checks: RunChecks,
-    private readonly git: Workspaces,
+    private readonly workspaces: Workspaces,
     private readonly base: string,
   ) {}
 
@@ -21,11 +21,11 @@ export class Land {
     const task = this.requireManagerReview(taskId);
     const { branch, worktree } = task.workspace!;
 
-    if (this.git.exists(worktree)) {
-      this.git.syncBase(worktree, this.base);
-      const rebased = this.git.rebase(worktree, this.base);
+    if (this.workspaces.exists(worktree)) {
+      this.workspaces.syncBase(worktree, this.base);
+      const rebased = this.workspaces.rebase(worktree, this.base);
       if (rebased.code !== 0) {
-        this.git.abortRebase(worktree);
+        this.workspaces.abortRebase(worktree);
         throw new Error(
           `the branch no longer rebases onto ${this.base}: ${rebased.stderr.trim()}`,
         );
@@ -43,14 +43,14 @@ export class Land {
       this.pool.harvest(this.graph.read(taskId)?.workspace ?? null);
     }
 
-    if (this.git.branchExists(branch)) {
-      const merged = this.git.fastForward(branch);
+    if (this.workspaces.branchExists(branch)) {
+      const merged = this.workspaces.fastForward(branch);
       if (merged.code !== 0) {
         throw new Error(
           `the fast-forward merge of ${branch} was refused: ${merged.stderr.trim()}`,
         );
       }
-      if (!this.git.isAncestor(branch, this.base)) {
+      if (!this.workspaces.isAncestor(branch, this.base)) {
         throw new Error(
           `${branch} is not an ancestor of ${this.base} after the merge`,
         );
@@ -68,8 +68,8 @@ export class Land {
 
     if (
       branch !== null &&
-      this.git.branchExists(branch) &&
-      this.git.isAncestor(branch, this.base)
+      this.workspaces.branchExists(branch) &&
+      this.workspaces.isAncestor(branch, this.base)
     ) {
       throw new Error(
         `${branch} is already part of ${this.base}; an aborted task is one whose work is being thrown away`,

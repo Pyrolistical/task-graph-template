@@ -858,7 +858,7 @@ describe("Feature: the sandbox as it actually runs", () => {
       // Given a worktree cloned from a repository the sandbox may only read
       const repo = tempRepo();
       const workspace = path.join(tempDir("sandbox-root-"), "worktree");
-      git.addWorkspace(repo, "work/000042", workspace, "master");
+      git.createWorkspace(repo, "work/000042", workspace, "master");
       const policy = {
         cwd: workspace,
         writable: [workspace],

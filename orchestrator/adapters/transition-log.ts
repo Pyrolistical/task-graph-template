@@ -1,20 +1,11 @@
 import fs from "node:fs";
-import type { TaskId } from "../domain/task.ts";
-import type { TaskState } from "../domain/state-machine.ts";
+import type { TransitionEntry, Transitions } from "../app/ports.ts";
 
 export const TRANSITION_LOG_LINES = 1000;
 
-export interface TransitionEntry {
-  seq: number;
-  at: string;
-  task_id: TaskId;
-  transition: string;
-  from: TaskState;
-  to: TaskState;
-  by: string;
-}
+export type { TransitionEntry };
 
-export class TransitionLog {
+export class TransitionLog implements Transitions {
   private readonly filePath: string;
   private readonly cap: number;
   private lines: string[];

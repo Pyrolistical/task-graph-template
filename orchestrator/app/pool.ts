@@ -102,7 +102,7 @@ export class Pool {
 
   constructor(
     private readonly agents: Agents,
-    private readonly git: Workspaces,
+    private readonly workspaces: Workspaces,
     private readonly paths: Paths,
     private readonly publisher: Publisher,
     private readonly alive: (pid: number) => boolean,
@@ -255,10 +255,10 @@ export class Pool {
   }
 
   harvest(workspace: { branch: string; worktree: string } | null): void {
-    if (workspace === null || !this.git.exists(workspace.worktree)) {
+    if (workspace === null || !this.workspaces.exists(workspace.worktree)) {
       return;
     }
-    this.git.harvest(workspace.worktree, workspace.branch);
+    this.workspaces.harvest(workspace.worktree, workspace.branch);
   }
 
   stop(runner: Runner): void {

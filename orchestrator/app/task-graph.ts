@@ -1,8 +1,8 @@
 import type {
   ClaimArgs,
   CreatedTask,
-  Inbox,
-  Journal,
+  Reviews,
+  Transitions,
   Paths,
   Publisher,
   Tasks,
@@ -43,9 +43,9 @@ export class TaskGraph {
 
   constructor(
     private readonly tasks: Tasks,
-    private readonly git: Workspaces,
-    private readonly inbox: Inbox,
-    private readonly journal: Journal,
+    private readonly workspaces: Workspaces,
+    private readonly reviews: Reviews,
+    private readonly transitions: Transitions,
     private readonly publisher: Publisher,
     private readonly paths: Paths,
   ) {}
@@ -132,7 +132,7 @@ export class TaskGraph {
     const before = tasks.get(taskId);
     const result = this.tasks.apply(taskId, name, args);
     if (name === "submit" && isReviewState(result.from)) {
-      this.inbox.clearReviewFailures(taskId);
+      this.reviews.clearFailures(taskId);
     }
     const to = (result.to ?? before?.state ?? "NEW") as TaskState;
 
@@ -148,7 +148,7 @@ export class TaskGraph {
       this.paths.discard(taskId);
     }
 
-    this.journal.append({
+    this.transitions.append({
       task_id: taskId,
       transition: name,
       from: result.from,
@@ -160,12 +160,12 @@ export class TaskGraph {
   }
 
   feedback(taskId: TaskId, findings: string[], by: string): TransitionResult {
-    this.inbox.setFindings(taskId, findings);
+    this.reviews.setFindings(taskId, findings);
     const state = this.tasks.read(taskId)?.state;
     if (state !== undefined && isReviewState(state)) {
-      const failures = this.inbox.reviewFailures(taskId) + 1;
+      const failures = this.reviews.failures(taskId) + 1;
       if (failures >= REVIEW_FAILURE_LIMIT) {
-        this.inbox.clearReviewFailures(taskId);
+        this.reviews.clearFailures(taskId);
         return this.transition(
           taskId,
           "hold",
@@ -173,7 +173,7 @@ export class TaskGraph {
           by,
         );
       }
-      this.inbox.setReviewFailures(taskId, failures);
+      this.reviews.setFailures(taskId, failures);
     }
     return this.transition(taskId, "feedback", { findings }, by);
   }
@@ -184,9 +184,9 @@ export class TaskGraph {
       return;
     }
 
-    this.git.remove(workspace.worktree);
-    if (this.git.branchExists(workspace.branch)) {
-      this.git.deleteBranch(workspace.branch);
+    this.workspaces.remove(workspace.worktree);
+    if (this.workspaces.branchExists(workspace.branch)) {
+      this.workspaces.deleteBranch(workspace.branch);
     }
   }
 

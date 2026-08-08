@@ -3,7 +3,7 @@ import path from "node:path";
 import type {
   Agents,
   Checks,
-  Console as CommandChannel,
+  CommandChannel,
   Publisher,
   Workspaces,
 } from "../app/ports.ts";
@@ -27,7 +27,7 @@ import {
   Runtime,
   defaultAgentsPath,
   defaultTasksDir,
-  snapshot,
+  viewJson,
   writeAtomic,
 } from "../adapters/runtime.ts";
 import {
@@ -103,7 +103,7 @@ export function wire(options: WiringOptions): Server {
 
   const workspaces: Workspaces = {
     create: (branch, worktree, base) =>
-      git.addWorkspace(repo, branch, worktree, base),
+      git.createWorkspace(repo, branch, worktree, base),
     remove: (worktree) => git.removeWorkspace(worktree),
     exists: (worktree) => fs.existsSync(worktree),
     branchExists: (branch) => git.branchExists(repo, branch),
@@ -143,7 +143,7 @@ export function wire(options: WiringOptions): Server {
         sandbox(
           {
             cwd: spec.cwd,
-            writable: [runtime.taskDir(spec.taskId)],
+            writable: [runtime.taskRoot(spec.taskId)],
             readable: [repo, orchestratorDir],
             overlay: overlays(agentWrite(spec.slot)),
             oomScoreAdjust: AGENT_OOM_SCORE_ADJUST,
@@ -185,25 +185,25 @@ export function wire(options: WiringOptions): Server {
 
   const files = new TaskFiles(runtime);
 
-  const journal = new TransitionLog(runtime.transitionLog);
+  const transitions = new TransitionLog(runtime.transitionLog);
 
   const publisher: Publisher = {
     publish: (views) => {
       writeAtomic(
         runtime.slotsView,
-        snapshot(views.seq, "slots", views.slots, {
+        viewJson(views.seq, "slots", views.slots, {
           agents_file: views.agentsFile,
         }),
       );
       writeAtomic(
         runtime.checksView,
-        snapshot(views.seq, "checks", views.checks),
+        viewJson(views.seq, "checks", views.checks),
       );
-      writeAtomic(runtime.tasksView, snapshot(views.seq, "tasks", views.tasks));
-      writeAtomic(runtime.inboxView, snapshot(views.seq, "inbox", views.inbox));
+      writeAtomic(runtime.tasksView, viewJson(views.seq, "tasks", views.tasks));
+      writeAtomic(runtime.inboxView, viewJson(views.seq, "inbox", views.inbox));
       writeAtomic(
         runtime.queueView,
-        snapshot(views.seq, "queue", views.queue, {
+        viewJson(views.seq, "queue", views.queue, {
           scheduling: views.scheduling,
         }),
       );
@@ -242,7 +242,7 @@ export function wire(options: WiringOptions): Server {
     tasks,
     workspaces,
     files,
-    journal,
+    transitions,
     publisher,
     runtime,
   );
@@ -289,7 +289,7 @@ export function wire(options: WiringOptions): Server {
     land,
     recover,
     commands,
-    journal,
+    transitions,
     prompts,
     runtime,
     publisher,

@@ -1,4 +1,4 @@
-import type { Checks, Inbox, Prompts } from "./ports.ts";
+import type { Checks, Messages, Prompts } from "./ports.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
@@ -9,7 +9,7 @@ export class RunChecks {
   constructor(
     private readonly graph: TaskGraph,
     private readonly checks: Checks,
-    private readonly inbox: Inbox,
+    private readonly messages: Messages,
     private readonly prompts: Prompts,
     private readonly repo: string,
   ) {}
@@ -74,7 +74,7 @@ export class RunChecks {
       this.graph.transition(taskId, "pass", {}, "server");
       return;
     }
-    this.inbox.queue(
+    this.messages.queue(
       taskId,
       "WORK",
       this.prompts.fragment("check-failed", { failures }),

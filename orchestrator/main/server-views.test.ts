@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyTransition } from "../adapters/task-documents.ts";
 import { takeClaim } from "../adapters/task-documents.ts";
-import { snapshot, writeAtomic } from "../adapters/runtime.ts";
+import { viewJson, writeAtomic } from "../adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
@@ -891,7 +891,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const runtime = runtimeOf(fixture);
       writeAtomic(
         runtime.slotsView,
-        snapshot(1, "slots", [
+        viewJson(1, "slots", [
           {
             name: "pi-fake-fake-1",
             type: "pi",

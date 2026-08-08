@@ -9,6 +9,7 @@ import type { ResultCall } from "../domain/results.ts";
 import {
   type ClaimState,
   type Role,
+  type TaskState,
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
@@ -117,16 +118,19 @@ export interface Prompts {
   cachedFiles(): string[];
 }
 
-export interface Inbox {
-  queue(taskId: TaskId, state: ClaimState, entry: string): void;
+export interface Messages {
+  queue(taskId: TaskId, state: ClaimState, message: string): void;
   drain(taskId: TaskId, state: ClaimState): string;
   queued(taskId: TaskId, state: ClaimState): boolean;
+}
+
+export interface Reviews {
   findings(taskId: TaskId): string[];
   setFindings(taskId: TaskId, findings: string[]): void;
   clearFindings(taskId: TaskId): void;
-  reviewFailures(taskId: TaskId): number;
-  setReviewFailures(taskId: TaskId, failures: number): void;
-  clearReviewFailures(taskId: TaskId): void;
+  failures(taskId: TaskId): number;
+  setFailures(taskId: TaskId, failures: number): void;
+  clearFailures(taskId: TaskId): void;
 }
 
 export interface Assignments {
@@ -136,26 +140,20 @@ export interface Assignments {
   rotate(taskId: TaskId): void;
 }
 
-export interface JournalEntry {
+export interface TransitionEntry {
   seq: number;
   at: string;
   task_id: TaskId;
   transition: string;
-  from: string;
-  to: string;
+  from: TaskState;
+  to: TaskState;
   by: string;
 }
 
-export interface Journal {
+export interface Transitions {
   readonly cursor: number;
-  read(): JournalEntry[];
-  append(entry: {
-    task_id: TaskId;
-    transition: string;
-    from: string;
-    to: string;
-    by: string;
-  }): void;
+  read(): TransitionEntry[];
+  append(entry: Omit<TransitionEntry, "seq" | "at">): void;
 }
 
 export interface Views {
@@ -186,7 +184,7 @@ export interface Publisher {
   log(line: string): void;
 }
 
-export interface Console {
+export interface CommandChannel {
   take(): Command | null;
   watch(apply: (command: Command) => void): { close(): void };
 }
@@ -201,7 +199,7 @@ export interface Paths {
   readonly inboxView: string;
   readonly queueView: string;
   readonly consoleCommand: string;
-  taskDir(id: TaskId): string;
+  taskRoot(id: TaskId): string;
   worktree(id: TaskId): string;
   assignment(id: TaskId): string;
   history(id: TaskId): string;
@@ -210,7 +208,7 @@ export interface Paths {
   sessionDir(id: TaskId, role: Role): string;
   rpcLog(id: TaskId): string;
   checkLog(id: TaskId, index: number): string;
-  queueDir(id: TaskId): string;
+  messagesDir(id: TaskId): string;
   prepare(id: TaskId): void;
   discard(id: TaskId): void;
   log(line: string): void;

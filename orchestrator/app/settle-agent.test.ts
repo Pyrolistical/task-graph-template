@@ -4,7 +4,7 @@ import { SettleAgent } from "./settle-agent.ts";
 import { TaskGraph } from "./task-graph.ts";
 import {
   FakeAssignments,
-  FakeInbox,
+  FakeTaskFiles,
   FakeJournal,
   FakePrompts,
   FakePublisher,
@@ -27,7 +27,7 @@ function aRig(live = DISPATCHED) {
     claimed_pid: 4242,
   });
   const store = new FakeTasks(new Map<TaskId, TaskMeta>([[task.id, task]]));
-  const git = new FakeWorkspaces();
+  const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
   const paths = fakePaths();
   const assignments = new FakeAssignments();
@@ -35,8 +35,8 @@ function aRig(live = DISPATCHED) {
 
   const graph = new TaskGraph(
     store,
-    git,
-    new FakeInbox(),
+    workspaces,
+    new FakeTaskFiles(),
     new FakeJournal(),
     publisher,
     paths,
@@ -44,7 +44,7 @@ function aRig(live = DISPATCHED) {
   const prompted: string[] = [];
   const pool = new Pool(
     fakeAgents([aSlot()]),
-    git,
+    workspaces,
     paths,
     publisher,
     () => false,
@@ -53,10 +53,10 @@ function aRig(live = DISPATCHED) {
     graph,
     pool,
     assignments,
-    new FakeInbox(),
+    new FakeTaskFiles(),
     new FakePrompts(),
     publisher,
-    git,
+    workspaces,
     "master",
   );
 

@@ -51,7 +51,7 @@ export function writeAtomic(filePath: string, contents: string): void {
   fs.renameSync(temp, filePath);
 }
 
-export function snapshot(
+export function viewJson(
   seq: number,
   key: string,
   rows: unknown[],
@@ -172,48 +172,48 @@ export class Runtime {
     }
   }
 
-  taskDir(id: TaskId): string {
+  taskRoot(id: TaskId): string {
     return path.join(this.root, id);
   }
 
   assignment(id: TaskId): string {
-    return path.join(this.taskDir(id), "ASSIGNMENT.md");
+    return path.join(this.taskRoot(id), "ASSIGNMENT.md");
   }
 
   history(id: TaskId): string {
-    return path.join(this.taskDir(id), "history");
+    return path.join(this.taskRoot(id), "history");
   }
 
   findings(id: TaskId): string {
-    return path.join(this.taskDir(id), "findings.json");
+    return path.join(this.taskRoot(id), "findings.json");
   }
 
   reviewFailures(id: TaskId): string {
-    return path.join(this.taskDir(id), "review-failure-count");
+    return path.join(this.taskRoot(id), "review-failure-count");
   }
 
   worktree(id: TaskId): string {
-    return path.join(this.taskDir(id), "worktree");
+    return path.join(this.taskRoot(id), "worktree");
   }
 
   sessionDir(id: TaskId, role: Role): string {
-    return path.join(this.taskDir(id), "session", role);
+    return path.join(this.taskRoot(id), "session", role);
   }
 
   rpcLog(id: TaskId): string {
-    return path.join(this.taskDir(id), "agent-rpc.jsonl");
+    return path.join(this.taskRoot(id), "agent-rpc.jsonl");
   }
 
   checkLog(id: TaskId, index: number): string {
-    return path.join(this.taskDir(id), `check-${index}.log`);
+    return path.join(this.taskRoot(id), `check-${index}.log`);
   }
 
-  queueDir(id: TaskId): string {
-    return path.join(this.taskDir(id), "queue");
+  messagesDir(id: TaskId): string {
+    return path.join(this.taskRoot(id), "messages");
   }
 
-  queueFile(id: TaskId, state: ClaimState): string {
-    return path.join(this.queueDir(id), `${state}.md`);
+  messageFile(id: TaskId, state: ClaimState): string {
+    return path.join(this.messagesDir(id), `${state}.md`);
   }
 
   prepare(id: TaskId): void {
@@ -221,11 +221,11 @@ export class Runtime {
     for (const role of ALL_ROLES) {
       fs.mkdirSync(this.sessionDir(id, role), { recursive: true });
     }
-    fs.mkdirSync(this.queueDir(id), { recursive: true });
+    fs.mkdirSync(this.messagesDir(id), { recursive: true });
   }
 
   discard(id: TaskId): void {
-    fs.rmSync(this.taskDir(id), { recursive: true, force: true });
+    fs.rmSync(this.taskRoot(id), { recursive: true, force: true });
   }
 
   log(line: string, cap = SERVER_LOG_CAP_BYTES): void {
