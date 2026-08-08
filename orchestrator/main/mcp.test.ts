@@ -76,21 +76,17 @@ async function schedulingBecomes(client: Client, wanted: boolean) {
 
 describe("Feature: the tool surface the manager works through", () => {
   testInTempDirs(
-    "the manager gets one tool per judgement it can make, plus the views",
+    "the manager gets one tool per judgement it can make",
     async () => {
       // Given a server running over stdio against a project
       const fixture = makeFixture();
       const client = await connect(fixture);
 
-      // When the manager asks what it can do and what it can read
-      const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-      const resources = (await client.listResources()).resources
-        .map((r) => r.uri)
-        .sort();
-      const paths = await client.readResource({ uri: "orchestrator://paths" });
+      // When the manager asks what it can do
+      const tools = await client.listTools();
 
       // Then there is one tool for each judgement only a person can make
-      expect(tools).toEqual([
+      expect(tools.tools.map((t) => t.name).sort()).toEqual([
         "agent_abort",
         "disable_agent",
         "disable_scheduler",
@@ -106,8 +102,23 @@ describe("Feature: the tool surface the manager works through", () => {
         "task_write_body",
       ]);
 
-      // Then every view the console draws is readable as a resource
-      expect(resources).toEqual([
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "every view the console draws is readable as a resource",
+    async () => {
+      // Given a server running over stdio against a project
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+
+      // When the manager asks what it can read
+      const resources = await client.listResources();
+
+      // Then every view the console draws is there to be read
+      expect(resources.resources.map((r) => r.uri).sort()).toEqual([
         "orchestrator://agents",
         "orchestrator://checks",
         "orchestrator://error",
@@ -118,7 +129,22 @@ describe("Feature: the tool surface the manager works through", () => {
         "orchestrator://workspace_path",
       ]);
 
-      // Then the manager is told where the graph, the pool and the prompts are
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "the manager is told where the graph, the pool and the prompts are",
+    async () => {
+      // Given a server running over stdio against a project
+      const fixture = makeFixture();
+      const client = await connect(fixture);
+
+      // When the manager reads the paths resource
+      const paths = await client.readResource({ uri: "orchestrator://paths" });
+
+      // Then the graph, the pool and the prompts are each named in it
       const parsed = JSON.parse(
         (paths.contents as { text: string }[])[0]!.text,
       ) as Record<string, unknown>;

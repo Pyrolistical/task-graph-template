@@ -38,6 +38,10 @@ function issuesOf(meta: Record<string, unknown>): string[] {
   }
 }
 
+function allExited(procs: Bun.Subprocess[]): Promise<number[]> {
+  return Promise.all(procs.map((proc) => proc.exited));
+}
+
 describe("Feature: the id a task is known by", () => {
   testInTempDirs(
     "the first task of a project is written as the id 000001",
@@ -484,13 +488,15 @@ describe("Feature: reading and writing a task's fields", () => {
     const meta = baseMeta();
 
     // When the document is written
-    const keys = rebuildDocument(meta, "\n")
-      .split("\n")
-      .filter((line) => /^\w+:/.test(line))
-      .map((line) => line.split(":")[0]);
+    const document = rebuildDocument(meta, "\n");
 
-    // Then the order is the schema's, so a diff shows only what really changed
-    expect(keys).toEqual([
+    // Then the fields keep the schema's order, so a diff shows only real changes
+    expect(
+      document
+        .split("\n")
+        .filter((line) => /^\w+:/.test(line))
+        .map((line) => line.split(":")[0]),
+    ).toEqual([
       "id",
       "title",
       "state",
@@ -656,17 +662,46 @@ describe("Feature: creating a task", () => {
     expect(attempt).toThrow(/title is required/);
   });
 
-  testInTempDirs("ids are handed out in order and never repeat", () => {
+  testInTempDirs("the first task created takes the id 000001", () => {
     // Given an empty task directory
     const dir = makeTasksDir();
 
-    // When three tasks are created
-    const ids = ["a", "b", "c"].map(
-      (title) => createTask(dir, ORCHESTRATOR_DIR, title).id,
-    );
+    // When the first task is created
+    const first = createTask(dir, ORCHESTRATOR_DIR, "a");
 
-    // Then each takes the next id, and the counter is left ready for the next
-    expect(ids).toEqual(["000001", "000002", "000003"]);
+    // Then it takes the id 000001, and the counter reads two for the next one
+    expect(first.id).toBe("000001");
+    expect(
+      fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
+    ).toBe("2");
+  });
+
+  testInTempDirs("the second task created takes the id 000002", () => {
+    // Given a task directory holding the first task
+    const dir = makeTasksDir();
+    createTask(dir, ORCHESTRATOR_DIR, "a");
+
+    // When the second task is created
+    const second = createTask(dir, ORCHESTRATOR_DIR, "b");
+
+    // Then it takes the id 000002, and the counter reads three for the next one
+    expect(second.id).toBe("000002");
+    expect(
+      fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
+    ).toBe("3");
+  });
+
+  testInTempDirs("the third task created takes the id 000003", () => {
+    // Given a task directory holding the first two tasks
+    const dir = makeTasksDir();
+    createTask(dir, ORCHESTRATOR_DIR, "a");
+    createTask(dir, ORCHESTRATOR_DIR, "b");
+
+    // When the third task is created
+    const third = createTask(dir, ORCHESTRATOR_DIR, "c");
+
+    // Then it takes the id 000003, and the counter reads four for the next one
+    expect(third.id).toBe("000003");
     expect(
       fs.readFileSync(path.join(dir, "next-task-id"), "utf-8").trim(),
     ).toBe("4");
@@ -750,7 +785,7 @@ describe("Feature: creating a task", () => {
       );
 
       // When every one of them has finished
-      const codes = await Promise.all(procs.map((proc) => proc.exited));
+      const codes = await allExited(procs);
 
       // Then all of them succeeded, and each took its own id
       expect(codes.every((code) => code === 0)).toBe(true);

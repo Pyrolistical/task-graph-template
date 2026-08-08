@@ -405,27 +405,30 @@ describe("Feature: reading the views the server publishes", () => {
     ]);
   });
 
-  testInTempDirs("a pool of nothing but disabled agents is never hidden", () => {
-    // Given views where every agent in the pool has been turned off
-    const runtime = seed(tempDir("console-"));
-    writeAtomic(
-      runtime.agentsView,
-      snapshot(
-        1,
-        "agents",
-        SLOTS.map((slot) => idleRow(slot, false)),
-        { agents_file: AGENTS_FILE },
-      ),
-    );
+  testInTempDirs(
+    "a pool of nothing but disabled agents is never hidden",
+    () => {
+      // Given views where every agent in the pool has been turned off
+      const runtime = seed(tempDir("console-"));
+      writeAtomic(
+        runtime.agentsView,
+        snapshot(
+          1,
+          "agents",
+          SLOTS.map((slot) => idleRow(slot, false)),
+          { agents_file: AGENTS_FILE },
+        ),
+      );
 
-    // When a frame is drawn with the disabled agents collapsed away
-    const { lines, hits } = frame(runtime, new Sessions(), layoutOf(), true);
+      // When a frame is drawn with the disabled agents collapsed away
+      const { lines, hits } = frame(runtime, new Sessions(), layoutOf(), true);
 
-    // Then every pane is drawn, since collapsing them would leave nothing to see
-    expect(hits.filter((hit) => hit.command.command === "agent")).toHaveLength(
-      SLOTS.length,
-    );
-    expect(lines.join("\n")).not.toContain(SHOW[0]!);
-    expect(lines.join("\n")).not.toContain(HIDE.trim());
-  });
+      // Then every pane is drawn, since collapsing them would leave nothing to see
+      expect(
+        hits.filter((hit) => hit.command.command === "agent"),
+      ).toHaveLength(SLOTS.length);
+      expect(lines.join("\n")).not.toContain(SHOW[0]!);
+      expect(lines.join("\n")).not.toContain(HIDE.trim());
+    },
+  );
 });

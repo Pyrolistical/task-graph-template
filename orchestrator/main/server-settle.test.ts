@@ -809,8 +809,8 @@ describe("Feature: an agent that stops short of finishing", () => {
       const sessionDir = server.runtime.sessionDir(id, "worker");
       expect(promptsOverlapping(sessionDir)).toEqual([]);
       expect(promptsTo(sessionDir)).toHaveLength(
-      ISSUES["missing-result"].attempts + 1,
-    );
+        ISSUES["missing-result"].attempts + 1,
+      );
 
       server.shutdown();
     },

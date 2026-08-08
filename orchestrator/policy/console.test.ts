@@ -1078,32 +1078,72 @@ describe("Feature: drawing the whole screen", () => {
     expect(attempt).toThrow(/empty/);
   });
 
-  test("the width of a pane leaves room for the dividers between them", () => {
-    // Given a terminal a hundred columns wide, split one, two and three ways
-    const counts = [1, 2, 3];
+  test("a single pane takes the whole terminal", () => {
+    // Given a terminal a hundred columns wide, split one way
+    const count = 1;
 
-    // When each pane's width is worked out
-    const widths = counts.map((count) => paneWidth(100, count));
+    // When the pane's width is worked out
+    const width = paneWidth(100, count);
 
-    // Then the columns the dividers take are subtracted before the split
-    expect(widths).toEqual([100, 49, 32]);
+    // Then no dividers are needed and the pane takes every column
+    expect(width).toBe(100);
+  });
+
+  test("two panes each leave one column for a divider", () => {
+    // Given a terminal a hundred columns wide, split two ways
+    const count = 2;
+
+    // When the pane's width is worked out
+    const width = paneWidth(100, count);
+
+    // Then the divider's column is subtracted before the split
+    expect(width).toBe(49);
+  });
+
+  test("three panes leave two columns for the dividers between them", () => {
+    // Given a terminal a hundred columns wide, split three ways
+    const count = 3;
+
+    // When the pane's width is worked out
+    const width = paneWidth(100, count);
+
+    // Then both dividers' columns are subtracted before the split
+    expect(width).toBe(32);
   });
 });
 
 describe("Feature: the switches on a pane header", () => {
-  test("a switch shows its state by which side the knob sits on", () => {
-    // Given a switch that is on, one that is off, and one with a label
-    const switches = [
-      toggle(true, ""),
-      toggle(false, ""),
-      toggle(true, "scheduler"),
-    ];
+  test("a switch that is on shows its knob on the right", () => {
+    // Given a switch that is on, with no label
+    const on = toggle(true, "");
 
-    // When each is drawn for a console that can click it
-    const drawn = switches.map(plain);
+    // When it is drawn for a console that can click it
+    const drawn = plain(on);
 
-    // Then the knob's side says the state, and the label follows it
-    expect(drawn).toEqual([SWITCH_ON, SWITCH_OFF, `${SWITCH_ON} scheduler`]);
+    // Then the knob sits on the on side
+    expect(drawn).toBe(SWITCH_ON);
+  });
+
+  test("a switch that is off shows its knob on the left", () => {
+    // Given a switch that is off, with no label
+    const off = toggle(false, "");
+
+    // When it is drawn for a console that can click it
+    const drawn = plain(off);
+
+    // Then the knob sits on the off side
+    expect(drawn).toBe(SWITCH_OFF);
+  });
+
+  test("a labeled switch carries its label after the knob", () => {
+    // Given a switch that is on, labeled scheduler
+    const on = toggle(true, "scheduler");
+
+    // When it is drawn for a console that can click it
+    const drawn = plain(on);
+
+    // Then the label follows the knob on the same line
+    expect(drawn).toBe(`${SWITCH_ON} scheduler`);
   });
 
   test("the pane header leads with the agent's switch", () => {

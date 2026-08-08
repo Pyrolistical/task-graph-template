@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, setSystemTime } from "bun:test";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { describeActivity } from "../domain/activity.ts";
+import { type Activity, describeActivity } from "../domain/activity.ts";
 import {
   JsonlSplitter,
   LOOP_LIMIT,
@@ -12,8 +12,8 @@ import {
 import { PiProcess } from "./pi-process.ts";
 import type { Sample } from "../domain/rates.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
+import { templateOf } from "../testing/orchestrator-jig.ts";
 import { Prompts } from "./prompts.ts";
-import { AGENT_STATES } from "../domain/state-machine.ts";
 
 beforeAll(() => {
   setSystemTime(new Date("2026-01-01").getTime());
@@ -497,41 +497,77 @@ describe("Feature: what an agent is doing right now", () => {
     },
   );
 
-  testInTempDirs(
-    "every kind of activity has a line the console can draw",
-    () => {
-      // Given each kind of activity an agent can be in
-      const activities = [
-        {
-          kind: "tool-call",
-          tool: "bash",
-          target: "bun test",
-          started_at: Date.now(),
-        },
-        {
-          kind: "tool-call",
-          tool: "bash",
-          target: "bash",
-          started_at: Date.now(),
-        },
-        { kind: "thinking", started_at: Date.now() },
-        { kind: "compacting", reason: "overflow", started_at: Date.now() },
-        { kind: "none" },
-      ] as const;
+  testInTempDirs("a tool call with a target names both for the console", () => {
+    // Given an agent inside a bash call on a test run
+    const activity: Activity = {
+      kind: "tool-call",
+      tool: "bash",
+      target: "bun test",
+      started_at: Date.now(),
+    };
 
-      // When each is written for the console
-      const written = activities.map(describeActivity);
+    // When the activity is written for the console
+    const written = describeActivity(activity);
 
-      // Then each reads as what it is, and an idle agent shows nothing
-      expect(written).toEqual([
-        "tool: bash — bun test (0s)",
-        "tool: bash (0s)",
-        "thinking (0s)",
-        "compacting (overflow) (0s)",
-        "",
-      ]);
-    },
-  );
+    // Then the tool and its target are both named
+    expect(written).toBe("tool: bash — bun test (0s)");
+  });
+
+  testInTempDirs("a tool call with no target names only the tool", () => {
+    // Given an agent inside a bash call with nothing to point at
+    const activity: Activity = {
+      kind: "tool-call",
+      tool: "bash",
+      target: "bash",
+      started_at: Date.now(),
+    };
+
+    // When the activity is written for the console
+    const written = describeActivity(activity);
+
+    // Then the tool alone is named, since the target was nothing
+    expect(written).toBe("tool: bash (0s)");
+  });
+
+  testInTempDirs("an agent that is thinking is shown thinking", () => {
+    // Given an agent thinking through its next step
+    const activity: Activity = {
+      kind: "thinking",
+      started_at: Date.now(),
+    };
+
+    // When the activity is written for the console
+    const written = describeActivity(activity);
+
+    // Then the console reads that it is thinking
+    expect(written).toBe("thinking (0s)");
+  });
+
+  testInTempDirs("an agent that is compacting is shown doing so", () => {
+    // Given an agent compacting a context that overflowed
+    const activity: Activity = {
+      kind: "compacting",
+      reason: "overflow",
+      started_at: Date.now(),
+    };
+
+    // When the activity is written for the console
+    const written = describeActivity(activity);
+
+    // Then the console reads that it is compacting, and why
+    expect(written).toBe("compacting (overflow) (0s)");
+  });
+
+  testInTempDirs("an idle agent shows no activity at all", () => {
+    // Given an agent with nothing going on
+    const activity: Activity = { kind: "none" };
+
+    // When the activity is written for the console
+    const written = describeActivity(activity);
+
+    // Then the line is empty, so the pane draws nothing for it
+    expect(written).toBe("");
+  });
 });
 
 describe("Feature: noticing an agent that has stopped making progress", () => {
@@ -634,18 +670,75 @@ describe("Feature: how an agent is spawned", () => {
     },
   );
 
-  testInTempDirs(
-    "every state has its own prompt, and none of them is empty",
-    () => {
-      // Given every state an agent is dispatched into
-      const prompts = new Prompts(ORCHESTRATOR_DIR);
+  testInTempDirs("a designer is prompted with words of its own", () => {
+    // Given the DESIGN state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
 
-      // When the fragment each is prompted with is read
-      const texts = AGENT_STATES.map((state) => prompts.fragment(state));
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("DESIGN");
 
-      // Then no two states share a prompt, and none of them says nothing
-      expect(new Set(texts).size).toBe(AGENT_STATES.length);
-      expect(texts.filter((text) => text.trim() === "")).toEqual([]);
-    },
-  );
+    // Then it is the shipped design prompt, and it says something
+    expect(text).toBe(templateOf("prompts/DESIGN.md"));
+    expect(text.trim()).not.toBe("");
+  });
+
+  testInTempDirs("a design reviewer is prompted with words of its own", () => {
+    // Given the DESIGN_REVIEW state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("DESIGN_REVIEW");
+
+    // Then it is the shipped review prompt, and it says something
+    expect(text).toBe(templateOf("prompts/DESIGN_REVIEW.md"));
+    expect(text.trim()).not.toBe("");
+  });
+
+  testInTempDirs("a planner is prompted with words of its own", () => {
+    // Given the PLAN state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("PLAN");
+
+    // Then it is the shipped plan prompt, and it says something
+    expect(text).toBe(templateOf("prompts/PLAN.md"));
+    expect(text.trim()).not.toBe("");
+  });
+
+  testInTempDirs("a plan reviewer is prompted with words of its own", () => {
+    // Given the PLAN_REVIEW state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("PLAN_REVIEW");
+
+    // Then it is the shipped review prompt, and it says something
+    expect(text).toBe(templateOf("prompts/PLAN_REVIEW.md"));
+    expect(text.trim()).not.toBe("");
+  });
+
+  testInTempDirs("a worker is prompted with words of its own", () => {
+    // Given the WORK state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("WORK");
+
+    // Then it is the shipped work prompt, and it says something
+    expect(text).toBe(templateOf("prompts/WORK.md"));
+    expect(text.trim()).not.toBe("");
+  });
+
+  testInTempDirs("a work reviewer is prompted with words of its own", () => {
+    // Given the WORK_REVIEW state an agent is dispatched into
+    const prompts = new Prompts(ORCHESTRATOR_DIR);
+
+    // When the fragment it is prompted with is read
+    const text = prompts.fragment("WORK_REVIEW");
+
+    // Then it is the shipped review prompt, and it says something
+    expect(text).toBe(templateOf("prompts/WORK_REVIEW.md"));
+    expect(text.trim()).not.toBe("");
+  });
 });

@@ -5,7 +5,6 @@ import path from "node:path";
 import { createTask, readTaskFile } from "./task-store.ts";
 import { parseTaskMeta } from "../domain/task.ts";
 import {
-  TRANSITION_NAMES,
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
@@ -641,23 +640,88 @@ describe("Feature: closing a task", () => {
     expect(metaOf(dir, main).depends_on).toEqual([other]);
   });
 
-  testInTempDirs("a closed task accepts no transition at all", () => {
+  testInTempDirs("a closed task will not take a submit", () => {
     // Given a task that has been closed
     const { dir, id } = toManagerReview();
     run(dir, id, "submit");
 
-    // When every transition the machine has is applied to it
-    const refused = TRANSITION_NAMES.map((name) => {
-      try {
-        apply(dir, id, name, {});
-        return "applied";
-      } catch (err) {
-        return (err as Error).message;
-      }
-    });
+    // When a submit is applied to it
+    const attempt = () => apply(dir, id, "submit", {});
 
-    // Then each is refused, because a closed task is finished with
-    expect(refused.filter((one) => !/is CLOSED/.test(one))).toEqual([]);
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take a pass", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When a pass is applied to it
+    const attempt = () => apply(dir, id, "pass", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take a fail", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When a fail is applied to it
+    const attempt = () => apply(dir, id, "fail", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take a hold", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When a hold is applied to it
+    const attempt = () => apply(dir, id, "hold", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take a resume", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When a resume is applied to it
+    const attempt = () => apply(dir, id, "resume", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take a feedback", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When a feedback is applied to it
+    const attempt = () => apply(dir, id, "feedback", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
+  });
+
+  testInTempDirs("a closed task will not take an abort", () => {
+    // Given a task that has been closed
+    const { dir, id } = toManagerReview();
+    run(dir, id, "submit");
+
+    // When an abort is applied to it
+    const attempt = () => apply(dir, id, "abort", {});
+
+    // Then it is refused, because a closed task is finished with
+    expect(attempt).toThrow(/is CLOSED/);
   });
 });
 

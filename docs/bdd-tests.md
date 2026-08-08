@@ -42,4 +42,3 @@ describe("Feature: Account withdrawal", () => {
   });
 });
 ```
-

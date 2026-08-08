@@ -50,14 +50,14 @@ describe("Feature: where a project's runtime state lives", () => {
   });
 
   testInTempDirs("two clones of one project never share a runtime", () => {
-    // Given the same project checked out in two places
-    const clones = ["/a/project", "/b/project"];
+    // Given the same project checked out at a different path
+    const clone = "/b/project";
 
-    // When the runtime key of each is worked out
-    const keys = clones.map(repoKey);
+    // When the runtime key for it is worked out
+    const key = repoKey(clone);
 
-    // Then the keys differ, so two servers never write over each other
-    expect(keys[0]).not.toBe(keys[1]);
+    // Then it is the clone's own flattened path, never the other checkout's
+    expect(key).toBe("-b-project");
   });
 
   testInTempDirs("every path a task needs hangs off its own directory", () => {

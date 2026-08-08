@@ -4,17 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { ISSUES } from "../domain/issues.ts";
 import { Prompts } from "./prompts.ts";
-import { RESULT_TOOLS, resultFromCall } from "../domain/results.ts";
+import { resultFromCall } from "../domain/results.ts";
 import { render } from "../domain/template.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { templateOf } from "../testing/orchestrator-jig.ts";
-import {
-  type ClaimState,
-  AGENT_STATES,
-  REVIEW_STATES,
-  STAGE_OF,
-} from "../domain/state-machine.ts";
+import { type ClaimState, STAGE_OF } from "../domain/state-machine.ts";
 
 interface Schema {
   properties: Record<string, unknown>;
@@ -49,6 +44,18 @@ async function toolsOf(state: ClaimState): Promise<Map<string, Tool>> {
 
 function textOf(result: ToolResult): string {
   return result.content[0]!.text;
+}
+
+async function submitOf(state: ClaimState) {
+  const tools = await toolsOf(state);
+  const submit = tools.get("submit")!.parameters;
+  return {
+    tools: [...tools.keys()].sort(),
+    blocked: tools.get("blocked")!.parameters.required,
+    fields: Object.keys(submit.properties),
+    required: submit.required ?? [],
+    closed: submit.additionalProperties,
+  };
 }
 
 function overrides(files: Record<string, string>): string {
@@ -231,22 +238,72 @@ describe("Feature: the issues an agent is sent back for", () => {
     expect(attempts).toBe(1);
   });
 
-  testInTempDirs("an agent that broke a rule is nudged four times", () => {
-    // Given the issues that mean the agent broke a rule of the pipeline
-    const names = [
-      "missing-todos",
-      "missing-notes",
-      "modified-assignment",
-      "uncommitted",
-      "modified-worktree",
-    ] as const;
+  testInTempDirs(
+    "an agent that left its todos missing is nudged four times",
+    () => {
+      // Given the issue raised when an agent submits without a todo list
+      const missing = ISSUES["missing-todos"];
 
-    // When each budget of retries is read
-    const attempts = names.map((name) => ISSUES[name].attempts);
+      // When its budget of retries is read
+      const attempts = missing.attempts;
 
-    // Then each is nudged the same four times before the task is held
-    expect(attempts).toEqual([4, 4, 4, 4, 4]);
+      // Then it is nudged four times before the task is held
+      expect(attempts).toBe(4);
+    },
+  );
+
+  testInTempDirs(
+    "an agent that left its notes missing is nudged four times",
+    () => {
+      // Given the issue raised when an agent submits without notes
+      const missing = ISSUES["missing-notes"];
+
+      // When its budget of retries is read
+      const attempts = missing.attempts;
+
+      // Then it is nudged four times before the task is held
+      expect(attempts).toBe(4);
+    },
+  );
+
+  testInTempDirs(
+    "an agent that modified its assignment is nudged four times",
+    () => {
+      // Given the issue raised when an agent rewrites its own assignment
+      const modified = ISSUES["modified-assignment"];
+
+      // When its budget of retries is read
+      const attempts = modified.attempts;
+
+      // Then it is nudged four times before the task is held
+      expect(attempts).toBe(4);
+    },
+  );
+
+  testInTempDirs("an agent that did not commit is nudged four times", () => {
+    // Given the issue raised when an agent submits without committing
+    const uncommitted = ISSUES.uncommitted;
+
+    // When its budget of retries is read
+    const attempts = uncommitted.attempts;
+
+    // Then it is nudged four times before the task is held
+    expect(attempts).toBe(4);
   });
+
+  testInTempDirs(
+    "an agent that changed the worktree is nudged four times",
+    () => {
+      // Given the issue raised when an agent writes outside its branch
+      const modified = ISSUES["modified-worktree"];
+
+      // When its budget of retries is read
+      const attempts = modified.attempts;
+
+      // Then it is nudged four times before the task is held
+      expect(attempts).toBe(4);
+    },
+  );
 
   testInTempDirs("a missing result is nudged the longest", () => {
     // Given the issue raised when an agent settles without a result tool call
@@ -373,127 +430,462 @@ describe("Feature: what an agent's result tool call means", () => {
     },
   );
 
-  testInTempDirs("a review submit carries the findings it was given", () => {
-    // Given the states an agent reviews in
-    const states = REVIEW_STATES;
+  testInTempDirs(
+    "a design review submit carries the findings it was given",
+    () => {
+      // Given a design reviewer that found one problem
+      const state = "DESIGN_REVIEW";
 
-    // When each submits a review that found one problem
-    const results = states.map((state) =>
-      resultFromCall(state, {
+      // When it submits a review carrying that finding
+      const result = resultFromCall(state, {
         tool: "submit",
         args: { findings: ["the null case is untested"] },
-      }),
-    );
+      });
 
-    // Then every one of them comes back carrying that finding
-    expect(results).toEqual(
-      states.map(() => ({
+      // Then the finding comes back on the result
+      expect(result).toEqual({
         type: "submit",
         findings: ["the null case is untested"],
-      })),
-    );
-  });
-
-  testInTempDirs("an agent in any state can report itself blocked", () => {
-    // Given every state an agent runs in
-    const states = AGENT_STATES;
-
-    // When each calls the blocked tool
-    const results = states.map((state) =>
-      resultFromCall(state, {
-        tool: "blocked",
-        args: { message: "the box is down" },
-      }),
-    );
-
-    // Then each reads as blocked, carrying what the agent said
-    expect(results).toEqual(
-      states.map(() => ({ type: "blocked", message: "the box is down" })),
-    );
-  });
-
-  testInTempDirs("every state loads its own extension of result tools", () => {
-    // Given every state an agent runs in
-    const states = AGENT_STATES;
-
-    // When the extension each is spawned with is resolved
-    const files = states.map((state) => STAGE_OF[state].tools);
-
-    // Then no two states share one, and every file it names is on disk
-    expect(new Set(files).size).toBe(states.length);
-    expect(
-      files.filter(
-        (file) =>
-          !fs.existsSync(
-            path.join(ORCHESTRATOR_DIR, `result-tools-${file}.ts`),
-          ),
-      ),
-    ).toEqual([]);
-  });
-
-  testInTempDirs(
-    "each state's submit tool accepts exactly the fields its stage produces",
-    async () => {
-      // Given the fields each stage's submit is meant to carry
-      const shapes: Record<string, string[]> = {
-        DESIGN: [],
-        PLAN: [],
-        WORK: [],
-        DESIGN_REVIEW: ["findings"],
-        PLAN_REVIEW: ["findings"],
-        WORK_REVIEW: ["findings"],
-      };
-
-      // When the extension of each state is loaded and its tools read
-      const declared = [];
-      for (const state of AGENT_STATES) {
-        const tools = await toolsOf(state);
-        const submit = tools.get("submit")!.parameters;
-        declared.push({
-          state,
-          tools: [...tools.keys()].sort(),
-          blocked: tools.get("blocked")!.parameters.required,
-          fields: Object.keys(submit.properties),
-          required: submit.required ?? [],
-          closed: submit.additionalProperties,
-        });
-      }
-
-      // Then each state offers both result tools, and its submit is closed
-      expect(declared).toEqual(
-        AGENT_STATES.map((state) => ({
-          state,
-          tools: [...RESULT_TOOLS].sort(),
-          blocked: ["message"],
-          fields: shapes[state]!,
-          required: shapes[state]!,
-          closed: false,
-        })),
-      );
+      });
     },
   );
 
   testInTempDirs(
-    "every result tool ends the turn it is called in",
+    "a plan review submit carries the findings it was given",
+    () => {
+      // Given a plan reviewer that found one problem
+      const state = "PLAN_REVIEW";
+
+      // When it submits a review carrying that finding
+      const result = resultFromCall(state, {
+        tool: "submit",
+        args: { findings: ["the null case is untested"] },
+      });
+
+      // Then the finding comes back on the result
+      expect(result).toEqual({
+        type: "submit",
+        findings: ["the null case is untested"],
+      });
+    },
+  );
+
+  testInTempDirs(
+    "a work review submit carries the findings it was given",
+    () => {
+      // Given a work reviewer that found one problem
+      const state = "WORK_REVIEW";
+
+      // When it submits a review carrying that finding
+      const result = resultFromCall(state, {
+        tool: "submit",
+        args: { findings: ["the null case is untested"] },
+      });
+
+      // Then the finding comes back on the result
+      expect(result).toEqual({
+        type: "submit",
+        findings: ["the null case is untested"],
+      });
+    },
+  );
+
+  testInTempDirs("a designer that is stuck can report itself blocked", () => {
+    // Given a designer that cannot get past the thing in its way
+    const state = "DESIGN";
+
+    // When it calls the blocked tool
+    const result = resultFromCall(state, {
+      tool: "blocked",
+      args: { message: "the box is down" },
+    });
+
+    // Then it reads as blocked, carrying what the agent said
+    expect(result).toEqual({ type: "blocked", message: "the box is down" });
+  });
+
+  testInTempDirs(
+    "a design reviewer that is stuck can report itself blocked",
+    () => {
+      // Given a design reviewer that cannot get past the thing in its way
+      const state = "DESIGN_REVIEW";
+
+      // When it calls the blocked tool
+      const result = resultFromCall(state, {
+        tool: "blocked",
+        args: { message: "the box is down" },
+      });
+
+      // Then it reads as blocked, carrying what the agent said
+      expect(result).toEqual({ type: "blocked", message: "the box is down" });
+    },
+  );
+
+  testInTempDirs("a planner that is stuck can report itself blocked", () => {
+    // Given a planner that cannot get past the thing in its way
+    const state = "PLAN";
+
+    // When it calls the blocked tool
+    const result = resultFromCall(state, {
+      tool: "blocked",
+      args: { message: "the box is down" },
+    });
+
+    // Then it reads as blocked, carrying what the agent said
+    expect(result).toEqual({ type: "blocked", message: "the box is down" });
+  });
+
+  testInTempDirs(
+    "a plan reviewer that is stuck can report itself blocked",
+    () => {
+      // Given a plan reviewer that cannot get past the thing in its way
+      const state = "PLAN_REVIEW";
+
+      // When it calls the blocked tool
+      const result = resultFromCall(state, {
+        tool: "blocked",
+        args: { message: "the box is down" },
+      });
+
+      // Then it reads as blocked, carrying what the agent said
+      expect(result).toEqual({ type: "blocked", message: "the box is down" });
+    },
+  );
+
+  testInTempDirs("a worker that is stuck can report itself blocked", () => {
+    // Given a worker that cannot get past the thing in its way
+    const state = "WORK";
+
+    // When it calls the blocked tool
+    const result = resultFromCall(state, {
+      tool: "blocked",
+      args: { message: "the box is down" },
+    });
+
+    // Then it reads as blocked, carrying what the agent said
+    expect(result).toEqual({ type: "blocked", message: "the box is down" });
+  });
+
+  testInTempDirs(
+    "a work reviewer that is stuck can report itself blocked",
+    () => {
+      // Given a work reviewer that cannot get past the thing in its way
+      const state = "WORK_REVIEW";
+
+      // When it calls the blocked tool
+      const result = resultFromCall(state, {
+        tool: "blocked",
+        args: { message: "the box is down" },
+      });
+
+      // Then it reads as blocked, carrying what the agent said
+      expect(result).toEqual({ type: "blocked", message: "the box is down" });
+    },
+  );
+
+  testInTempDirs(
+    "a designer is loaded with the extension its stage names",
+    () => {
+      // Given the DESIGN stage of an agent
+      const tools = STAGE_OF.DESIGN.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the designer extension, and it is there to load
+      expect(tools).toBe("designer");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a design reviewer is loaded with the extension its stage names",
+    () => {
+      // Given the DESIGN_REVIEW stage of an agent
+      const tools = STAGE_OF.DESIGN_REVIEW.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the review extension, and it is there to load
+      expect(tools).toBe("design-reviewer");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a planner is loaded with the extension its stage names",
+    () => {
+      // Given the PLAN stage of an agent
+      const tools = STAGE_OF.PLAN.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the planner extension, and it is there to load
+      expect(tools).toBe("planner");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a plan reviewer is loaded with the extension its stage names",
+    () => {
+      // Given the PLAN_REVIEW stage of an agent
+      const tools = STAGE_OF.PLAN_REVIEW.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the review extension, and it is there to load
+      expect(tools).toBe("plan-reviewer");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a worker is loaded with the extension its stage names",
+    () => {
+      // Given the WORK stage of an agent
+      const tools = STAGE_OF.WORK.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the worker extension, and it is there to load
+      expect(tools).toBe("worker");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a work reviewer is loaded with the extension its stage names",
+    () => {
+      // Given the WORK_REVIEW stage of an agent
+      const tools = STAGE_OF.WORK_REVIEW.tools;
+
+      // When the extension file it names is looked for on disk
+      const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
+
+      // Then it is the review extension, and it is there to load
+      expect(tools).toBe("work-reviewer");
+      expect(fs.existsSync(file)).toBe(true);
+    },
+  );
+
+  testInTempDirs(
+    "a designer's submit tool carries nothing beyond the submit",
     async () => {
-      // Given every result tool of every state an agent runs in
-      const called = [];
-      for (const state of AGENT_STATES) {
-        const tools = await toolsOf(state);
+      // Given a designer, whose stage produces no findings
+      const state = "DESIGN";
 
-        // When each is called with arguments its state accepts
-        called.push(await tools.get("submit")!.execute("id", { findings: [] }));
-        called.push(
-          await tools
-            .get("blocked")!
-            .execute("id", { message: "the box is down" }),
-        );
-      }
+      // When the extension it is spawned with is loaded and its submit read
+      const declared = await submitOf(state);
 
-      // Then not one of them leaves the agent a turn to carry on in
-      expect(called.map((result) => result.terminate)).toEqual(
-        called.map(() => true),
-      );
+      // Then it offers both result tools, and its submit carries no fields
+      expect(declared.tools).toEqual(["blocked", "submit"]);
+      expect(declared.blocked).toEqual(["message"]);
+      expect(declared.fields).toEqual([]);
+      expect(declared.required).toEqual([]);
+      expect(declared.closed).toBe(false);
+    },
+  );
+
+  testInTempDirs(
+    "a design reviewer's submit tool carries findings",
+    async () => {
+      // Given a design reviewer, whose stage reviews the design
+      const state = "DESIGN_REVIEW";
+
+      // When the extension it is spawned with is loaded and its submit read
+      const declared = await submitOf(state);
+
+      // Then it offers both result tools, and its submit carries findings
+      expect(declared.tools).toEqual(["blocked", "submit"]);
+      expect(declared.blocked).toEqual(["message"]);
+      expect(declared.fields).toEqual(["findings"]);
+      expect(declared.required).toEqual(["findings"]);
+      expect(declared.closed).toBe(false);
+    },
+  );
+
+  testInTempDirs(
+    "a planner's submit tool carries nothing beyond the submit",
+    async () => {
+      // Given a planner, whose stage produces no findings
+      const state = "PLAN";
+
+      // When the extension it is spawned with is loaded and its submit read
+      const declared = await submitOf(state);
+
+      // Then it offers both result tools, and its submit carries no fields
+      expect(declared.tools).toEqual(["blocked", "submit"]);
+      expect(declared.blocked).toEqual(["message"]);
+      expect(declared.fields).toEqual([]);
+      expect(declared.required).toEqual([]);
+      expect(declared.closed).toBe(false);
+    },
+  );
+
+  testInTempDirs("a plan reviewer's submit tool carries findings", async () => {
+    // Given a plan reviewer, whose stage reviews the plan
+    const state = "PLAN_REVIEW";
+
+    // When the extension it is spawned with is loaded and its submit read
+    const declared = await submitOf(state);
+
+    // Then it offers both result tools, and its submit carries findings
+    expect(declared.tools).toEqual(["blocked", "submit"]);
+    expect(declared.blocked).toEqual(["message"]);
+    expect(declared.fields).toEqual(["findings"]);
+    expect(declared.required).toEqual(["findings"]);
+    expect(declared.closed).toBe(false);
+  });
+
+  testInTempDirs(
+    "a worker's submit tool carries nothing beyond the submit",
+    async () => {
+      // Given a worker, whose stage produces no findings
+      const state = "WORK";
+
+      // When the extension it is spawned with is loaded and its submit read
+      const declared = await submitOf(state);
+
+      // Then it offers both result tools, and its submit carries no fields
+      expect(declared.tools).toEqual(["blocked", "submit"]);
+      expect(declared.blocked).toEqual(["message"]);
+      expect(declared.fields).toEqual([]);
+      expect(declared.required).toEqual([]);
+      expect(declared.closed).toBe(false);
+    },
+  );
+
+  testInTempDirs("a work reviewer's submit tool carries findings", async () => {
+    // Given a work reviewer, whose stage reviews the work
+    const state = "WORK_REVIEW";
+
+    // When the extension it is spawned with is loaded and its submit read
+    const declared = await submitOf(state);
+
+    // Then it offers both result tools, and its submit carries findings
+    expect(declared.tools).toEqual(["blocked", "submit"]);
+    expect(declared.blocked).toEqual(["message"]);
+    expect(declared.fields).toEqual(["findings"]);
+    expect(declared.required).toEqual(["findings"]);
+    expect(declared.closed).toBe(false);
+  });
+
+  testInTempDirs(
+    "a designer's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a designer is spawned with
+      const tools = await toolsOf("DESIGN");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
+    },
+  );
+
+  testInTempDirs(
+    "a design reviewer's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a design reviewer is spawned with
+      const tools = await toolsOf("DESIGN_REVIEW");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
+    },
+  );
+
+  testInTempDirs(
+    "a planner's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a planner is spawned with
+      const tools = await toolsOf("PLAN");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
+    },
+  );
+
+  testInTempDirs(
+    "a plan reviewer's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a plan reviewer is spawned with
+      const tools = await toolsOf("PLAN_REVIEW");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
+    },
+  );
+
+  testInTempDirs(
+    "a worker's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a worker is spawned with
+      const tools = await toolsOf("WORK");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
+    },
+  );
+
+  testInTempDirs(
+    "a work reviewer's result tools end the turn they are called in",
+    async () => {
+      // Given the result tools a work reviewer is spawned with
+      const tools = await toolsOf("WORK_REVIEW");
+
+      // When each of them is called with arguments its stage accepts
+      const ended = [
+        await tools.get("submit")!.execute("id", { findings: [] }),
+        await tools
+          .get("blocked")!
+          .execute("id", { message: "the box is down" }),
+      ];
+
+      // Then neither leaves the agent a turn to carry on in
+      expect(ended.map((result) => result.terminate)).toEqual([true, true]);
     },
   );
 

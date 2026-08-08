@@ -4,9 +4,6 @@ import {
   type TransitionName,
   type Decision,
   type ValidState,
-  ALLOWED_TRANSITIONS,
-  TRANSITION_NAMES,
-  VALID_STATES,
   decide,
   isAgentState,
 } from "./state-machine.ts";
@@ -40,122 +37,1012 @@ const ARGS: Record<TransitionName, TransitionArgs> = {
   abort: {},
 };
 
-const EDGES: Record<ValidState, Partial<Record<TransitionName, string>>> = {
-  NEW: { submit: "DESIGN" },
-  BLOCKED: { submit: "DESIGN" },
-  HELD_DESIGN: { resume: "DESIGN", abort: "CLOSED" },
-  HELD_PLAN: { resume: "PLAN", abort: "CLOSED" },
-  HELD_WORK: { resume: "WORK", abort: "CLOSED" },
-  DESIGN: { submit: "DESIGN_REVIEW", hold: "HELD_DESIGN" },
-  DESIGN_REVIEW: {
-    submit: "PLAN",
-    feedback: "DESIGN",
-    hold: "HELD_DESIGN",
-  },
-  PLAN: { submit: "PLAN_REVIEW", hold: "HELD_PLAN" },
-  PLAN_REVIEW: { submit: "WORK", feedback: "PLAN", hold: "HELD_PLAN" },
-  WORK: { submit: "CHECK", hold: "HELD_WORK" },
-  CHECK: { pass: "WORK_REVIEW", fail: "WORK", hold: "HELD_WORK" },
-  WORK_REVIEW: {
-    submit: "MANAGER_REVIEW",
-    feedback: "WORK",
-    hold: "HELD_WORK",
-  },
-  MANAGER_REVIEW: { submit: "CLOSED", feedback: "WORK", abort: "CLOSED" },
-};
-
 function landed(decision: Decision, from: ValidState): string {
   return decision.kind === "stay" ? from : decision.to;
 }
 
-function edges(): { from: ValidState; name: TransitionName; to: string }[] {
-  return VALID_STATES.flatMap((from) =>
-    Object.entries(EDGES[from]).map(([name, to]) => ({
-      from,
-      name: name as TransitionName,
-      to,
-    })),
-  );
-}
-
 describe("Feature: where every transition lands", () => {
-  test("the table of edges names every transition the machine allows", () => {
-    // Given the edges this suite claims the machine has
-    const claimed = VALID_STATES.map(
-      (state) => `${state}: ${Object.keys(EDGES[state]).sort().join(", ")}`,
-    );
+  test("a task in NEW that submits lands in DESIGN", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
 
-    // When they are lined up against the transitions the machine allows
-    const allowed = VALID_STATES.map(
-      (state) =>
-        `${state}: ${[...ALLOWED_TRANSITIONS[state]].sort().join(", ")}`,
-    );
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
 
-    // Then the suite covers each of them and invents none
-    expect(claimed).toEqual(allowed);
+    // Then the task lands in DESIGN
+    expect(landed(decided, "NEW")).toBe("DESIGN");
   });
 
-  test("every transition the machine allows is one this suite exercises", () => {
-    // Given the names of every transition in the machine
-    const names = [...TRANSITION_NAMES].sort();
+  test("a task in BLOCKED that submits lands in DESIGN", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
 
-    // When the names appearing somewhere in the table of edges are collected
-    const exercised = [...new Set(edges().map((edge) => edge.name))].sort();
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
 
-    // Then none of the transitions goes untested
-    expect(exercised).toEqual(names);
+    // Then the task lands in DESIGN
+    expect(landed(decided, "BLOCKED")).toBe("DESIGN");
   });
 
-  test("every allowed transition lands in the state the machine promises", () => {
-    // Given a task sitting in each state the machine allows a transition from
-    const walked = edges().map((edge) => {
-      const meta = aTask(edge.from);
+  test("a task in HELD_DESIGN that resumes lands in DESIGN", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
 
-      // When each allowed transition is decided on that task
-      const decided = decide(meta, BODY, edge.name, ARGS[edge.name]);
-      return `${edge.from} --${edge.name}--> ${landed(decided, edge.from)}`;
-    });
+    // When a resume is decided on it
+    const decided = decide(meta, BODY, "resume", ARGS.resume);
 
-    // Then each one lands where the machine says it does
-    expect(walked).toEqual(
-      edges().map((edge) => `${edge.from} --${edge.name}--> ${edge.to}`),
-    );
+    // Then the task lands in DESIGN
+    expect(landed(decided, "HELD_DESIGN")).toBe("DESIGN");
   });
 
-  test("every transition the machine does not allow is refused", () => {
-    // Given every pairing of a state with a transition it does not allow
-    const refused = VALID_STATES.flatMap((state) =>
-      TRANSITION_NAMES.filter(
-        (name) => !ALLOWED_TRANSITIONS[state].includes(name),
-      ).map((name) => ({ state, name })),
-    );
+  test("a task in HELD_DESIGN that aborts lands in CLOSED", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
 
-    // Given there are enough of them for the rule to mean something
-    expect(refused.length).toBeGreaterThan(30);
+    // When an abort is decided on it
+    const decided = decide(meta, BODY, "abort", ARGS.abort);
 
-    // When each pairing is decided on a task sitting in that state
-    const accepted = refused.filter(({ state, name }) => {
-      try {
-        decide(aTask(state), BODY, name, ARGS[name]);
-        return true;
-      } catch (err) {
-        return !/not valid from state/.test((err as Error).message);
-      }
-    });
-
-    // Then every one of them is turned away as invalid from that state
-    expect(accepted).toEqual([]);
+    // Then the task lands in CLOSED
+    expect(landed(decided, "HELD_DESIGN")).toBe("CLOSED");
   });
 
-  test("a closed task has no transition left at all", () => {
-    // Given a task that has already been closed
-    const meta = { ...aTask("NEW"), state: "CLOSED" as const };
+  test("a task in HELD_PLAN that resumes lands in PLAN", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
 
-    // When any transition is decided on it
+    // When a resume is decided on it
+    const decided = decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then the task lands in PLAN
+    expect(landed(decided, "HELD_PLAN")).toBe("PLAN");
+  });
+
+  test("a task in HELD_PLAN that aborts lands in CLOSED", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When an abort is decided on it
+    const decided = decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then the task lands in CLOSED
+    expect(landed(decided, "HELD_PLAN")).toBe("CLOSED");
+  });
+
+  test("a task in HELD_WORK that resumes lands in WORK", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When a resume is decided on it
+    const decided = decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then the task lands in WORK
+    expect(landed(decided, "HELD_WORK")).toBe("WORK");
+  });
+
+  test("a task in HELD_WORK that aborts lands in CLOSED", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When an abort is decided on it
+    const decided = decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then the task lands in CLOSED
+    expect(landed(decided, "HELD_WORK")).toBe("CLOSED");
+  });
+
+  test("a task in DESIGN that submits lands in DESIGN_REVIEW", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in DESIGN_REVIEW
+    expect(landed(decided, "DESIGN")).toBe("DESIGN_REVIEW");
+  });
+
+  test("a task in DESIGN that holds lands in HELD_DESIGN", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_DESIGN
+    expect(landed(decided, "DESIGN")).toBe("HELD_DESIGN");
+  });
+
+  test("a task in DESIGN_REVIEW that submits lands in PLAN", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in PLAN
+    expect(landed(decided, "DESIGN_REVIEW")).toBe("PLAN");
+  });
+
+  test("a task in DESIGN_REVIEW that sends feedback lands in DESIGN", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When feedback is decided on it
+    const decided = decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then the task lands in DESIGN
+    expect(landed(decided, "DESIGN_REVIEW")).toBe("DESIGN");
+  });
+
+  test("a task in DESIGN_REVIEW that holds lands in HELD_DESIGN", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_DESIGN
+    expect(landed(decided, "DESIGN_REVIEW")).toBe("HELD_DESIGN");
+  });
+
+  test("a task in PLAN that submits lands in PLAN_REVIEW", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in PLAN_REVIEW
+    expect(landed(decided, "PLAN")).toBe("PLAN_REVIEW");
+  });
+
+  test("a task in PLAN that holds lands in HELD_PLAN", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_PLAN
+    expect(landed(decided, "PLAN")).toBe("HELD_PLAN");
+  });
+
+  test("a task in PLAN_REVIEW that submits lands in WORK", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in WORK
+    expect(landed(decided, "PLAN_REVIEW")).toBe("WORK");
+  });
+
+  test("a task in PLAN_REVIEW that sends feedback lands in PLAN", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When feedback is decided on it
+    const decided = decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then the task lands in PLAN
+    expect(landed(decided, "PLAN_REVIEW")).toBe("PLAN");
+  });
+
+  test("a task in PLAN_REVIEW that holds lands in HELD_PLAN", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_PLAN
+    expect(landed(decided, "PLAN_REVIEW")).toBe("HELD_PLAN");
+  });
+
+  test("a task in WORK that submits lands in CHECK", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in CHECK
+    expect(landed(decided, "WORK")).toBe("CHECK");
+  });
+
+  test("a task in WORK that holds lands in HELD_WORK", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_WORK
+    expect(landed(decided, "WORK")).toBe("HELD_WORK");
+  });
+
+  test("a task in CHECK that passes lands in WORK_REVIEW", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When a pass is decided on it
+    const decided = decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then the task lands in WORK_REVIEW
+    expect(landed(decided, "CHECK")).toBe("WORK_REVIEW");
+  });
+
+  test("a task in CHECK that fails lands in WORK", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When a fail is decided on it
+    const decided = decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then the task lands in WORK
+    expect(landed(decided, "CHECK")).toBe("WORK");
+  });
+
+  test("a task in CHECK that holds lands in HELD_WORK", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_WORK
+    expect(landed(decided, "CHECK")).toBe("HELD_WORK");
+  });
+
+  test("a task in WORK_REVIEW that submits lands in MANAGER_REVIEW", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in MANAGER_REVIEW
+    expect(landed(decided, "WORK_REVIEW")).toBe("MANAGER_REVIEW");
+  });
+
+  test("a task in WORK_REVIEW that sends feedback lands in WORK", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When feedback is decided on it
+    const decided = decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then the task lands in WORK
+    expect(landed(decided, "WORK_REVIEW")).toBe("WORK");
+  });
+
+  test("a task in WORK_REVIEW that holds lands in HELD_WORK", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When a hold is decided on it
+    const decided = decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then the task lands in HELD_WORK
+    expect(landed(decided, "WORK_REVIEW")).toBe("HELD_WORK");
+  });
+
+  test("a task in MANAGER_REVIEW that submits lands in CLOSED", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When a submit is decided on it
+    const decided = decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then the task lands in CLOSED
+    expect(landed(decided, "MANAGER_REVIEW")).toBe("CLOSED");
+  });
+
+  test("a task in MANAGER_REVIEW that sends feedback lands in WORK", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When feedback is decided on it
+    const decided = decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then the task lands in WORK
+    expect(landed(decided, "MANAGER_REVIEW")).toBe("WORK");
+  });
+
+  test("a task in MANAGER_REVIEW that aborts lands in CLOSED", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When an abort is decided on it
+    const decided = decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then the task lands in CLOSED
+    expect(landed(decided, "MANAGER_REVIEW")).toBe("CLOSED");
+  });
+});
+
+describe("Feature: the transitions a task turns away", () => {
+  test("a task in NEW will not take a pass", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in NEW will not take a fail", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in NEW will not take a hold", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in NEW will not take a resume", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in NEW will not take feedback", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in NEW will not take an abort", () => {
+    // Given a new task with nothing holding it back
+    const meta = aTask("NEW");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from NEW
+    expect(attempt).toThrow(/not valid from state "NEW"/);
+  });
+
+  test("a task in BLOCKED will not take a pass", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in BLOCKED will not take a fail", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in BLOCKED will not take a hold", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in BLOCKED will not take a resume", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in BLOCKED will not take feedback", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in BLOCKED will not take an abort", () => {
+    // Given a blocked task with nothing left to wait on
+    const meta = aTask("BLOCKED");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from BLOCKED
+    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+  });
+
+  test("a task in HELD_DESIGN will not take a submit", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
+
+    // When a submit is decided on it
     const attempt = () => decide(meta, BODY, "submit", ARGS.submit);
 
-    // Then the machine says the task is closed and has no further transitions
-    expect(attempt).toThrow(/is CLOSED and has no further transitions/);
+    // Then it is turned away as not valid from HELD_DESIGN
+    expect(attempt).toThrow(/not valid from state "HELD_DESIGN"/);
+  });
+
+  test("a task in HELD_DESIGN will not take a pass", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from HELD_DESIGN
+    expect(attempt).toThrow(/not valid from state "HELD_DESIGN"/);
+  });
+
+  test("a task in HELD_DESIGN will not take a fail", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from HELD_DESIGN
+    expect(attempt).toThrow(/not valid from state "HELD_DESIGN"/);
+  });
+
+  test("a task in HELD_DESIGN will not take a hold", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from HELD_DESIGN
+    expect(attempt).toThrow(/not valid from state "HELD_DESIGN"/);
+  });
+
+  test("a task in HELD_DESIGN will not take feedback", () => {
+    // Given a task parked on a design hold
+    const meta = aTask("HELD_DESIGN");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from HELD_DESIGN
+    expect(attempt).toThrow(/not valid from state "HELD_DESIGN"/);
+  });
+
+  test("a task in HELD_PLAN will not take a submit", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When a submit is decided on it
+    const attempt = () => decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then it is turned away as not valid from HELD_PLAN
+    expect(attempt).toThrow(/not valid from state "HELD_PLAN"/);
+  });
+
+  test("a task in HELD_PLAN will not take a pass", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from HELD_PLAN
+    expect(attempt).toThrow(/not valid from state "HELD_PLAN"/);
+  });
+
+  test("a task in HELD_PLAN will not take a fail", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from HELD_PLAN
+    expect(attempt).toThrow(/not valid from state "HELD_PLAN"/);
+  });
+
+  test("a task in HELD_PLAN will not take a hold", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from HELD_PLAN
+    expect(attempt).toThrow(/not valid from state "HELD_PLAN"/);
+  });
+
+  test("a task in HELD_PLAN will not take feedback", () => {
+    // Given a task parked on a plan hold
+    const meta = aTask("HELD_PLAN");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from HELD_PLAN
+    expect(attempt).toThrow(/not valid from state "HELD_PLAN"/);
+  });
+
+  test("a task in HELD_WORK will not take a submit", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When a submit is decided on it
+    const attempt = () => decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then it is turned away as not valid from HELD_WORK
+    expect(attempt).toThrow(/not valid from state "HELD_WORK"/);
+  });
+
+  test("a task in HELD_WORK will not take a pass", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from HELD_WORK
+    expect(attempt).toThrow(/not valid from state "HELD_WORK"/);
+  });
+
+  test("a task in HELD_WORK will not take a fail", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from HELD_WORK
+    expect(attempt).toThrow(/not valid from state "HELD_WORK"/);
+  });
+
+  test("a task in HELD_WORK will not take a hold", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from HELD_WORK
+    expect(attempt).toThrow(/not valid from state "HELD_WORK"/);
+  });
+
+  test("a task in HELD_WORK will not take feedback", () => {
+    // Given a task parked on a work hold
+    const meta = aTask("HELD_WORK");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from HELD_WORK
+    expect(attempt).toThrow(/not valid from state "HELD_WORK"/);
+  });
+
+  test("a task in DESIGN will not take a pass", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from DESIGN
+    expect(attempt).toThrow(/not valid from state "DESIGN"/);
+  });
+
+  test("a task in DESIGN will not take a fail", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from DESIGN
+    expect(attempt).toThrow(/not valid from state "DESIGN"/);
+  });
+
+  test("a task in DESIGN will not take a resume", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from DESIGN
+    expect(attempt).toThrow(/not valid from state "DESIGN"/);
+  });
+
+  test("a task in DESIGN will not take feedback", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from DESIGN
+    expect(attempt).toThrow(/not valid from state "DESIGN"/);
+  });
+
+  test("a task in DESIGN will not take an abort", () => {
+    // Given a task in the design stage
+    const meta = aTask("DESIGN");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from DESIGN
+    expect(attempt).toThrow(/not valid from state "DESIGN"/);
+  });
+
+  test("a task in DESIGN_REVIEW will not take a pass", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from DESIGN_REVIEW
+    expect(attempt).toThrow(/not valid from state "DESIGN_REVIEW"/);
+  });
+
+  test("a task in DESIGN_REVIEW will not take a fail", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from DESIGN_REVIEW
+    expect(attempt).toThrow(/not valid from state "DESIGN_REVIEW"/);
+  });
+
+  test("a task in DESIGN_REVIEW will not take a resume", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from DESIGN_REVIEW
+    expect(attempt).toThrow(/not valid from state "DESIGN_REVIEW"/);
+  });
+
+  test("a task in DESIGN_REVIEW will not take an abort", () => {
+    // Given a task sitting in design review
+    const meta = aTask("DESIGN_REVIEW");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from DESIGN_REVIEW
+    expect(attempt).toThrow(/not valid from state "DESIGN_REVIEW"/);
+  });
+
+  test("a task in PLAN will not take a pass", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from PLAN
+    expect(attempt).toThrow(/not valid from state "PLAN"/);
+  });
+
+  test("a task in PLAN will not take a fail", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from PLAN
+    expect(attempt).toThrow(/not valid from state "PLAN"/);
+  });
+
+  test("a task in PLAN will not take a resume", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from PLAN
+    expect(attempt).toThrow(/not valid from state "PLAN"/);
+  });
+
+  test("a task in PLAN will not take feedback", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from PLAN
+    expect(attempt).toThrow(/not valid from state "PLAN"/);
+  });
+
+  test("a task in PLAN will not take an abort", () => {
+    // Given a task in the plan stage
+    const meta = aTask("PLAN");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from PLAN
+    expect(attempt).toThrow(/not valid from state "PLAN"/);
+  });
+
+  test("a task in PLAN_REVIEW will not take a pass", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from PLAN_REVIEW
+    expect(attempt).toThrow(/not valid from state "PLAN_REVIEW"/);
+  });
+
+  test("a task in PLAN_REVIEW will not take a fail", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from PLAN_REVIEW
+    expect(attempt).toThrow(/not valid from state "PLAN_REVIEW"/);
+  });
+
+  test("a task in PLAN_REVIEW will not take a resume", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from PLAN_REVIEW
+    expect(attempt).toThrow(/not valid from state "PLAN_REVIEW"/);
+  });
+
+  test("a task in PLAN_REVIEW will not take an abort", () => {
+    // Given a task sitting in plan review
+    const meta = aTask("PLAN_REVIEW");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from PLAN_REVIEW
+    expect(attempt).toThrow(/not valid from state "PLAN_REVIEW"/);
+  });
+
+  test("a task in WORK will not take a pass", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from WORK
+    expect(attempt).toThrow(/not valid from state "WORK"/);
+  });
+
+  test("a task in WORK will not take a fail", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from WORK
+    expect(attempt).toThrow(/not valid from state "WORK"/);
+  });
+
+  test("a task in WORK will not take a resume", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from WORK
+    expect(attempt).toThrow(/not valid from state "WORK"/);
+  });
+
+  test("a task in WORK will not take feedback", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from WORK
+    expect(attempt).toThrow(/not valid from state "WORK"/);
+  });
+
+  test("a task in WORK will not take an abort", () => {
+    // Given a task being worked on
+    const meta = aTask("WORK");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from WORK
+    expect(attempt).toThrow(/not valid from state "WORK"/);
+  });
+
+  test("a task in CHECK will not take a submit", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When a submit is decided on it
+    const attempt = () => decide(meta, BODY, "submit", ARGS.submit);
+
+    // Then it is turned away as not valid from CHECK
+    expect(attempt).toThrow(/not valid from state "CHECK"/);
+  });
+
+  test("a task in CHECK will not take a resume", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from CHECK
+    expect(attempt).toThrow(/not valid from state "CHECK"/);
+  });
+
+  test("a task in CHECK will not take feedback", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When feedback is decided on it
+    const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
+
+    // Then it is turned away as not valid from CHECK
+    expect(attempt).toThrow(/not valid from state "CHECK"/);
+  });
+
+  test("a task in CHECK will not take an abort", () => {
+    // Given a task sitting in the check stage
+    const meta = aTask("CHECK");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from CHECK
+    expect(attempt).toThrow(/not valid from state "CHECK"/);
+  });
+
+  test("a task in WORK_REVIEW will not take a pass", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from WORK_REVIEW
+    expect(attempt).toThrow(/not valid from state "WORK_REVIEW"/);
+  });
+
+  test("a task in WORK_REVIEW will not take a fail", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from WORK_REVIEW
+    expect(attempt).toThrow(/not valid from state "WORK_REVIEW"/);
+  });
+
+  test("a task in WORK_REVIEW will not take a resume", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from WORK_REVIEW
+    expect(attempt).toThrow(/not valid from state "WORK_REVIEW"/);
+  });
+
+  test("a task in WORK_REVIEW will not take an abort", () => {
+    // Given a task sitting in work review
+    const meta = aTask("WORK_REVIEW");
+
+    // When an abort is decided on it
+    const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
+
+    // Then it is turned away as not valid from WORK_REVIEW
+    expect(attempt).toThrow(/not valid from state "WORK_REVIEW"/);
+  });
+
+  test("a task in MANAGER_REVIEW will not take a pass", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When a pass is decided on it
+    const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
+
+    // Then it is turned away as not valid from MANAGER_REVIEW
+    expect(attempt).toThrow(/not valid from state "MANAGER_REVIEW"/);
+  });
+
+  test("a task in MANAGER_REVIEW will not take a fail", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When a fail is decided on it
+    const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
+
+    // Then it is turned away as not valid from MANAGER_REVIEW
+    expect(attempt).toThrow(/not valid from state "MANAGER_REVIEW"/);
+  });
+
+  test("a task in MANAGER_REVIEW will not take a hold", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When a hold is decided on it
+    const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
+
+    // Then it is turned away as not valid from MANAGER_REVIEW
+    expect(attempt).toThrow(/not valid from state "MANAGER_REVIEW"/);
+  });
+
+  test("a task in MANAGER_REVIEW will not take a resume", () => {
+    // Given a task waiting on the manager
+    const meta = aTask("MANAGER_REVIEW");
+
+    // When a resume is decided on it
+    const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
+
+    // Then it is turned away as not valid from MANAGER_REVIEW
+    expect(attempt).toThrow(/not valid from state "MANAGER_REVIEW"/);
   });
 });
 

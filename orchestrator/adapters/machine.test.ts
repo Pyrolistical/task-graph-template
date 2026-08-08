@@ -3,17 +3,10 @@ import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  AGENT_STATES,
-  VALID_STATES,
   type ClaimState,
+  type TransitionName,
   type ValidState,
   isAgentState,
-  ALLOWED_TRANSITIONS,
-  TRANSITION_NAMES,
-  type TransitionName,
-  type TaskState,
-  type Decision,
-  decide,
 } from "../domain/state-machine.ts";
 import { createTask, readTaskFile } from "./task-store.ts";
 import {
@@ -117,80 +110,1624 @@ function build(state: ValidState): { dir: string; id: string } {
   return { dir, id };
 }
 
-function landsIn(decided: Decision, state: ValidState): TaskState {
-  return decided.kind === "stay" ? state : decided.to;
-}
-
 describe("Feature: applying the state machine to the task directory", () => {
-  testInTempDirs("the directory can put a task in every state there is", () => {
-    // Given every state the machine allows a task to sit in
-    const states = [...VALID_STATES];
+  testInTempDirs("the directory can walk a task into NEW", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into NEW through the task directory
+    const { dir, id } = build("NEW");
 
-    // When a task is walked into each of them through the task directory
-    const reached = states.map((state) => {
-      const { dir, id } = build(state);
-      return metaOf(dir, id).state;
-    });
-
-    // Then each task is sitting in the state that was asked for
-    expect(reached).toEqual(states);
+    // Then it is sitting in NEW
+    expect(metaOf(dir, id).state).toBe("NEW");
   });
 
-  testInTempDirs("every allowed transition is written to the document", () => {
-    // Given a task sitting in each state the machine allows a transition from
-    const edges = VALID_STATES.flatMap((state) =>
-      ALLOWED_TRANSITIONS[state].map((name) => ({ state, name })),
-    );
+  testInTempDirs("the directory can walk a task into BLOCKED", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into BLOCKED through the task directory
+    const { dir, id } = build("BLOCKED");
 
-    // When each allowed transition is applied through the task directory
-    const applied = edges.map(({ state, name }) => {
-      const { dir, id } = build(state);
-      const decided = decide(
-        structuredClone(metaOf(dir, id)),
-        bodyOf(path.join(dir, `${id}.md`)),
-        name,
-        shape(name, ARGS[name]),
-      );
-
-      const result = run(dir, id, name, ...ARGS[name]);
-      return {
-        edge: `${state} --${name}-->`,
-        landed: readTaskFile(documentOf(dir, id, result)).meta.state,
-        decided: landsIn(decided, state),
-      };
-    });
-
-    // Then the document on disk holds the state the machine decided on
-    expect(applied.filter((one) => one.landed !== one.decided)).toEqual([]);
+    // Then it is sitting in BLOCKED
+    expect(metaOf(dir, id).state).toBe("BLOCKED");
   });
 
+  testInTempDirs("the directory can walk a task into HELD_DESIGN", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into HELD_DESIGN through the task directory
+    const { dir, id } = build("HELD_DESIGN");
+
+    // Then it is sitting in HELD_DESIGN
+    expect(metaOf(dir, id).state).toBe("HELD_DESIGN");
+  });
+
+  testInTempDirs("the directory can walk a task into HELD_PLAN", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into HELD_PLAN through the task directory
+    const { dir, id } = build("HELD_PLAN");
+
+    // Then it is sitting in HELD_PLAN
+    expect(metaOf(dir, id).state).toBe("HELD_PLAN");
+  });
+
+  testInTempDirs("the directory can walk a task into HELD_WORK", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into HELD_WORK through the task directory
+    const { dir, id } = build("HELD_WORK");
+
+    // Then it is sitting in HELD_WORK
+    expect(metaOf(dir, id).state).toBe("HELD_WORK");
+  });
+
+  testInTempDirs("the directory can walk a task into DESIGN", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into DESIGN through the task directory
+    const { dir, id } = build("DESIGN");
+
+    // Then it is sitting in DESIGN
+    expect(metaOf(dir, id).state).toBe("DESIGN");
+  });
+
+  testInTempDirs("the directory can walk a task into DESIGN_REVIEW", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into DESIGN_REVIEW through the task directory
+    const { dir, id } = build("DESIGN_REVIEW");
+
+    // Then it is sitting in DESIGN_REVIEW
+    expect(metaOf(dir, id).state).toBe("DESIGN_REVIEW");
+  });
+
+  testInTempDirs("the directory can walk a task into PLAN", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into PLAN through the task directory
+    const { dir, id } = build("PLAN");
+
+    // Then it is sitting in PLAN
+    expect(metaOf(dir, id).state).toBe("PLAN");
+  });
+
+  testInTempDirs("the directory can walk a task into PLAN_REVIEW", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into PLAN_REVIEW through the task directory
+    const { dir, id } = build("PLAN_REVIEW");
+
+    // Then it is sitting in PLAN_REVIEW
+    expect(metaOf(dir, id).state).toBe("PLAN_REVIEW");
+  });
+
+  testInTempDirs("the directory can walk a task into WORK", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into WORK through the task directory
+    const { dir, id } = build("WORK");
+
+    // Then it is sitting in WORK
+    expect(metaOf(dir, id).state).toBe("WORK");
+  });
+
+  testInTempDirs("the directory can walk a task into CHECK", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into CHECK through the task directory
+    const { dir, id } = build("CHECK");
+
+    // Then it is sitting in CHECK
+    expect(metaOf(dir, id).state).toBe("CHECK");
+  });
+
+  testInTempDirs("the directory can walk a task into WORK_REVIEW", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into WORK_REVIEW through the task directory
+    const { dir, id } = build("WORK_REVIEW");
+
+    // Then it is sitting in WORK_REVIEW
+    expect(metaOf(dir, id).state).toBe("WORK_REVIEW");
+  });
+
+  testInTempDirs("the directory can walk a task into MANAGER_REVIEW", () => {
+    // Given a task directory the machine walks a fresh task through
+    // When the task is walked into MANAGER_REVIEW through the task directory
+    const { dir, id } = build("MANAGER_REVIEW");
+
+    // Then it is sitting in MANAGER_REVIEW
+    expect(metaOf(dir, id).state).toBe("MANAGER_REVIEW");
+  });
   testInTempDirs(
-    "a refused transition leaves the document byte for byte",
+    "a task in NEW that submits is written to the document as DESIGN",
     () => {
-      // Given a task sitting in each state, and its document as it stands
-      const untouched = VALID_STATES.map((state) => {
-        const { dir, id } = build(state);
-        const filePath = path.join(dir, `${id}.md`);
-        const before = fs.readFileSync(filePath, "utf-8");
+      // Given a task sitting in NEW
+      const { dir, id } = build("NEW");
 
-        // When every transition the machine refuses from that state is applied
-        const refused = TRANSITION_NAMES.filter(
-          (name) => !ALLOWED_TRANSITIONS[state].includes(name),
-        );
-        for (const name of refused) {
-          expect(() => run(dir, id, name, ...ARGS[name])).toThrow(
-            /not valid from state/,
-          );
-        }
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
 
-        return fs.readFileSync(filePath, "utf-8") === before;
-      });
-
-      // Then none of the refusals changed a document
-      expect(untouched).toEqual(VALID_STATES.map(() => true));
+      // Then the document on disk holds DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "DESIGN",
+      );
     },
   );
 
+  testInTempDirs(
+    "a task in BLOCKED that submits is written to the document as DESIGN",
+    () => {
+      // Given a task sitting in BLOCKED with nothing left to wait on
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "BLOCKED" });
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "DESIGN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN that resumes is written to the document as DESIGN",
+    () => {
+      // Given a task sitting in HELD_DESIGN
+      const { dir, id } = build("HELD_DESIGN");
+
+      // When a resume is applied through the task directory
+      const result = run(dir, id, "resume");
+
+      // Then the document on disk holds DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "DESIGN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN that aborts is written to the document as CLOSED",
+    () => {
+      // Given a task sitting in HELD_DESIGN
+      const { dir, id } = build("HELD_DESIGN");
+
+      // When an abort is applied through the task directory
+      const result = run(dir, id, "abort");
+
+      // Then the document on disk holds CLOSED, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CLOSED",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN that resumes is written to the document as PLAN",
+    () => {
+      // Given a task sitting in HELD_PLAN
+      const { dir, id } = build("HELD_PLAN");
+
+      // When a resume is applied through the task directory
+      const result = run(dir, id, "resume");
+
+      // Then the document on disk holds PLAN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("PLAN");
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN that aborts is written to the document as CLOSED",
+    () => {
+      // Given a task sitting in HELD_PLAN
+      const { dir, id } = build("HELD_PLAN");
+
+      // When an abort is applied through the task directory
+      const result = run(dir, id, "abort");
+
+      // Then the document on disk holds CLOSED, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CLOSED",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK that resumes is written to the document as WORK",
+    () => {
+      // Given a task sitting in HELD_WORK
+      const { dir, id } = build("HELD_WORK");
+
+      // When a resume is applied through the task directory
+      const result = run(dir, id, "resume");
+
+      // Then the document on disk holds WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("WORK");
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK that aborts is written to the document as CLOSED",
+    () => {
+      // Given a task sitting in HELD_WORK
+      const { dir, id } = build("HELD_WORK");
+
+      // When an abort is applied through the task directory
+      const result = run(dir, id, "abort");
+
+      // Then the document on disk holds CLOSED, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CLOSED",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN that submits is written to the document as DESIGN_REVIEW",
+    () => {
+      // Given a task sitting in DESIGN
+      const { dir, id } = build("DESIGN");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds DESIGN_REVIEW, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "DESIGN_REVIEW",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN that holds is written to the document as HELD_DESIGN",
+    () => {
+      // Given a task sitting in DESIGN
+      const { dir, id } = build("DESIGN");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_DESIGN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW that submits is written to the document as PLAN",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW
+      const { dir, id } = build("DESIGN_REVIEW");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds PLAN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("PLAN");
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW that sends feedback is written to the document as DESIGN",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW
+      const { dir, id } = build("DESIGN_REVIEW");
+
+      // When feedback is applied through the task directory
+      const result = run(dir, id, "feedback", "a finding");
+
+      // Then the document on disk holds DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "DESIGN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW that holds is written to the document as HELD_DESIGN",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW
+      const { dir, id } = build("DESIGN_REVIEW");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_DESIGN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_DESIGN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN that submits is written to the document as PLAN_REVIEW",
+    () => {
+      // Given a task sitting in PLAN
+      const { dir, id } = build("PLAN");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds PLAN_REVIEW, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "PLAN_REVIEW",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN that holds is written to the document as HELD_PLAN",
+    () => {
+      // Given a task sitting in PLAN
+      const { dir, id } = build("PLAN");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_PLAN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_PLAN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW that submits is written to the document as WORK",
+    () => {
+      // Given a task sitting in PLAN_REVIEW
+      const { dir, id } = build("PLAN_REVIEW");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("WORK");
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW that sends feedback is written to the document as PLAN",
+    () => {
+      // Given a task sitting in PLAN_REVIEW
+      const { dir, id } = build("PLAN_REVIEW");
+
+      // When feedback is applied through the task directory
+      const result = run(dir, id, "feedback", "a finding");
+
+      // Then the document on disk holds PLAN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("PLAN");
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW that holds is written to the document as HELD_PLAN",
+    () => {
+      // Given a task sitting in PLAN_REVIEW
+      const { dir, id } = build("PLAN_REVIEW");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_PLAN, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_PLAN",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK that submits is written to the document as CHECK",
+    () => {
+      // Given a task sitting in WORK
+      const { dir, id } = build("WORK");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds CHECK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CHECK",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK that holds is written to the document as HELD_WORK",
+    () => {
+      // Given a task sitting in WORK
+      const { dir, id } = build("WORK");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_WORK",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK that passes is written to the document as WORK_REVIEW",
+    () => {
+      // Given a task sitting in CHECK
+      const { dir, id } = build("CHECK");
+
+      // When a pass is applied through the task directory
+      const result = run(dir, id, "pass");
+
+      // Then the document on disk holds WORK_REVIEW, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "WORK_REVIEW",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK that fails is written to the document as WORK",
+    () => {
+      // Given a task sitting in CHECK
+      const { dir, id } = build("CHECK");
+
+      // When a fail is applied through the task directory
+      const result = run(dir, id, "fail");
+
+      // Then the document on disk holds WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("WORK");
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK that holds is written to the document as HELD_WORK",
+    () => {
+      // Given a task sitting in CHECK
+      const { dir, id } = build("CHECK");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_WORK",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW that submits is written to the document as MANAGER_REVIEW",
+    () => {
+      // Given a task sitting in WORK_REVIEW
+      const { dir, id } = build("WORK_REVIEW");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds MANAGER_REVIEW, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "MANAGER_REVIEW",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW that sends feedback is written to the document as WORK",
+    () => {
+      // Given a task sitting in WORK_REVIEW
+      const { dir, id } = build("WORK_REVIEW");
+
+      // When feedback is applied through the task directory
+      const result = run(dir, id, "feedback", "a finding");
+
+      // Then the document on disk holds WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("WORK");
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW that holds is written to the document as HELD_WORK",
+    () => {
+      // Given a task sitting in WORK_REVIEW
+      const { dir, id } = build("WORK_REVIEW");
+
+      // When a hold is applied through the task directory
+      const result = run(dir, id, "hold", "a reason");
+
+      // Then the document on disk holds HELD_WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "HELD_WORK",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW that sends feedback is written to the document as WORK",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW
+      const { dir, id } = build("MANAGER_REVIEW");
+
+      // When feedback is applied through the task directory
+      const result = run(dir, id, "feedback", "a finding");
+
+      // Then the document on disk holds WORK, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe("WORK");
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW that submits is written to the document as CLOSED",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW
+      const { dir, id } = build("MANAGER_REVIEW");
+
+      // When a submit is applied through the task directory
+      const result = run(dir, id, "submit");
+
+      // Then the document on disk holds CLOSED, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CLOSED",
+      );
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW that aborts is written to the document as CLOSED",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW
+      const { dir, id } = build("MANAGER_REVIEW");
+
+      // When an abort is applied through the task directory
+      const result = run(dir, id, "abort");
+
+      // Then the document on disk holds CLOSED, as the machine decided
+      expect(readTaskFile(documentOf(dir, id, result)).meta.state).toBe(
+        "CLOSED",
+      );
+    },
+  );
+  testInTempDirs(
+    "a task in NEW will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in NEW will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in NEW will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in NEW will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in NEW will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in NEW will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in NEW, and its document as it stands
+      const { dir, id } = build("NEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in BLOCKED will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in BLOCKED, and its document as it stands
+      const { dir, id } = build("BLOCKED");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN will not take a submit, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_DESIGN, and its document as it stands
+      const { dir, id } = build("HELD_DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a submit is applied through the task directory
+      const attempt = () => run(dir, id, "submit");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_DESIGN, and its document as it stands
+      const { dir, id } = build("HELD_DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_DESIGN, and its document as it stands
+      const { dir, id } = build("HELD_DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_DESIGN, and its document as it stands
+      const { dir, id } = build("HELD_DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_DESIGN will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_DESIGN, and its document as it stands
+      const { dir, id } = build("HELD_DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN will not take a submit, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_PLAN, and its document as it stands
+      const { dir, id } = build("HELD_PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a submit is applied through the task directory
+      const attempt = () => run(dir, id, "submit");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_PLAN, and its document as it stands
+      const { dir, id } = build("HELD_PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_PLAN, and its document as it stands
+      const { dir, id } = build("HELD_PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_PLAN, and its document as it stands
+      const { dir, id } = build("HELD_PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_PLAN will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_PLAN, and its document as it stands
+      const { dir, id } = build("HELD_PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK will not take a submit, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_WORK, and its document as it stands
+      const { dir, id } = build("HELD_WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a submit is applied through the task directory
+      const attempt = () => run(dir, id, "submit");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_WORK, and its document as it stands
+      const { dir, id } = build("HELD_WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_WORK, and its document as it stands
+      const { dir, id } = build("HELD_WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_WORK, and its document as it stands
+      const { dir, id } = build("HELD_WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in HELD_WORK will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in HELD_WORK, and its document as it stands
+      const { dir, id } = build("HELD_WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN, and its document as it stands
+      const { dir, id } = build("DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN, and its document as it stands
+      const { dir, id } = build("DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN, and its document as it stands
+      const { dir, id } = build("DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN, and its document as it stands
+      const { dir, id } = build("DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN, and its document as it stands
+      const { dir, id } = build("DESIGN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW, and its document as it stands
+      const { dir, id } = build("DESIGN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW, and its document as it stands
+      const { dir, id } = build("DESIGN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW, and its document as it stands
+      const { dir, id } = build("DESIGN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in DESIGN_REVIEW will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW, and its document as it stands
+      const { dir, id } = build("DESIGN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN, and its document as it stands
+      const { dir, id } = build("PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN, and its document as it stands
+      const { dir, id } = build("PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN, and its document as it stands
+      const { dir, id } = build("PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN, and its document as it stands
+      const { dir, id } = build("PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN, and its document as it stands
+      const { dir, id } = build("PLAN");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN_REVIEW, and its document as it stands
+      const { dir, id } = build("PLAN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN_REVIEW, and its document as it stands
+      const { dir, id } = build("PLAN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN_REVIEW, and its document as it stands
+      const { dir, id } = build("PLAN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in PLAN_REVIEW will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in PLAN_REVIEW, and its document as it stands
+      const { dir, id } = build("PLAN_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK, and its document as it stands
+      const { dir, id } = build("WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK, and its document as it stands
+      const { dir, id } = build("WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK, and its document as it stands
+      const { dir, id } = build("WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK, and its document as it stands
+      const { dir, id } = build("WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK, and its document as it stands
+      const { dir, id } = build("WORK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK will not take a submit, and its document stays whole",
+    () => {
+      // Given a task sitting in CHECK, and its document as it stands
+      const { dir, id } = build("CHECK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a submit is applied through the task directory
+      const attempt = () => run(dir, id, "submit");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in CHECK, and its document as it stands
+      const { dir, id } = build("CHECK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK will not take feedback, and its document stays whole",
+    () => {
+      // Given a task sitting in CHECK, and its document as it stands
+      const { dir, id } = build("CHECK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When feedback is applied through the task directory
+      const attempt = () => run(dir, id, "feedback", "a finding");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in CHECK will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in CHECK, and its document as it stands
+      const { dir, id } = build("CHECK");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK_REVIEW, and its document as it stands
+      const { dir, id } = build("WORK_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK_REVIEW, and its document as it stands
+      const { dir, id } = build("WORK_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK_REVIEW, and its document as it stands
+      const { dir, id } = build("WORK_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in WORK_REVIEW will not take an abort, and its document stays whole",
+    () => {
+      // Given a task sitting in WORK_REVIEW, and its document as it stands
+      const { dir, id } = build("WORK_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When an abort is applied through the task directory
+      const attempt = () => run(dir, id, "abort");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW will not take a pass, and its document stays whole",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW, and its document as it stands
+      const { dir, id } = build("MANAGER_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a pass is applied through the task directory
+      const attempt = () => run(dir, id, "pass");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW will not take a fail, and its document stays whole",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW, and its document as it stands
+      const { dir, id } = build("MANAGER_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a fail is applied through the task directory
+      const attempt = () => run(dir, id, "fail");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW will not take a hold, and its document stays whole",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW, and its document as it stands
+      const { dir, id } = build("MANAGER_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a hold is applied through the task directory
+      const attempt = () => run(dir, id, "hold", "a reason");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
+
+  testInTempDirs(
+    "a task in MANAGER_REVIEW will not take a resume, and its document stays whole",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW, and its document as it stands
+      const { dir, id } = build("MANAGER_REVIEW");
+      const filePath = path.join(dir, `${id}.md`);
+      const before = fs.readFileSync(filePath, "utf-8");
+
+      // When a resume is applied through the task directory
+      const attempt = () => run(dir, id, "resume");
+
+      // Then it is refused, and the document is byte for byte what it was
+      expect(attempt).toThrow(/not valid from state/);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe(before);
+    },
+  );
   testInTempDirs(
     "a transition on a task that does not exist is refused",
     () => {
@@ -236,51 +1773,312 @@ describe("Feature: applying the state machine to the task directory", () => {
 });
 
 describe("Feature: claiming a task in the task directory", () => {
-  testInTempDirs("only the states an agent runs can be claimed", () => {
-    // Given a task sitting in each state the machine has
-    const states = [...VALID_STATES];
+  testInTempDirs("a task sitting in DESIGN can be claimed by an agent", () => {
+    // Given a task sitting in DESIGN
+    const dir = makeTasksDir();
+    const id = writeTask(dir, { id: "000001", state: "DESIGN" });
 
-    // When an agent tries to claim each of them
-    const claimed = states.map((state) => {
-      const dir = makeTasksDir();
-      const id = writeTask(dir, { id: "000001", state });
-      try {
-        claim(dir, id, "agent-1");
-        return metaOf(dir, id).claimed_by === "agent-1";
-      } catch {
-        return false;
-      }
-    });
+    // When an agent claims it
+    claim(dir, id, "agent-1");
 
-    // Then exactly the states an agent runs are the ones it could take
-    expect(claimed).toEqual(states.map(isAgentState));
+    // Then the agent's name is on the task
+    expect(metaOf(dir, id).claimed_by).toBe("agent-1");
   });
 
   testInTempDirs(
-    "claiming and releasing moves the claim, never the stage",
-    async () => {
-      // Given a task in each state an agent runs, claimed by a process now gone
-      const states = AGENT_STATES;
-      const dead = await deadPid();
+    "a task sitting in DESIGN_REVIEW can be claimed by an agent",
+    () => {
+      // Given a task sitting in DESIGN_REVIEW
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "DESIGN_REVIEW" });
 
-      // When each claim is taken and then released
-      const walked = states.map((state) => {
-        const dir = makeTasksDir();
-        const id = writeTask(dir, { id: "000001", state });
-        claim(dir, id, "agent-1", dead);
-        const held = metaOf(dir, id);
-        unclaim(dir, id);
-        const free = metaOf(dir, id);
-        return [held.state, held.claimed_by, free.state, free.claimed_by];
-      });
+      // When an agent claims it
+      claim(dir, id, "agent-1");
 
-      // Then each task stays where it was, and only the holder changes
-      expect(walked).toEqual(
-        states.map((state) => [state, "agent-1", state, null]),
-      );
+      // Then the agent's name is on the task
+      expect(metaOf(dir, id).claimed_by).toBe("agent-1");
     },
   );
 
+  testInTempDirs("a task sitting in PLAN can be claimed by an agent", () => {
+    // Given a task sitting in PLAN
+    const dir = makeTasksDir();
+    const id = writeTask(dir, { id: "000001", state: "PLAN" });
+
+    // When an agent claims it
+    claim(dir, id, "agent-1");
+
+    // Then the agent's name is on the task
+    expect(metaOf(dir, id).claimed_by).toBe("agent-1");
+  });
+
+  testInTempDirs(
+    "a task sitting in PLAN_REVIEW can be claimed by an agent",
+    () => {
+      // Given a task sitting in PLAN_REVIEW
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "PLAN_REVIEW" });
+
+      // When an agent claims it
+      claim(dir, id, "agent-1");
+
+      // Then the agent's name is on the task
+      expect(metaOf(dir, id).claimed_by).toBe("agent-1");
+    },
+  );
+
+  testInTempDirs("a task sitting in WORK can be claimed by an agent", () => {
+    // Given a task sitting in WORK
+    const dir = makeTasksDir();
+    const id = writeTask(dir, { id: "000001", state: "WORK" });
+
+    // When an agent claims it
+    claim(dir, id, "agent-1");
+
+    // Then the agent's name is on the task
+    expect(metaOf(dir, id).claimed_by).toBe("agent-1");
+  });
+
+  testInTempDirs(
+    "a task sitting in WORK_REVIEW can be claimed by an agent",
+    () => {
+      // Given a task sitting in WORK_REVIEW
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "WORK_REVIEW" });
+
+      // When an agent claims it
+      claim(dir, id, "agent-1");
+
+      // Then the agent's name is on the task
+      expect(metaOf(dir, id).claimed_by).toBe("agent-1");
+    },
+  );
+  testInTempDirs("a task sitting in NEW cannot be claimed by an agent", () => {
+    // Given a task sitting in NEW
+    const dir = makeTasksDir();
+    const id = writeTask(dir, { id: "000001", state: "NEW" });
+
+    // When an agent tries to claim it
+    const attempt = () => claim(dir, id, "agent-1");
+
+    // Then it is refused, because no agent runs that state
+    expect(attempt).toThrow(/which no agent runs/);
+  });
+
+  testInTempDirs(
+    "a task sitting in BLOCKED cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in BLOCKED
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "BLOCKED" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+
+  testInTempDirs(
+    "a task sitting in HELD_DESIGN cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in HELD_DESIGN
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "HELD_DESIGN" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+
+  testInTempDirs(
+    "a task sitting in HELD_PLAN cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in HELD_PLAN
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "HELD_PLAN" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+
+  testInTempDirs(
+    "a task sitting in HELD_WORK cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in HELD_WORK
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "HELD_WORK" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+
+  testInTempDirs(
+    "a task sitting in CHECK cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in CHECK
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "CHECK" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+
+  testInTempDirs(
+    "a task sitting in MANAGER_REVIEW cannot be claimed by an agent",
+    () => {
+      // Given a task sitting in MANAGER_REVIEW
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "MANAGER_REVIEW" });
+
+      // When an agent tries to claim it
+      const attempt = () => claim(dir, id, "agent-1");
+
+      // Then it is refused, because no agent runs that state
+      expect(attempt).toThrow(/which no agent runs/);
+    },
+  );
+  testInTempDirs(
+    "releasing a claimed DESIGN task frees it without moving the stage",
+    async () => {
+      // Given a task in DESIGN claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "DESIGN" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in DESIGN, and only the holder changes
+      expect(held.state).toBe("DESIGN");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("DESIGN");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs(
+    "releasing a claimed DESIGN_REVIEW task frees it without moving the stage",
+    async () => {
+      // Given a task in DESIGN_REVIEW claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "DESIGN_REVIEW" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in DESIGN_REVIEW, and only the holder changes
+      expect(held.state).toBe("DESIGN_REVIEW");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("DESIGN_REVIEW");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs(
+    "releasing a claimed PLAN task frees it without moving the stage",
+    async () => {
+      // Given a task in PLAN claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "PLAN" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in PLAN, and only the holder changes
+      expect(held.state).toBe("PLAN");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("PLAN");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs(
+    "releasing a claimed PLAN_REVIEW task frees it without moving the stage",
+    async () => {
+      // Given a task in PLAN_REVIEW claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "PLAN_REVIEW" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in PLAN_REVIEW, and only the holder changes
+      expect(held.state).toBe("PLAN_REVIEW");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("PLAN_REVIEW");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs(
+    "releasing a claimed WORK task frees it without moving the stage",
+    async () => {
+      // Given a task in WORK claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "WORK" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in WORK, and only the holder changes
+      expect(held.state).toBe("WORK");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("WORK");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
+
+  testInTempDirs(
+    "releasing a claimed WORK_REVIEW task frees it without moving the stage",
+    async () => {
+      // Given a task in WORK_REVIEW claimed by a process now gone
+      const dir = makeTasksDir();
+      const id = writeTask(dir, { id: "000001", state: "WORK_REVIEW" });
+      claim(dir, id, "agent-1", await deadPid());
+      const held = metaOf(dir, id);
+
+      // When the claim is released
+      unclaim(dir, id);
+
+      // Then the task stays in WORK_REVIEW, and only the holder changes
+      expect(held.state).toBe("WORK_REVIEW");
+      expect(held.claimed_by).toBe("agent-1");
+      const free = metaOf(dir, id);
+      expect(free.state).toBe("WORK_REVIEW");
+      expect(free.claimed_by).toBeNull();
+    },
+  );
   testInTempDirs("a claim held by a live process is not released", () => {
     // Given a task claimed by a process that is still running
     const dir = makeTasksDir();

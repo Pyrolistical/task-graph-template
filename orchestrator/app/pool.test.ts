@@ -30,10 +30,10 @@ describe("Feature: the pool of agent slots", () => {
     const { pool } = aPool([aSlot(), aSlot({ name: "pi-fake-fake-2" })]);
 
     // When the pool is asked for its rows
-    const states = pool.rows().map((row) => row.state);
+    const rows = pool.rows();
 
     // Then both slots read as idle, because the pool is fixed at load
-    expect(states).toEqual(["IDLE", "IDLE"]);
+    expect(rows.map((row) => row.state)).toEqual(["IDLE", "IDLE"]);
   });
 
   test("a slot of an agent disabled in the pool file reads as disabled", () => {

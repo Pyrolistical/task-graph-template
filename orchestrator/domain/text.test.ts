@@ -17,26 +17,103 @@ function plain(line: Line): string {
 }
 
 describe("Feature: how wide a piece of text draws", () => {
-  test("an emoji, a cjk character and a keycap each take two columns", () => {
-    // Given the characters a transcript is likely to carry
-    const characters = ["a", "…", "✔", "✔️", "🔥", "漢", "1️⃣"];
+  test("an ascii letter draws in a single column", () => {
+    // Given a plain ascii letter
+    const letter = "a";
 
-    // When each is measured in terminal columns
-    const widths = characters.map(charWidth);
+    // When it is measured in terminal columns
+    const width = charWidth(letter);
 
-    // Then the wide ones take two columns and the narrow ones take one
-    expect(widths).toEqual([1, 1, 1, 2, 2, 2, 2]);
+    // Then it takes the one column a narrow character takes
+    expect(width).toBe(1);
   });
 
-  test("a joined family and a flag are each one two-column cluster", () => {
-    // Given two emoji built from several code points
-    const clusters = ["👨‍👩‍👧", "🇺🇸"];
+  test("an ellipsis draws in a single column", () => {
+    // Given the ellipsis character on its own
+    const ellipsis = "…";
 
-    // When each is measured in terminal columns
-    const widths = clusters.map(textWidth);
+    // When it is measured in terminal columns
+    const width = charWidth(ellipsis);
 
-    // Then each draws as a single wide character, not as its parts
-    expect(widths).toEqual([2, 2]);
+    // Then it takes one column
+    expect(width).toBe(1);
+  });
+
+  test("a bare checkmark draws in a single column", () => {
+    // Given the checkmark character on its own
+    const checkmark = "✔";
+
+    // When it is measured in terminal columns
+    const width = charWidth(checkmark);
+
+    // Then it takes one column
+    expect(width).toBe(1);
+  });
+
+  test("a checkmark with a variation selector draws wide", () => {
+    // Given a checkmark followed by the emoji variation selector
+    const checkmark = "✔️";
+
+    // When it is measured in terminal columns
+    const width = charWidth(checkmark);
+
+    // Then it takes two columns
+    expect(width).toBe(2);
+  });
+
+  test("a fire emoji draws wide", () => {
+    // Given the fire emoji on its own
+    const fire = "🔥";
+
+    // When it is measured in terminal columns
+    const width = charWidth(fire);
+
+    // Then it takes two columns
+    expect(width).toBe(2);
+  });
+
+  test("a cjk character draws wide", () => {
+    // Given a cjk character on its own
+    const cjk = "漢";
+
+    // When it is measured in terminal columns
+    const width = charWidth(cjk);
+
+    // Then it takes two columns
+    expect(width).toBe(2);
+  });
+
+  test("a keycap draws wide", () => {
+    // Given the keycap emoji, made of a digit and a combining cap
+    const keycap = "1️⃣";
+
+    // When it is measured in terminal columns
+    const width = charWidth(keycap);
+
+    // Then it takes two columns
+    expect(width).toBe(2);
+  });
+
+  test("a family built from several code points draws as one wide cluster", () => {
+    // Given a family emoji joined from several code points
+    const family = "👨‍👩‍👧";
+
+    // When it is measured in terminal columns
+    const width = textWidth(family);
+
+    // Then it takes two columns, not one for each code point
+    expect(width).toBe(2);
+  });
+
+  test("a flag built from two regional indicators draws as one wide cluster", () => {
+    // Given a flag made of two joined regional indicators
+    const flag = "🇺🇸";
+
+    // When it is measured in terminal columns
+    const width = textWidth(flag);
+
+    // Then it takes two columns, not one for each indicator
+    expect(width).toBe(2);
   });
 
   test("the width of a string counts columns rather than code points", () => {
