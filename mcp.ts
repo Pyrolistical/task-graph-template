@@ -225,7 +225,10 @@ export function build(startup: Startup): McpServer {
 
   view("tasks", "the last 100 tasks to change state");
 
-  view("queue", "the tasks waiting on a slot, in the order the scheduler will dispatch them");
+  view(
+    "queue",
+    "the tasks waiting on a slot, in the order the scheduler will dispatch them",
+  );
 
   resource(
     "paths",
