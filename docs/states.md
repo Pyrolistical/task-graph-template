@@ -148,11 +148,10 @@ An agent that cannot finish sets `result.type: blocked` with a message.
 - if the next settle is blocked again it applies `hold`, which clears the claim and records the message verbatim in `held_reason`
 - a person is the most expensive thing the system can spend, so it is worth one prompt to be sure
 
-The six halves of that question are six files — `blocked-WORK.md`, `blocked-WORK_REVIEW.md`, `blocked-PLAN.md`, `blocked-PLAN_REVIEW.md`, `blocked-DESIGN.md`, `blocked-DESIGN_REVIEW.md` — each with its alternative already written into it.
+That question is one file, `blocked.md`, because the same words hold from every claimed state: an agent is asked to look again, and to resubmit `blocked` with the same message if it still cannot proceed.
 
-- there is no shared fragment with a hole in it
-- the alternatives have nothing in common but their position in the sentence
-- a template that interpolates one prose paragraph into another is a worse way to read either of them
+- there is no shared fragment with a hole in it, and nothing is interpolated into the prose
+- a per-state variant is one line in `ISSUES` when a state needs its own words, as `modified-assignment` does
 
 ### Why they are states, not a flag
 

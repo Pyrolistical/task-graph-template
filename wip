@@ -1,0 +1,149 @@
+# Deep refactorings
+
+Ranked by leverage. Measurements are from the suite as it stands: 977 tests,
+134s, 19,341 lines of test against 9,759 lines of source.
+
+## 1. Redeem the Agents and Checks ports in the main/ suites
+
+docs/architecture.md says these two "are now one object away from being faked".
+Nothing has claimed the object. wire() (main/compose.ts:78) hardcodes PiProcess
+and CheckRunner, so every main/ test clones a repo and spawns fake-pi
+subprocesses:
+
+- main/server-views.test.ts — 56.2s
+- main/mcp.test.ts — 51.2s
+- everything else combined — ~27s
+
+107 of the 134 seconds, and server-views is asserting view shapes: agents[0]
+.state === "IDLE", row counts, null columns. It needs a Server, not a
+subprocess.
+
+Split wire into ports(options): Ports and assemble(config, ports): Server. The
+view, settle and dispatch suites call assemble with a FakeAgents, which
+testing/ports.ts:55 already almost is. mcp.test.ts gets the same treatment from
+the other end: build(startup) (mcp.ts:44) already takes an injectable Startup,
+so it can run in-process against a fake Server instead of over a real stdio
+transport — only the handful of tests that genuinely exercise the transport keep
+spawning it. What is left is ~4 suites that really test pi, bwrap and git.
+
+## 2. Delete the adapter-level mirror of the state machine
+
+adapters/machine.test.ts is 2,405 lines / 145 filesystem tests that shadow
+domain/state-machine.test.ts (1,216 lines / 105 pure tests) name for name:
+
+    domain:    "a task in DESIGN that submits lands in DESIGN_REVIEW"
+    adapters:  "a task in DESIGN that submits is written to the document as DESIGN_REVIEW"
+
+Every rule is asserted twice, once as a decision and once through a temp dir.
+What applyTransition adds over decide is small and mostly untested as its own
+thing: stamping state_entered, clearing the claim, closeTaskFile, and
+propagateClose (adapters/transition-store.ts:26). That is ~10 tests. The claim
+block (machine.test.ts:1795) is six copies of one assertion parameterised by
+state, and isAgentState is already a domain predicate, so that rule belongs in
+domain/ too.
+
+This is not re-tabling anything — one behaviour per test stays. It is deleting a
+second copy of the coverage that lives in the wrong layer. Roughly 2,000 lines,
+and every state-machine change currently costs two edits.
+
+## 3. Worker is a mutable god-record; make it a union
+
+app/pool.ts:28 — 20 fields, all `| null`, all null when idle. The cost lands in
+settle-agent.ts, which carries 15 non-null assertions: worker.task_id! x5,
+worker.stage! x5, worker.process! x4, plus worktree!, dispatched!, head!.
+
+    type Worker = { slot; state: "IDLE" } | { slot; state: Running; job: Job }
+
+where Job holds the eight fields that are non-null exactly when a worker holds a
+task. "SPAWNING with no process" and "BUSY with no stage" stop being
+representable, and freshWorker's 20-line null literal collapses. This is the
+single biggest source of ! in the codebase.
+
+## 4. The per-state prompt files are 21 copies of 4 prompts
+
+orchestrator/prompts/ is 42 files. By content hash:
+
+- blocked-\* — 6 identical
+- missing-result-\* — 6 identical
+- looping-\* — 6 identical (looping-WORK_REVIEW.md differs by a trailing newline)
+- modified-worktree-\* — 4 identical
+
+ISSUES already supports state-independent fragments: uncommitted and
+missing-todos do `fragment: () => "uncommitted"` (domain/issues.ts:81). So this
+is four one-line changes plus 17 deletions. The only thing holding the copies in
+place is Issue.states, a field read by nothing in the source — its sole consumer
+is adapters/prompts.test.ts:376, a completeness check that demands a file per
+(issue, state) pair. The field goes with the files, and the test becomes "every
+issue names a prompt that exists". modified-assignment-\* genuinely differs per
+state; it stays.
+
+## 5. Nine file adapters → two stores (the big one)
+
+There are two state stores in the system, but they're implemented across nine
+tiny adapter files plus ~120 lines of hand-wired glue in compose.ts:
+
+- The tasks side — three adapters for one concept (the task document):
+  task-store.ts (parse/read/write), transition-store.ts (applyTransition),
+  graph-store.ts (readActiveTasks/readTaskBody)
+- The runtime side — six for one concept (the per-task runtime dir): queue.ts,
+  findings.ts, claim.ts, assignment-store.ts, transition-log.ts, plus fs calls
+  written inline in compose.ts:215-243
+
+Runtime (adapters/runtime.ts) already owns the path layout; the small adapters
+are just each re-walking its layout with its own file convention. The refactor:
+one TaskFiles object over Runtime (queue, findings, review-failure-count, claim,
+ASSIGNMENT.md, history) and one TaskDocuments over the tasks dir (parse, apply,
+list). That's ~9 files + the compose glue → 2 objects. The ports stay the same
+shape, so app/ is untouched — but compose.ts loses its longest hand-wired
+sections (tasks, inbox, assignments objects), and the corresponding fakes in
+testing/ports.ts shrink with them. File formats stay on disk unchanged — the
+runtime directory's debuggability is the design's whole point
+(docs/runtime-directory.md), so this is ceremony removal, not a behavior change.
+
+Fold in while there: ClaimArgs is declared twice (app/ports.ts:24,
+adapters/claim.ts:11) and requireText is copy-pasted between
+domain/state-machine.ts:263 and adapters/claim.ts:20. Those duplicates exist
+because the concept is spread across files; they disappear with the merge rather
+than needing their own pass.
+
+## 6. Stop Server from becoming a service locator
+
+Server has grown getters that hand out its internals — prompts, transitions,
+rates, runtime, tasksDir (app/server.ts:81-95) — and mcp.ts reaches through them
+(e.g. live().tasksDir at mcp.ts:80 alongside createTask imported from the
+adapter layer, which is composition-root work happening in a protocol file). The
+onion's boundary is supposed to be main/compose.ts; right now both entries
+pierce it. Give mcp.ts an explicit interface of the ~10 operations its tools
+need, implemented by Server, so the getters collapse and the MCP tools stop
+knowing Server's shape.
+
+Go further than that: mcp.ts reaches live().runtime 15 times, and 11 of those
+are to get a view file path and read it (mcp.ts:266-320). The interface should
+be the operations plus view(name): string and paths(): PathReport, so mcp.ts
+never touches Runtime and the runtime / prompts / transitions / rates / tasksDir
+/ orchestratorDir / overridesDir / agentsPath getters all delete. That also
+unblocks 1, since a fake Server becomes a small object instead of a class with a
+filesystem hanging off it.
+
+## 7. Derive ALLOWED_TRANSITIONS from STAGES
+
+state-machine.ts now carries two hand-maintained representations of the same
+machine: the STAGES table (which already knows back, phase, role) and the 15-row
+ALLOWED_TRANSITIONS matrix (state-machine.ts:223). The matrix is mostly
+derivable from the table: agent stages get submit, hold; reviewer stages add
+feedback; CHECK gets pass, fail, hold; only NEW, BLOCKED, HELD_\*,
+MANAGER_REVIEW are hand-set. That's one small allowed(state) function replacing
+a matrix that can silently drift from STAGES (and it already duplicates what
+NEXT_STATE and back declare). The mutate switch stays — it's the transition
+policy, and the per-event special cases (NEW/BLOCKED submit, resume-with-deps →
+BLOCKED, feedback-into-body) make full data-encoding worse than a switch.
+
+The real payoff is downstream: decide casts `state as AdvancingState` four times
+(state-machine.ts:296-311) because the matrix can't prove the state is a stage.
+Deriving from STAGES makes those casts unnecessary, which is worth more than the
+deleted rows.
+
+## Order
+
+4 first (an afternoon, zero risk), then 6 and 1 together (6 unblocks the fake
+Server that 1 needs), then 2 and 3, then 5, then 7.

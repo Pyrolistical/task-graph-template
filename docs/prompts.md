@@ -6,30 +6,27 @@ Every word an agent reads is a file.
 - so a prompt can be rewritten without a diff to the server
 - and reading the fifty files is reading everything the agents are told
 
-| File                                         | Kind            | Given to                                                                 |
-| -------------------------------------------- | --------------- | ------------------------------------------------------------------------ |
-| `prompts/DESIGN.md`                          | dispatch prompt | every `DESIGN` agent, as the first thing it is asked                     |
-| `prompts/DESIGN-with-findings.md`            | dispatch prompt | a `DESIGN` agent the design review sent back, in place of `DESIGN.md`    |
-| `prompts/DESIGN_REVIEW.md`                   | dispatch prompt | every `DESIGN_REVIEW` agent, as the first thing it is asked              |
-| `prompts/PLAN.md`                            | dispatch prompt | every `PLAN` agent, as the first thing it is asked                       |
-| `prompts/PLAN-with-findings.md`              | dispatch prompt | a `PLAN` agent the plan review sent back, in place of `PLAN.md`          |
-| `prompts/PLAN_REVIEW.md`                     | dispatch prompt | every `PLAN_REVIEW` agent, as the first thing it is asked                |
-| `prompts/WORK.md`                            | dispatch prompt | every `WORK` agent, as the first thing it is asked                       |
-| `prompts/WORK-with-findings.md`              | dispatch prompt | a `WORK` agent a work or manager review sent back, in place of `WORK.md` |
-| `prompts/WORK_REVIEW.md`                     | dispatch prompt | every `WORK_REVIEW` agent, as the first thing it is asked                |
-| `prompts/check-failed.md`                    | queue entry     | a failed check, rendered into the worker's prompt queue                  |
-| `prompts/missing-result-<state>.md`          | prompt fragment | an agent that settled without calling a result tool                      |
-| `prompts/missing-todos.md`                   | prompt fragment | a planner that submitted without appending a `## Todos` section          |
-| `prompts/missing-design.md`                  | prompt fragment | a designer that submitted without appending a `## Design` section        |
-| `prompts/missing-notes.md`                   | prompt fragment | a worker that submitted without appending `## Implementation Notes`      |
-| `prompts/modified-assignment-<state>.md`     | prompt fragment | an agent that changed the assignment above its allowed section           |
-| `prompts/modified-worktree-DESIGN.md`        | prompt fragment | a designer that wrote or committed                                       |
-| `prompts/modified-worktree-DESIGN_REVIEW.md` | prompt fragment | a design reviewer that wrote or committed                                |
-| `prompts/modified-worktree-PLAN.md`          | prompt fragment | a planner that wrote or committed                                        |
-| `prompts/modified-worktree-PLAN_REVIEW.md`   | prompt fragment | a plan reviewer that wrote or committed                                  |
-| `prompts/uncommitted.md`                     | prompt fragment | a worker that submitted uncommitted work                                 |
-| `prompts/looping-<state>.md`                 | prompt fragment | an agent, caught repeating one command                                   |
-| `prompts/blocked-<state>.md`                 | prompt fragment | an agent that came back blocked                                          |
+| File                                     | Kind            | Given to                                                                 |
+| ---------------------------------------- | --------------- | ------------------------------------------------------------------------ |
+| `prompts/DESIGN.md`                      | dispatch prompt | every `DESIGN` agent, as the first thing it is asked                     |
+| `prompts/DESIGN-with-findings.md`        | dispatch prompt | a `DESIGN` agent the design review sent back, in place of `DESIGN.md`    |
+| `prompts/DESIGN_REVIEW.md`               | dispatch prompt | every `DESIGN_REVIEW` agent, as the first thing it is asked              |
+| `prompts/PLAN.md`                        | dispatch prompt | every `PLAN` agent, as the first thing it is asked                       |
+| `prompts/PLAN-with-findings.md`          | dispatch prompt | a `PLAN` agent the plan review sent back, in place of `PLAN.md`          |
+| `prompts/PLAN_REVIEW.md`                 | dispatch prompt | every `PLAN_REVIEW` agent, as the first thing it is asked                |
+| `prompts/WORK.md`                        | dispatch prompt | every `WORK` agent, as the first thing it is asked                       |
+| `prompts/WORK-with-findings.md`          | dispatch prompt | a `WORK` agent a work or manager review sent back, in place of `WORK.md` |
+| `prompts/WORK_REVIEW.md`                 | dispatch prompt | every `WORK_REVIEW` agent, as the first thing it is asked                |
+| `prompts/check-failed.md`                | queue entry     | a failed check, rendered into the worker's prompt queue                  |
+| `prompts/missing-result.md`              | prompt fragment | an agent that settled without calling a result tool                      |
+| `prompts/missing-todos.md`               | prompt fragment | a planner that submitted without appending a `## Todos` section          |
+| `prompts/missing-design.md`              | prompt fragment | a designer that submitted without appending a `## Design` section        |
+| `prompts/missing-notes.md`               | prompt fragment | a worker that submitted without appending `## Implementation Notes`      |
+| `prompts/modified-assignment-<state>.md` | prompt fragment | an agent that changed the assignment above its allowed section           |
+| `prompts/modified-worktree.md`           | prompt fragment | a designer, planner or their reviewer that wrote or committed            |
+| `prompts/uncommitted.md`                 | prompt fragment | a worker that submitted uncommitted work                                 |
+| `prompts/looping.md`                     | prompt fragment | an agent, caught repeating one command                                   |
+| `prompts/blocked.md`                     | prompt fragment | an agent that came back blocked                                          |
 
 Six files are code, not prose:
 

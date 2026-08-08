@@ -75,23 +75,22 @@ Everything the server can find wrong with a settle — and one thing it can find
 - raising one prompts the live session with that fragment
 - the attempt after the last one is a `hold` whose reason names the issue
 
-| Issue                 | Attempts | Fragment                                                 | Held as                                                     |
-| --------------------- | -------- | -------------------------------------------------------- | ----------------------------------------------------------- |
-| `missing-result`      | 8        | `missing-result-<state>.md`                              | the agent stopped without calling a submit or blocked tool  |
-| `missing-todos`       | 4        | `missing-todos.md`                                       | the planner submitted without appending a todo list         |
-| `missing-design`      | 4        | `missing-design.md`                                      | the designer submitted without appending a design section   |
-| `missing-notes`       | 4        | `missing-notes.md`                                       | the worker submitted without appending implementation notes |
-| `modified-assignment` | 4        | `modified-assignment-<state>.md`                         | the agent changed parts of the assignment it may not        |
-| `uncommitted`         | 4        | `uncommitted.md`, rendered from `git status`             | the agent submitted work it never committed                 |
-| `looping`             | 3        | `looping-<state>.md`, rendered from the repeated command | the agent kept repeating one command                        |
-| `blocked`             | 1        | `blocked-<state>.md`, one per claimed state              | the agent's own `message`, verbatim                         |
-| `modified-worktree`   | 4        | `modified-worktree-<state>.md`                           | the agent wrote to the worktree during design or planning   |
+| Issue                 | Attempts | Fragment                                         | Held as                                                     |
+| --------------------- | -------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| `missing-result`      | 8        | `missing-result.md`                              | the agent stopped without calling a submit or blocked tool  |
+| `missing-todos`       | 4        | `missing-todos.md`                               | the planner submitted without appending a todo list         |
+| `missing-design`      | 4        | `missing-design.md`                              | the designer submitted without appending a design section   |
+| `missing-notes`       | 4        | `missing-notes.md`                               | the worker submitted without appending implementation notes |
+| `modified-assignment` | 4        | `modified-assignment-<state>.md`                 | the agent changed parts of the assignment it may not        |
+| `uncommitted`         | 4        | `uncommitted.md`, rendered from `git status`     | the agent submitted work it never committed                 |
+| `looping`             | 3        | `looping.md`, rendered from the repeated command | the agent kept repeating one command                        |
+| `blocked`             | 1        | `blocked.md`                                     | the agent's own `message`, verbatim                         |
+| `modified-worktree`   | 4        | `modified-worktree.md`                           | the agent wrote to the worktree during design or planning   |
 
 Scoping:
 
-- `missing-todos`, `missing-design`, `missing-notes` and `uncommitted` fire from exactly one state and keep a plain fragment name
-- `looping`, `blocked`, `modified-worktree`, `modified-assignment` and `missing-result` can fire from several, so each is one file per state
-- that way a project can override the designer's looping nudge without touching the worker's
+- every issue names one fragment, whatever it fires from, because the words do not depend on the state
+- `modified-assignment` is the exception, and is one file per state: each names the section that state may append, and the reviewers are told they may write nothing at all
 - attempts are counted per issue per dispatch, not per settle — an agent that edits the assignment twice and then stops without a result has spent two of one budget and one of another
 
 ### Why four attempts

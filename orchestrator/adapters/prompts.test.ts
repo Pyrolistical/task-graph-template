@@ -9,7 +9,11 @@ import { render } from "../domain/template.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
 import { templateOf } from "../testing/orchestrator-jig.ts";
-import { type ClaimState, STAGE_OF } from "../domain/state-machine.ts";
+import {
+  type ClaimState,
+  AGENT_STATES,
+  STAGE_OF,
+} from "../domain/state-machine.ts";
 
 interface Schema {
   properties: Record<string, unknown>;
@@ -111,7 +115,7 @@ describe("Feature: overriding the words an agent reads", () => {
     // Then each still comes from the orchestrator, rendered as it always was
     expect(others).toEqual([
       templateOf("prompts/WORK_REVIEW.md"),
-      render(templateOf("prompts/looping-WORK.md"), {
+      render(templateOf("prompts/looping.md"), {
         command: "bun test",
         limit: LOOP_LIMIT,
       }),
@@ -371,9 +375,9 @@ describe("Feature: the issues an agent is sent back for", () => {
   testInTempDirs(
     "every issue has a prompt for every state that raises it",
     () => {
-      // Given every issue and the states it can be raised in
+      // Given every issue, named for each state an agent can be raised at in
       const wanted = Object.values(ISSUES).flatMap((issue) =>
-        issue.states.map((state) =>
+        AGENT_STATES.map((state) =>
           path.join(ORCHESTRATOR_DIR, "prompts", `${issue.fragment(state)}.md`),
         ),
       );
