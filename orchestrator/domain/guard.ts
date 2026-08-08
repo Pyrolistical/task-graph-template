@@ -1,5 +1,5 @@
 import type { Guard } from "./state-machine.ts";
-import type { TemplateVars } from "./template.ts";
+import type { FragmentVars } from "./fragment.ts";
 
 export const STATUS_SHOWN_LINES = 20;
 
@@ -55,7 +55,7 @@ function dirtyVar(dirty: string[]): Record<string, string>[] {
   return dirty.length === 0 ? [] : [{ status: statusOf(dirty) }];
 }
 
-export function varsOf(issue: WorktreeIssue): TemplateVars {
+export function varsOf(issue: WorktreeIssue): FragmentVars {
   switch (issue.name) {
     case "uncommitted": {
       return {

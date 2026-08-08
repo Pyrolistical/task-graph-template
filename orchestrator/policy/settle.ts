@@ -9,7 +9,7 @@ import type { IssueName } from "../domain/issues.ts";
 import { type StopReason, LOOP_LIMIT } from "../domain/protocol.ts";
 import { type ResultCall, resultFromCall } from "../domain/results.ts";
 import { type ClaimState, STAGE_OF } from "../domain/state-machine.ts";
-import type { TemplateVars } from "../domain/template.ts";
+import type { FragmentVars } from "../domain/fragment.ts";
 
 export interface Settlement {
   state: ClaimState;
@@ -25,7 +25,7 @@ export interface Settlement {
 export type Intent =
   | { kind: "abandon" }
   | { kind: "back-off" }
-  | { kind: "raise"; issue: IssueName; detail: string; vars: TemplateVars }
+  | { kind: "raise"; issue: IssueName; detail: string; vars: FragmentVars }
   | { kind: "restore"; section: string | null }
   | { kind: "feedback"; findings: string[] }
   | { kind: "submit"; body: boolean };
@@ -88,6 +88,6 @@ export function decideSettle(settled: Settlement): Intent[] {
   return [{ kind: "submit", body: stage.body }];
 }
 
-function raise(issue: IssueName, detail = "", vars: TemplateVars = {}): Intent {
+function raise(issue: IssueName, detail = "", vars: FragmentVars = {}): Intent {
   return { kind: "raise", issue, detail, vars };
 }

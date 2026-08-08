@@ -1,9 +1,9 @@
-export type TemplateValue =
+export type FragmentValue =
   | string
   | number
   | Record<string, string | number | boolean>[];
 
-export type TemplateVars = Record<string, TemplateValue>;
+export type FragmentVars = Record<string, FragmentValue>;
 
 const SECTION_OPEN = /^(\s*)\{\{#(\w+)\}\}\s*$/;
 const SECTION_CLOSE = /^\s*\{\{\/(\w+)\}\}\s*$/;
@@ -12,7 +12,7 @@ const PLACEHOLDER = /\{\{(\w+)\}\}/g;
 function substitute(line: string, vars: Record<string, unknown>): string {
   return line.replace(PLACEHOLDER, (match, name: string, offset: number) => {
     if (!(name in vars)) {
-      throw new Error(`Template refers to "${name}", which was not given`);
+      throw new Error(`Fragment refers to "${name}", which was not given`);
     }
     const value = String(vars[name]);
     const quoted =
@@ -21,7 +21,7 @@ function substitute(line: string, vars: Record<string, unknown>): string {
   });
 }
 
-export function render(template: string, vars: TemplateVars): string {
+export function render(template: string, vars: FragmentVars): string {
   const out: string[] = [];
   const lines = template.split("\n");
 
@@ -43,7 +43,7 @@ export function render(template: string, vars: TemplateVars): string {
       const close = SECTION_CLOSE.exec(inner);
       if (close !== null) {
         if (close[1] !== name) {
-          throw new Error(`Template closes "${close[1]}" inside "${name}"`);
+          throw new Error(`Fragment closes "${close[1]}" inside "${name}"`);
         }
         closed = true;
         break;
@@ -52,12 +52,12 @@ export function render(template: string, vars: TemplateVars): string {
     }
 
     if (!closed) {
-      throw new Error(`Template never closes "${name}"`);
+      throw new Error(`Fragment never closes "${name}"`);
     }
 
     const items = vars[name];
     if (!Array.isArray(items)) {
-      throw new Error(`Template section "${name}" needs a list`);
+      throw new Error(`Fragment section "${name}" needs a list`);
     }
 
     if (items.length === 0) {

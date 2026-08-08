@@ -12,7 +12,7 @@ import {
 import { PiProcess } from "./pi-process.ts";
 import type { Sample } from "../domain/rates.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
-import { templateOf } from "../testing/orchestrator-jig.ts";
+import { shippedFile } from "../testing/orchestrator-jig.ts";
 import { Prompts } from "./prompts.ts";
 
 beforeAll(() => {
@@ -695,7 +695,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("DESIGN");
 
     // Then it is the shipped design prompt, and it says something
-    expect(text).toBe(templateOf("prompts/DESIGN.md"));
+    expect(text).toBe(shippedFile("prompts/DESIGN.md"));
     expect(text.trim()).not.toBe("");
   });
 
@@ -707,7 +707,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("DESIGN_REVIEW");
 
     // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(templateOf("prompts/DESIGN_REVIEW.md"));
+    expect(text).toBe(shippedFile("prompts/DESIGN_REVIEW.md"));
     expect(text.trim()).not.toBe("");
   });
 
@@ -719,7 +719,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("PLAN");
 
     // Then it is the shipped plan prompt, and it says something
-    expect(text).toBe(templateOf("prompts/PLAN.md"));
+    expect(text).toBe(shippedFile("prompts/PLAN.md"));
     expect(text.trim()).not.toBe("");
   });
 
@@ -731,7 +731,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("PLAN_REVIEW");
 
     // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(templateOf("prompts/PLAN_REVIEW.md"));
+    expect(text).toBe(shippedFile("prompts/PLAN_REVIEW.md"));
     expect(text.trim()).not.toBe("");
   });
 
@@ -743,7 +743,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("WORK");
 
     // Then it is the shipped work prompt, and it says something
-    expect(text).toBe(templateOf("prompts/WORK.md"));
+    expect(text).toBe(shippedFile("prompts/WORK.md"));
     expect(text.trim()).not.toBe("");
   });
 
@@ -755,7 +755,7 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("WORK_REVIEW");
 
     // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(templateOf("prompts/WORK_REVIEW.md"));
+    expect(text).toBe(shippedFile("prompts/WORK_REVIEW.md"));
     expect(text.trim()).not.toBe("");
   });
 });

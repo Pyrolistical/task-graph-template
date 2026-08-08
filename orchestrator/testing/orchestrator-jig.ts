@@ -22,6 +22,6 @@ export function commitIn(target: string, file: string, contents: string): void {
   git.gitOrThrow(target, ["commit", "-q", "-m", `add ${file}`]);
 }
 
-export function templateOf(name: string): string {
+export function shippedFile(name: string): string {
   return fs.readFileSync(path.join(ORCHESTRATOR_DIR, name), "utf-8");
 }

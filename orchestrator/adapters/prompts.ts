@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ClaimState } from "../domain/state-machine.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
-import { type TemplateVars, render } from "../domain/template.ts";
+import { type FragmentVars, render } from "../domain/fragment.ts";
 
 interface CachedFile {
   path: string;
@@ -46,11 +46,11 @@ export class Prompts {
     return this.cachedFiles();
   }
 
-  fragment(name: string, vars: TemplateVars = {}): string {
+  fragment(name: string, vars: FragmentVars = {}): string {
     return render(this.file(name).contents, vars);
   }
 
-  issue(name: IssueName, state: ClaimState, vars: TemplateVars = {}): string {
+  issue(name: IssueName, state: ClaimState, vars: FragmentVars = {}): string {
     return this.fragment(ISSUES[name].fragment(state), vars);
   }
 

@@ -23,7 +23,7 @@ import type {
   TransitionName,
   TransitionResult,
 } from "../domain/state-machine.ts";
-import type { TemplateVars } from "../domain/template.ts";
+import type { FragmentVars } from "../domain/fragment.ts";
 
 export function aSlot(overrides: Partial<Slot> = {}): Slot {
   return {
@@ -371,7 +371,7 @@ export class FakePrompts implements Prompts {
     return `prompt:${name}`;
   }
 
-  issue(name: string, state: string, vars: TemplateVars = {}): string {
+  issue(name: string, state: string, vars: FragmentVars = {}): string {
     return `issue:${name}:${state}:${JSON.stringify(vars)}`;
   }
 

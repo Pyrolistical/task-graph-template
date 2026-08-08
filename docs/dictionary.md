@@ -29,30 +29,32 @@ one of them is wrong.
 
 ## The pipeline
 
-| Term          | What it names                                                                         | Carried by                    |
-| ------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
-| agent         | one entry in `agents.json`: a model on a provider, with roles and a write list        | `AgentEntry`, `agentName`     |
-| slot          | one concurrent seat of an agent, named `type-provider-model-index`                    | `Slot`, `slotName`, `SlotRow` |
-| pool          | every slot the server has, idle ones included                                         | `Pool`                        |
-| runner        | the pool's live state for one slot: its process, task, role, issues and backoff       | `Runner`                      |
-| run           | a runner that actually has a process, a task and a checkout                           | `Run`, `runOf`                |
-| process       | the `pi` subprocess behind a runner, and the rpc channel to it                        | `AgentProcess`, `PiProcess`   |
-| session       | the pi session file a turn is recorded in, one per task and role                      | `session`                     |
-| assignment    | `ASSIGNMENT.md` — the whole of what an agent is told, and where it answers            | `Assignments`                 |
-| workspace     | what a task keeps its work in: branch, worktree, slot and session                     | `Workspace`                   |
-| worktree      | the per-task clone of the repo on disk                                                | `worktree`                    |
-| branch        | `task/<id>`, the only thing an agent's commits land on                                | `branchName`                  |
-| base          | the branch a worktree is cut from and lands back onto                                 | `base`                        |
-| checkout      | what a runner was handed: branch, worktree, head, and the assignment as dispatched    | `Checkout`                    |
-| message queue | what the next agent on a task is told at dispatch — a failing check, and nothing else | `Messages`, `messages/`       |
-| dispatch      | handing one candidate to one slot: clone, write, claim, spawn, prompt                 | `Dispatcher`, `Dispatch`      |
-| candidate     | a task the scheduler could dispatch, with its rank                                    | `Candidate`, `candidates`     |
-| rank          | the scheduler's order over candidates                                                 | `Rank`, `RANKS`               |
-| settle        | reading what an agent's finished turn meant, and acting on it                         | `Settler`, `decideSettle`     |
-| issue         | a named way an agent's turn was wrong, with a retry budget                            | `IssueName`, `ISSUES`         |
-| guard         | what a stage requires of its worktree: untouched, committed, or nothing               | `Guard`, `worktreeIssue`      |
-| harvest       | fetching a worktree's branch back into the repo                                       | `harvest`                     |
-| land          | rebasing, re-checking and fast-forwarding a task's branch onto the base               | `Lander`                      |
+| Term            | What it names                                                                         | Carried by                    |
+| --------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
+| agent           | one entry in `agents.json`: a model on a provider, with roles and a write list        | `AgentEntry`, `agentName`     |
+| slot            | one concurrent seat of an agent, named `type-provider-model-index`                    | `Slot`, `slotName`, `SlotRow` |
+| pool            | every slot the server has, idle ones included                                         | `Pool`                        |
+| runner          | the pool's live state for one slot: its process, task, role, issues and backoff       | `Runner`                      |
+| run             | a runner that actually has a process, a task and a checkout                           | `Run`, `runOf`                |
+| process         | the `pi` subprocess behind a runner, and the rpc channel to it                        | `AgentProcess`, `PiProcess`   |
+| session         | the pi session file a turn is recorded in, one per task and role                      | `session`                     |
+| assignment      | `ASSIGNMENT.md` — the whole of what an agent is told, and where it answers            | `Assignments`                 |
+| prompt fragment | one file under `prompts/`, rendered with vars into a thing an agent is sent           | `Prompts.fragment`, `render`  |
+| template        | `template.md` — the document a new task is created from                               | `templatePath`                |
+| workspace       | what a task keeps its work in: branch, worktree, slot and session                     | `Workspace`                   |
+| worktree        | the per-task clone of the repo on disk                                                | `worktree`                    |
+| branch          | `task/<id>`, the only thing an agent's commits land on                                | `branchName`                  |
+| base            | the branch a worktree is cut from and lands back onto                                 | `base`                        |
+| checkout        | what a runner was handed: branch, worktree, head, and the assignment as dispatched    | `Checkout`                    |
+| message queue   | what the next agent on a task is told at dispatch — a failing check, and nothing else | `Messages`, `messages/`       |
+| dispatch        | handing one candidate to one slot: clone, write, claim, spawn, prompt                 | `Dispatcher`, `Dispatch`      |
+| candidate       | a task the scheduler could dispatch, with its rank                                    | `Candidate`, `candidates`     |
+| rank            | the scheduler's order over candidates                                                 | `Rank`, `RANKS`               |
+| settle          | reading what an agent's finished turn meant, and acting on it                         | `Settler`, `decideSettle`     |
+| issue           | a named way an agent's turn was wrong, with a retry budget                            | `IssueName`, `ISSUES`         |
+| guard           | what a stage requires of its worktree: untouched, committed, or nothing               | `Guard`, `worktreeIssue`      |
+| harvest         | fetching a worktree's branch back into the repo                                       | `harvest`                     |
+| land            | rebasing, re-checking and fast-forwarding a task's branch onto the base               | `Lander`                      |
 
 - an **agent** is configured, a **slot** is dispatched to, a **runner** is what
   the pool remembers about that slot right now. `claimed_by`, `workspace.slot`
@@ -77,16 +79,17 @@ one of them is wrong.
 
 ## Words that are not used
 
-| Not this                    | This           | Why                                                                        |
-| --------------------------- | -------------- | -------------------------------------------------------------------------- |
-| journal                     | transition log | one log, one name; the port is `Transitions`                               |
-| worker (a member of a pool) | runner         | `worker` is a role, and a runner can be any of the four                    |
-| agent (a seat in the pool)  | slot           | an agent is the `agents.json` entry; its seats are slots                   |
-| inbox (a task's own)        | message queue  | the inbox is the manager's, and only the manager's                         |
-| prompt queue                | message queue  | it carries messages; prompts are the fragments an agent is dispatched with |
-| stage (a value like `WORK`) | state          | a stage is a table row, a state is a document field                        |
-| clone (the directory)       | worktree       | `git clone` is how one is made, not what it is called afterwards           |
-| session (a pi process)      | process        | a session is the file; the process is `AgentProcess`                       |
+| Not this                    | This           | Why                                                                            |
+| --------------------------- | -------------- | ------------------------------------------------------------------------------ |
+| journal                     | transition log | one log, one name; the port is `Transitions`                                   |
+| worker (a member of a pool) | runner         | `worker` is a role, and a runner can be any of the four                        |
+| agent (a seat in the pool)  | slot           | an agent is the `agents.json` entry; its seats are slots                       |
+| inbox (a task's own)        | message queue  | the inbox is the manager's, and only the manager's                             |
+| prompt queue                | message queue  | it carries messages; prompts are the fragments an agent is dispatched with     |
+| stage (a value like `WORK`) | state          | a stage is a table row, a state is a document field                            |
+| clone (the directory)       | worktree       | `git clone` is how one is made, not what it is called afterwards               |
+| session (a pi process)      | process        | a session is the file; the process is `AgentProcess`                           |
+| template (a prompt file)    | fragment       | the template is the one a task is created from; `fragment.ts` renders the rest |
 
 ## How identifiers are spelled
 

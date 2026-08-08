@@ -622,16 +622,16 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 ### Feature: filling a prompt in
 
-#### a template asking for something it was not given fails
+#### a fragment asking for something it was not given fails
 
-- **Given** a template that refers to a variable
+- **Given** a fragment that refers to a variable
 - **When** it is rendered without that variable
 - **Then** it fails and names what was missing, rather than rendering a blank
 
 #### a section that is never closed fails
 
-- **Given** a template with an unclosed section in it
-- **When** the template is rendered
+- **Given** a fragment with an unclosed section in it
+- **When** the fragment is rendered
 - **Then** it fails and names the section, rather than swallowing the rest
 
 ### Feature: the issues an agent is sent back for

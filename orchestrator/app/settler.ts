@@ -18,7 +18,7 @@ import { type IssueName, ISSUES } from "../domain/issues.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 import { STAGE_OF } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
-import type { TemplateVars } from "../domain/template.ts";
+import type { FragmentVars } from "../domain/fragment.ts";
 import {
   type Intent,
   type Settlement,
@@ -225,7 +225,7 @@ export class Settler {
     run: Run,
     name: IssueName,
     detail: string,
-    vars: TemplateVars = {},
+    vars: FragmentVars = {},
   ): Promise<void> {
     const { runner, taskId } = run;
     const issue = ISSUES[name];

@@ -5,10 +5,10 @@ import path from "node:path";
 import { ISSUES } from "../domain/issues.ts";
 import { Prompts } from "./prompts.ts";
 import { resultFromCall } from "../domain/results.ts";
-import { render } from "../domain/template.ts";
+import { render } from "../domain/fragment.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { ORCHESTRATOR_DIR } from "../testing/graph-jig.ts";
-import { templateOf } from "../testing/orchestrator-jig.ts";
+import { shippedFile } from "../testing/orchestrator-jig.ts";
 import {
   type ClaimState,
   CLAIM_STATES,
@@ -83,7 +83,7 @@ describe("Feature: overriding the words an agent reads", () => {
       const fragment = prompts.fragment("WORK");
 
       // Then it is the orchestrator's own copy of it
-      expect(fragment).toBe(templateOf("prompts/WORK.md"));
+      expect(fragment).toBe(shippedFile("prompts/WORK.md"));
     },
   );
 
@@ -114,8 +114,8 @@ describe("Feature: overriding the words an agent reads", () => {
 
     // Then each still comes from the orchestrator, rendered as it always was
     expect(others).toEqual([
-      templateOf("prompts/WORK_REVIEW.md"),
-      render(templateOf("prompts/looping.md"), {
+      shippedFile("prompts/WORK_REVIEW.md"),
+      render(shippedFile("prompts/looping.md"), {
         command: "bun test",
         limit: LOOP_LIMIT,
       }),
@@ -184,7 +184,7 @@ describe("Feature: overriding the words an agent reads", () => {
 
     // Then the orchestrator's own copy is back in use, and no longer named
     expect(cached).not.toContain(path.join(dir, "prompts", "WORK.md"));
-    expect(prompts.fragment("WORK")).toBe(templateOf("prompts/WORK.md"));
+    expect(prompts.fragment("WORK")).toBe(shippedFile("prompts/WORK.md"));
   });
 
   testInTempDirs("a prompt in neither directory names both of them", () => {
@@ -205,13 +205,13 @@ describe("Feature: overriding the words an agent reads", () => {
 
 describe("Feature: filling a prompt in", () => {
   testInTempDirs(
-    "a template asking for something it was not given fails",
+    "a fragment asking for something it was not given fails",
     () => {
-      // Given a template that refers to a variable
-      const template = "agent: {{agent}}\n";
+      // Given a fragment that refers to a variable
+      const fragment = "agent: {{agent}}\n";
 
       // When it is rendered without that variable
-      const attempt = () => render(template, {});
+      const attempt = () => render(fragment, {});
 
       // Then it fails and names what was missing, rather than rendering a blank
       expect(attempt).toThrow(/refers to "agent"/);
@@ -219,11 +219,11 @@ describe("Feature: filling a prompt in", () => {
   );
 
   testInTempDirs("a section that is never closed fails", () => {
-    // Given a template with an unclosed section in it
-    const template = "{{#todos}}\n- x\n";
+    // Given a fragment with an unclosed section in it
+    const fragment = "{{#todos}}\n- x\n";
 
-    // When the template is rendered
-    const attempt = () => render(template, { todos: [] });
+    // When the fragment is rendered
+    const attempt = () => render(fragment, { todos: [] });
 
     // Then it fails and names the section, rather than swallowing the rest
     expect(attempt).toThrow(/never closes "todos"/);

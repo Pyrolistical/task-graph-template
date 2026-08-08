@@ -15,7 +15,7 @@ import {
   type TransitionResult,
 } from "../domain/state-machine.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
-import type { TemplateVars } from "../domain/template.ts";
+import type { FragmentVars } from "../domain/fragment.ts";
 import type { StreamState } from "../domain/protocol.ts";
 import type { InboxRow } from "../policy/inbox.ts";
 import type { Candidate } from "../policy/scheduler.ts";
@@ -112,8 +112,8 @@ export interface Checks {
 }
 
 export interface Prompts {
-  fragment(name: string, vars?: TemplateVars): string;
-  issue(name: IssueName, state: ClaimState, vars?: TemplateVars): string;
+  fragment(name: string, vars?: FragmentVars): string;
+  issue(name: IssueName, state: ClaimState, vars?: FragmentVars): string;
   reload(): string[];
   cachedFiles(): string[];
 }

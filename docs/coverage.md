@@ -99,7 +99,7 @@ Individually small; together they are the failure story.
 | `adapters/task-documents.ts:115`                       | a task file whose frontmatter id disagrees with its name                              |
 | `adapters/task-files.ts:94`                            | `findings.json` holding something that is not a count                                 |
 | `domain/task.ts:104`                                   | frontmatter that parses to a scalar rather than a mapping                             |
-| `domain/template.ts:44,58,64`                          | a template closing the wrong section, a section var that is not a list, an empty list |
+| `domain/fragment.ts:44,58,64`                          | a template closing the wrong section, a section var that is not a list, an empty list |
 | `domain/state-machine.ts:325,333`                      | `hold` from a state with no phase, `resume` on a task that is not held                |
 | `main/compose.ts:95-97`                                | no cgroup limits — the warning                                                        |
 | `task-store.ts:176`, `command.ts:22`, `compose.ts:227` | three bare `catch` swallows                                                           |

@@ -36,6 +36,7 @@ One stdio server, calling `task.ts` and `state-machine.ts` in process.
 | `disable_scheduler()`  | start nothing new; running processes are still settled and released   |
 | `disable_agent(agent)` | stop dispatching to every slot of one agent; running slots drain      |
 | `enable_agent(agent)`  | offer that agent's slots again                                        |
+| `slot_abort(slot)`     | kill the `bash` call one slot is inside; the turn and the claim stand |
 | `reload_prompts()`     | re-read every prompt and template from disk; returns each cached path |
 
 - `disable_scheduler` and `disable_agent` are the same verb at different scopes: the first parks the whole pool, the second parks one model on one provider when it is the thing misbehaving
