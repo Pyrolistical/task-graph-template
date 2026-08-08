@@ -379,9 +379,9 @@ export function hideButton(): Line {
   return [{ text: HIDE, sgr: REVERSE }];
 }
 
-export function hideRegion(from: number, width: number, rows: number): Region {
+export function hideRegion(from: number, to: number, rows: number): Region {
   const button = spanWidth(hideButton());
-  const left = from + Math.max(0, Math.floor((width - button) / 2));
+  const left = from + Math.max(0, Math.floor((to - from - button) / 2));
   return {
     row:
       QUEUE_LINES + HEADER_LINES + 1 + Math.floor((bodyHeight(rows) - 1) / 2),
@@ -500,15 +500,14 @@ export function screen(
   layout: Layout,
   hidden = 0,
 ): Frame {
-  if (cells.length === 0 && hidden === 0) {
+  if (cells.length === 0) {
     throw new Error("console: the agents view is empty");
   }
 
   const { columns, rows, nowMs, scroll } = layout;
   const strip = hidden === 0 ? 0 : COLLAPSED_WIDTH + 1;
-  const width =
-    cells.length === 0 ? 0 : paneWidth(columns - strip, cells.length);
-  if (cells.length > 0 && width < MIN_PANE_WIDTH) {
+  const width = paneWidth(columns - strip, cells.length);
+  if (width < MIN_PANE_WIDTH) {
     const needed = MIN_PANE_WIDTH * cells.length + cells.length - 1 + strip;
     throw new Error(
       `console: ${cells.length} panes need ${needed} columns, terminal has ${columns}`,
@@ -535,10 +534,6 @@ export function screen(
         enabled: !pane.agent.enabled,
       },
     });
-    if (!pane.agent.enabled) {
-      const at = hideRegion(from, width, rows);
-      hits.push({ ...at, command: { command: "hide_disabled" } });
-    }
     const button = abortButton(pane);
     if (button.length > 0) {
       const buttonWidth = spanWidth(button);
@@ -558,6 +553,21 @@ export function screen(
       ...body(paneLines, height, base, scroll.offsets[index] ?? 0),
     ];
   });
+
+  const off = cells.flatMap((cell, index) =>
+    cell.pane.agent.enabled ? [] : [index],
+  );
+  const hide =
+    off.length === 0 || off.length === cells.length
+      ? null
+      : hideRegion(
+          off[0]! * (width + 1),
+          off[off.length - 1]! * (width + 1) + width,
+          rows,
+        );
+  if (hide !== null) {
+    hits.push({ ...hide, command: { command: "hide_disabled" } });
+  }
 
   const rule: Line = [];
   rendered.forEach((_, index) => {
@@ -615,20 +625,15 @@ export function screen(
         ),
       );
     }
-    const hides = hits.filter(
-      (hit) =>
-        hit.command.command === "hide_disabled" &&
-        hit.row === row + QUEUE_LINES,
-    );
-    const withHides = hides.reduce(
-      (drawn, at) => overlay(drawn, hideButton(), at),
-      line,
-    );
+    const withHide =
+      hide !== null && hide.row === row + QUEUE_LINES
+        ? overlay(line, hideButton(), hide)
+        : line;
     out.push(
       renderLine(
         news !== null && row + QUEUE_LINES === news.row
-          ? overlay(withHides, newsButton(), news)
-          : withHides,
+          ? overlay(withHide, newsButton(), news)
+          : withHide,
       ),
     );
   }

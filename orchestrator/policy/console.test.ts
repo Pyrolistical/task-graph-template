@@ -659,7 +659,7 @@ describe("Feature: drawing the whole screen", () => {
 
   function disabledCell(index: number) {
     return {
-      pane: paneOf({ agents: [idleRow(SLOTS[index]!, false)] }),
+      pane: paneOf({ agents: [idleRow(SLOTS[index % SLOTS.length]!, false)] }),
       rate: null,
       lines: (width: number) => new PaneLines().update([], width),
     };
@@ -677,6 +677,37 @@ describe("Feature: drawing the whole screen", () => {
     expect(hide).toHaveLength(1);
     expect(bare(lines[hide[0]!.row]!)).toContain(HIDE.trim());
     expect(hide[0]!.from).toBeGreaterThan(paneWidth(100, 2));
+  });
+
+  test("two disabled panes share one button, centred across both", () => {
+    // Given one running slot and two whose agents have been turned off
+    const panes = [cells(1)[0]!, disabledCell(1), disabledCell(2)];
+
+    // When the screen is drawn
+    const { lines, hits } = screen(panes, [], layoutOf());
+
+    // Then one button is drawn, in the middle of the two disabled panes
+    const hide = hits.filter((hit) => hit.command.command === "hide_disabled");
+    const width = paneWidth(100, 3);
+    const span = { from: width + 1, to: 3 * width + 2 };
+    expect(hide).toHaveLength(1);
+    expect(bare(lines[hide[0]!.row]!)).toContain(HIDE.trim());
+    expect(hide[0]!.to - hide[0]!.from).toBe(textWidth(HIDE));
+    expect(hide[0]!.from + hide[0]!.to).toBe(span.from + span.to);
+  });
+
+  test("a screen with nothing running offers no button to hide with", () => {
+    // Given two slots whose agents have both been turned off
+    const panes = [disabledCell(0), disabledCell(1)];
+
+    // When the screen is drawn
+    const { lines, hits } = screen(panes, [], layoutOf());
+
+    // Then nothing offers to hide, because hiding them would leave an empty screen
+    expect(
+      hits.filter((hit) => hit.command.command === "hide_disabled"),
+    ).toEqual([]);
+    expect(lines.join("\n")).not.toContain(HIDE.trim());
   });
 
   test("a running pane carries no button to hide anything", () => {

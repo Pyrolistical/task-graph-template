@@ -224,7 +224,8 @@ export function frame(
 ): Frame {
   const view = readView(runtime);
   const all = panes(view);
-  const shown = collapsed ? all.filter((pane) => pane.agent.enabled) : all;
+  const running = all.filter((pane) => pane.agent.enabled);
+  const shown = collapsed && running.length > 0 ? running : all;
   const cells = shown.map((pane) => {
     const session = pane.agent.session;
     sessions.entries(session);

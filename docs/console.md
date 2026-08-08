@@ -39,8 +39,9 @@ tool: bash — bun test │ thinking (12s)        │
 - then the transcript, scrolling
 - panes divide the terminal evenly; below `MIN_PANE_WIDTH` (24 columns each) the console refuses to draw and says how many columns it needs, rather than rendering something unreadable
 - with no agents in the pool there are no panes: the queue line stays and the path of the pool file is centred below it, so a person knows which file to edit
-- disabled agents are drawn to the right of the running ones, and every one of their panes carries a `hide disabled` button across its middle
+- disabled agents are drawn to the right of the running ones, and one `hide disabled` button is drawn across the middle of the whole block of them, however many there are
 - hitting it collapses all of them into one eight-column strip at the right edge, reading `show`/`disabled`/`agents` down three lines, so the panes that are working get the rest of the terminal
+- with every agent in the pool disabled there is no button and nothing is collapsed, because hiding them would leave an empty screen — turning one back on brings the button back
 - hiding is the console's own state: nothing is written to the server, and the agents stay exactly as enabled or disabled as they were
 
 Each pane joins three sources by slot:
@@ -99,13 +100,13 @@ Two caches keep a 1s redraw cheap:
 
 SGR mouse reporting is on, and the console registers click targets as it renders:
 
-| Target                            | Command                              |
-| --------------------------------- | ------------------------------------ |
-| the scheduler switch, queue line  | `{command: "scheduler", enabled}`    |
-| a pane's switch, header line      | `{command: "agent", agent, enabled}` |
-| a pane's `[abort]`, activity line | `{command: "agent_abort", …}`        |
-| `hide disabled`, a disabled pane  | handled in the console               |
-| the collapsed column at the right | handled in the console               |
+| Target                              | Command                              |
+| ----------------------------------- | ------------------------------------ |
+| the scheduler switch, queue line    | `{command: "scheduler", enabled}`    |
+| a pane's switch, header line        | `{command: "agent", agent, enabled}` |
+| a pane's `[abort]`, activity line   | `{command: "agent_abort", …}`        |
+| `hide disabled`, the disabled block | handled in the console               |
+| the collapsed column at the right   | handled in the console               |
 
 - `New messages ↓` is the one target that is not a command: it is handled in the console, ahead of the hit list, and only moves the scroll
 - hit targets are recomputed every frame from the same layout that drew them, so a resize cannot leave a stale target behind
