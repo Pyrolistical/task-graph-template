@@ -2,7 +2,7 @@ import { z } from "zod";
 import { parse } from "./schema.ts";
 import type { TaskId } from "./task.ts";
 import { ALL_ROLES, type Role } from "./state-machine.ts";
-import type { Activity } from "./activity.ts";
+import { Activity } from "./activity.ts";
 
 function poolSchema(defaultWrite: string[]) {
   const Entry = z.strictObject({
@@ -92,41 +92,53 @@ export function parseAgents(
   return slots;
 }
 
-export type SlotState =
-  | "IDLE"
-  | "DISABLED"
-  | "SPAWNING"
-  | "BUSY"
-  | "WAITING"
-  | "ABORTING"
-  | "SETTLED";
+export const SlotState = z.enum([
+  "IDLE",
+  "DISABLED",
+  "SPAWNING",
+  "BUSY",
+  "WAITING",
+  "ABORTING",
+  "SETTLED",
+]);
 
-export interface SlotRow {
-  name: string;
-  agent: string;
-  type: string;
-  provider: string;
-  model: string;
-  index: number;
-  enabled: boolean;
-  state: SlotState;
-  task_id: TaskId | null;
-  role: Role | null;
-  pid: number | null;
-  started_at: string | null;
-  activity: Activity;
-  tokens: number | null;
-  context_percent: number | null;
-  compactions: number;
-  session: string | null;
-  log: string | null;
-  retry: Retry | null;
-}
+export type SlotState = z.infer<typeof SlotState>;
 
-export interface Retry {
-  at: string;
-  attempt: number;
-}
+export const Retry = z.strictObject({
+  at: z.string(),
+  attempt: z.int(),
+});
+
+export type Retry = z.infer<typeof Retry>;
+
+export const SlotRow = z.strictObject({
+  name: z.string(),
+  agent: z.string(),
+  type: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  index: z.int(),
+  enabled: z.boolean(),
+  state: SlotState,
+  task_id: z.string().nullable(),
+  role: z.enum(ALL_ROLES).nullable(),
+  pid: z.int().nullable(),
+  started_at: z.string().nullable(),
+  activity: Activity,
+  tokens: z.number().nullable(),
+  context_percent: z.number().nullable(),
+  compactions: z.int(),
+  session: z.string().nullable(),
+  log: z.string().nullable(),
+  retry: Retry.nullable(),
+});
+
+export type SlotRow = z.infer<typeof SlotRow>;
+
+export const SlotsView = z.looseObject({
+  agents_file: z.string(),
+  slots: z.array(SlotRow),
+});
 
 export function idleRow(slot: Slot, enabled = true): SlotRow {
   return {

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CreatedTask } from "../app/ports/tasks.ts";
+import { hasCode } from "../domain/errors.ts";
 import {
   type TaskId,
   type TaskMeta,
@@ -152,7 +153,7 @@ export function withLock<T>(tasksDir: string, fn: () => T): T {
       fs.writeSync(fd, `${process.pid}\n`);
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (!hasCode(err, "EEXIST")) throw err;
       Bun.sleepSync(LOCK_RETRY_MS);
     }
   }

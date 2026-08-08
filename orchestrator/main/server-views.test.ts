@@ -13,6 +13,8 @@ import {
 } from "../testing/fixture.ts";
 import { writeCommand } from "../adapters/command.ts";
 import { readView } from "../adapters/tui.ts";
+import { idleRow } from "../domain/agents.ts";
+import { aSlot } from "../testing/ports.ts";
 import { eventually } from "../testing/wait.ts";
 import {
   compactionsOf,
@@ -891,25 +893,22 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const runtime = runtimeOf(fixture);
       writeAtomic(
         runtime.slotsView,
-        viewJson(1, "slots", [
-          {
-            name: "pi-fake-fake-1",
-            type: "pi",
-            provider: "fake",
-            model: "fake",
-            index: 1,
-            state: "BUSY",
-            task_id: id,
-            role: "worker",
-            pid: alive.pid,
-            started_at: new Date().toISOString(),
-            activity: { kind: "none" },
-            tokens: null,
-            context_percent: null,
-            session: "/tmp/s.jsonl",
-            log: null,
-          },
-        ]),
+        viewJson(
+          1,
+          "slots",
+          [
+            {
+              ...idleRow(aSlot()),
+              state: "BUSY",
+              task_id: id,
+              role: "worker",
+              pid: alive.pid,
+              started_at: new Date().toISOString(),
+              session: "/tmp/s.jsonl",
+            },
+          ],
+          { agents_file: path.join(fixture.repo, "agents.json") },
+        ),
       );
 
       takeClaim(fixture.tasksDir, id, {

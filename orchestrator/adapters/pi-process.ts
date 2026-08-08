@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import type { AgentProcess } from "../app/ports/agents.ts";
+import { errorOf } from "../domain/errors.ts";
 import {
   type OnCompaction,
   type OnResult,
@@ -7,6 +8,7 @@ import {
   type PiResponse,
   type SpawnOptions,
   PiStream,
+  SessionStats,
   spawnArgs,
 } from "../domain/protocol.ts";
 
@@ -18,7 +20,7 @@ export class PiProcess implements AgentProcess {
   private readonly log: number;
   private nextId = 0;
   private closed = false;
-  private aborting = false;
+  private abortRequested = false;
   private stderr = "";
 
   constructor(
@@ -40,7 +42,7 @@ export class PiProcess implements AgentProcess {
       stderr: "pipe",
       detached: true,
       env: { ...process.env },
-    }) as Bun.Subprocess<"pipe", "pipe", "pipe">;
+    });
 
     this.pid = this.proc.pid;
     void this.pump();
@@ -84,7 +86,7 @@ export class PiProcess implements AgentProcess {
     try {
       this.write({ id, ...command });
     } catch (err) {
-      this.stream.reject(id, err as Error);
+      this.stream.reject(id, errorOf(err));
     }
     return expected;
   }
@@ -117,13 +119,17 @@ export class PiProcess implements AgentProcess {
   }
 
   async prompt(message: string): Promise<void> {
-    this.aborting = false;
+    this.abortRequested = false;
     this.stream.starting();
     await this.send({ type: "prompt", message });
   }
 
+  get aborting(): boolean {
+    return this.abortRequested;
+  }
+
   abort(): void {
-    this.aborting = true;
+    this.abortRequested = true;
     this.write({ type: "abort" });
   }
 
@@ -146,13 +152,11 @@ export class PiProcess implements AgentProcess {
     tokens: number | null;
     contextPercent: number | null;
   }> {
-    const data = (await this.send({ type: "get_session_stats" })).data ?? {};
-    const tokens = (data.tokens as { total?: number } | undefined)?.total;
-    const percent = (data.contextUsage as { percent?: number } | undefined)
-      ?.percent;
+    const response = await this.send({ type: "get_session_stats" });
+    const stats = SessionStats.parse(response.data ?? {});
     return {
-      tokens: typeof tokens === "number" ? tokens : null,
-      contextPercent: typeof percent === "number" ? percent : null,
+      tokens: stats.tokens?.total ?? null,
+      contextPercent: stats.contextUsage?.percent ?? null,
     };
   }
 

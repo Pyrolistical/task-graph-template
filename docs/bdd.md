@@ -2140,7 +2140,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** a slots view that parses but holds no slots at all
 - **When** the next server tries to read it back
-- **Then** it names the file it could not use
+- **Then** it names the file it could not use, and what was missing from it
 - **Then** the file really was there, so this is not the first-start path
 
 ## orchestrator/app/pool.test.ts

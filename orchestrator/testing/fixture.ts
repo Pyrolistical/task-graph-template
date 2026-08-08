@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { z } from "zod";
 import path from "node:path";
 import {
   createTask,
@@ -373,7 +374,7 @@ function messagesIn(sessionDir: string, name: string): string[] {
     .readFileSync(filePath, "utf-8")
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as string);
+    .map((line) => z.string().parse(JSON.parse(line)));
 }
 
 export function promptsTo(sessionDir: string): string[] {

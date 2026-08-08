@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ViewName } from "../app/ports/publisher.ts";
+import { hasCode } from "../domain/errors.ts";
 import type { TaskId } from "../domain/task.ts";
 import {
   type ClaimState,
@@ -151,7 +152,7 @@ export class Runtime {
     try {
       held = fs.readFileSync(this.lockFile, "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      if (hasCode(err, "ENOENT")) {
         return null;
       }
       throw err;
@@ -165,7 +166,7 @@ export class Runtime {
       fs.writeFileSync(this.lockFile, `${process.pid}`, { flag: "wx" });
       return true;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      if (hasCode(err, "EEXIST")) {
         return false;
       }
       throw err;

@@ -1,3 +1,4 @@
+import { messageOf } from "../domain/errors.ts";
 import type { CommandChannel } from "./ports/command-channel.ts";
 import type { Paths } from "./ports/paths.ts";
 import type { Prompts } from "./ports/prompts.ts";
@@ -270,7 +271,7 @@ export class Server implements Manager {
         this.setAgentEnabled(command.agent, command.enabled);
       }
     } catch (err) {
-      this.publisher.log(`console command refused: ${(err as Error).message}`);
+      this.publisher.log(`console command refused: ${messageOf(err)}`);
       return;
     }
     void this.writeViews().catch((err: Error) => {

@@ -7,6 +7,7 @@ import { type Runner, Pool } from "./pool.ts";
 import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../domain/agents.ts";
+import { messageOf } from "../domain/errors.ts";
 import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
 import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
@@ -57,7 +58,7 @@ export class Dispatcher {
         await this.assign(task, candidate, slot);
       } catch (err) {
         this.publisher.log(
-          `dispatch of ${task.id} to ${slot.name} failed: ${(err as Error).message}`,
+          `dispatch of ${task.id} to ${slot.name} failed: ${messageOf(err)}`,
         );
         this.pool.finish(this.pool.runner(slot.name));
       }

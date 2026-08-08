@@ -1,11 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import type { Assignments } from "../app/ports/assignments.ts";
 import type { Messages } from "../app/ports/messages.ts";
 import type { Reviews } from "../app/ports/reviews.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
+import { parse } from "../domain/schema.ts";
 import { Runtime } from "./runtime.ts";
+
+const Findings = z.array(z.string());
 
 export function historyName(n: number): string {
   return `ASSIGNMENT.${n}.md`;
@@ -71,7 +75,12 @@ export class TaskFiles implements Messages, Reviews, Assignments {
     if (!fs.existsSync(filePath)) {
       return [];
     }
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as string[];
+    return parse(
+      Findings,
+      JSON.parse(fs.readFileSync(filePath, "utf-8")),
+      "findings",
+      filePath,
+    );
   }
 
   setFindings(taskId: TaskId, findings: string[]): void {

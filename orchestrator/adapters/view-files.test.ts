@@ -67,8 +67,10 @@ describe("Feature: reading back the slots the last server published", () => {
     writeAtomic(runtime.slotsView, '{"seq": 1}');
 
     // When the next server tries to read it back
-    // Then it names the file it could not use
-    expect(() => publisher.lastSlots()).toThrow("has no slots array");
+    // Then it names the file it could not use, and what was missing from it
+    expect(() => publisher.lastSlots()).toThrow(
+      /Invalid slots view in .*slots\.json/,
+    );
 
     // Then the file really was there, so this is not the first-start path
     expect(fs.existsSync(runtime.slotsView)).toBe(true);

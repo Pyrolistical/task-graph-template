@@ -1,3 +1,4 @@
+import { memberOf, tableOf } from "./lookup.ts";
 import type { TaskId, TaskMeta } from "./task.ts";
 
 export const PHASES = ["design", "plan", "work"] as const;
@@ -44,8 +45,8 @@ interface StageFields {
   body: boolean;
 }
 
-export const STAGES = [
-  {
+export const STAGE_OF = {
+  DESIGN: {
     state: "DESIGN",
     phase: "design",
     role: "designer",
@@ -56,7 +57,7 @@ export const STAGES = [
     back: null,
     body: false,
   },
-  {
+  DESIGN_REVIEW: {
     state: "DESIGN_REVIEW",
     phase: "design",
     role: "reviewer",
@@ -67,7 +68,7 @@ export const STAGES = [
     back: "DESIGN",
     body: true,
   },
-  {
+  PLAN: {
     state: "PLAN",
     phase: "plan",
     role: "planner",
@@ -78,7 +79,7 @@ export const STAGES = [
     back: null,
     body: false,
   },
-  {
+  PLAN_REVIEW: {
     state: "PLAN_REVIEW",
     phase: "plan",
     role: "reviewer",
@@ -89,7 +90,7 @@ export const STAGES = [
     back: "PLAN",
     body: true,
   },
-  {
+  WORK: {
     state: "WORK",
     phase: "work",
     role: "worker",
@@ -100,7 +101,7 @@ export const STAGES = [
     back: null,
     body: true,
   },
-  {
+  CHECK: {
     state: "CHECK",
     phase: "work",
     role: null,
@@ -111,7 +112,7 @@ export const STAGES = [
     back: "WORK",
     body: false,
   },
-  {
+  WORK_REVIEW: {
     state: "WORK_REVIEW",
     phase: "work",
     role: "reviewer",
@@ -122,7 +123,7 @@ export const STAGES = [
     back: "WORK",
     body: false,
   },
-  {
+  MANAGER_REVIEW: {
     state: "MANAGER_REVIEW",
     phase: "work",
     role: null,
@@ -133,7 +134,9 @@ export const STAGES = [
     back: "WORK",
     body: false,
   },
-] as const satisfies readonly StageFields[];
+} as const satisfies { [S in ValidState]?: StageFields & { state: S } };
+
+export const STAGES = Object.values(STAGE_OF);
 
 export type Stage = (typeof STAGES)[number];
 
@@ -153,26 +156,21 @@ export const CLAIM_STAGES = STAGES.filter(
   (stage): stage is ClaimStage => stage.role !== null,
 );
 
-export const CLAIM_STATES = CLAIM_STAGES.map(
-  (stage) => stage.state,
-) as ClaimState[];
+export const CLAIM_STATES = CLAIM_STAGES.map((stage) => stage.state);
 
-export const REVIEW_STATES = STAGES.filter(
-  (stage) => stage.role === "reviewer",
-).map((stage) => stage.state) as ReviewState[];
+export const REVIEW_STAGES = STAGES.filter(
+  (stage): stage is ReviewStage => stage.role === "reviewer",
+);
+
+export const REVIEW_STATES = REVIEW_STAGES.map((stage) => stage.state);
 
 export const REVIEW_FAILURE_LIMIT = 2;
 
-export const STAGE_OF = Object.fromEntries(
-  STAGES.map((stage) => [stage.state, stage]),
-) as { [S in StageState]: Extract<Stage, { state: S }> };
-
-export const NEXT_STATE = Object.fromEntries(
-  STAGES.slice(0, -1).map((stage, index) => [
-    stage.state,
-    STAGES[index + 1]!.state,
-  ]),
-) as Record<AdvancingState, StageState>;
+export const NEXT_STATE = tableOf(
+  STAGES.slice(0, -1),
+  (stage) => stage.state,
+  (_stage, index) => STAGES[index + 1]!.state,
+);
 
 export const HELD_STATES = ["HELD_DESIGN", "HELD_PLAN", "HELD_WORK"] as const;
 
@@ -192,21 +190,17 @@ export const RESUME_TARGETS: Record<HeldState, StageState> = {
 
 export const ENTRY_STATE: StageState = "DESIGN";
 
-export function isHeld(state: TaskState): state is HeldState {
-  return (HELD_STATES as readonly string[]).includes(state);
-}
+export const isValidState = memberOf(VALID_STATES);
+
+export const isHeld = memberOf(HELD_STATES);
 
 export function isStage(state: TaskState): state is StageState {
   return state in STAGE_OF;
 }
 
-export function isClaimState(state: TaskState): state is ClaimState {
-  return (CLAIM_STATES as readonly string[]).includes(state);
-}
+export const isClaimState = memberOf(CLAIM_STATES);
 
-export function isReviewState(state: TaskState): state is ReviewState {
-  return (REVIEW_STATES as readonly string[]).includes(state);
-}
+export const isReviewState = memberOf(REVIEW_STATES);
 
 export const TRANSITION_NAMES = [
   "submit",
@@ -245,10 +239,11 @@ function allowedFrom(state: ValidState): TransitionName[] {
     : ["submit", "hold"];
 }
 
-export const ALLOWED_TRANSITIONS: Record<ValidState, TransitionName[]> =
-  Object.fromEntries(
-    VALID_STATES.map((state) => [state, allowedFrom(state)]),
-  ) as Record<ValidState, TransitionName[]>;
+export const ALLOWED_TRANSITIONS = tableOf(
+  VALID_STATES,
+  (state) => state,
+  allowedFrom,
+);
 
 const AGENT_SPEECH: TransitionName[] = ["submit", "feedback"];
 
@@ -273,8 +268,7 @@ export type TransitionResult = Landing &
   );
 
 export type Decision =
-  | { kind: "stay" }
-  | { kind: "move"; to: TaskState; body: string | null };
+  { kind: "stay" } | { kind: "move"; to: TaskState; body: string | null };
 
 function stay(): Decision {
   return { kind: "stay" };
@@ -293,14 +287,18 @@ export function requireText(value: unknown, label: string): string {
   return value;
 }
 
+export function requireTexts(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`"${label}" must be a list, got ${JSON.stringify(value)}`);
+  }
+  return value.map((item) => requireText(item, `an entry of "${label}"`));
+}
+
 function requireFindings(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`"findings" must be a non-empty list`);
   }
-  for (const finding of value as unknown[]) {
-    requireText(finding, "a finding");
-  }
-  return value as string[];
+  return requireTexts(value, "findings");
 }
 
 function advancing(state: ValidState, name: TransitionName): AdvancingState {
@@ -406,7 +404,7 @@ export function decide(
     );
   }
 
-  const from = meta.state as ValidState;
+  const from = meta.state;
   const allowed = ALLOWED_TRANSITIONS[from];
   if (!allowed.includes(name)) {
     throw new Error(

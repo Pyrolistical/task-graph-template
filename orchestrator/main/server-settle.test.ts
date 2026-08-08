@@ -3,6 +3,8 @@ import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { activeTaskPath } from "../adapters/task-store.ts";
+import { SlotsView } from "../domain/agents.ts";
+import { parse } from "../domain/schema.ts";
 import * as git from "../adapters/git.ts";
 import {
   makeFixture,
@@ -1037,10 +1039,13 @@ describe("Feature: a failure while finishing with an agent", () => {
 
       // Then the slot is freed and the failure is logged rather than thrown away
       await server.writeViews();
-      const view = JSON.parse(
-        fs.readFileSync(pathsOf(server).slotsView, "utf-8"),
+      const view = parse(
+        SlotsView,
+        JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8")),
+        "slots view",
+        pathsOf(server).slotsView,
       );
-      for (const slot of view.slots as { state: string }[]) {
+      for (const slot of view.slots) {
         expect(slot.state).toBe("IDLE");
       }
       expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(

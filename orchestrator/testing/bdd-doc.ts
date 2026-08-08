@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { memberOf } from "../domain/lookup.ts";
 
 const ORCHESTRATOR = path.join(import.meta.dir, "..");
 const REPO_ROOT = path.join(ORCHESTRATOR, "..");
@@ -9,8 +10,12 @@ const TEST_START = /^ {2}(?:test|testInTempDirs)\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const DESCRIBE_START = /^describe\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const STEP = /^\s*\/\/ (Given|When|Then) (.+)$/gm;
 
+const KEYWORDS = ["Given", "When", "Then"] as const;
+
+const isKeyword = memberOf(KEYWORDS);
+
 export interface Step {
-  keyword: "Given" | "When" | "Then";
+  keyword: (typeof KEYWORDS)[number];
   text: string;
 }
 
@@ -58,10 +63,13 @@ function marks(
 }
 
 function stepsIn(source: string): Step[] {
-  return [...source.matchAll(STEP)].map((match) => ({
-    keyword: match[1] as Step["keyword"],
-    text: match[2]!,
-  }));
+  return [...source.matchAll(STEP)].map((match) => {
+    const keyword = match[1]!;
+    if (!isKeyword(keyword)) {
+      throw new Error(`"${keyword}" is not a step keyword`);
+    }
+    return { keyword, text: match[2]! };
+  });
 }
 
 export function readFile(filePath: string): File {

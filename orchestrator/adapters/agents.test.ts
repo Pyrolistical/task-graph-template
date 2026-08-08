@@ -35,7 +35,10 @@ function issuesOf(pool: unknown): string[] {
     parsePool(pool);
     return [];
   } catch (err) {
-    return (err as SchemaError).issues;
+    if (!(err instanceof SchemaError)) {
+      throw err;
+    }
+    return err.issues;
   }
 }
 

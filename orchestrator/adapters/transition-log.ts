@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
+import { parse } from "../domain/schema.ts";
+import { TransitionEntry, type Transitions } from "../app/ports/transitions.ts";
 
 export const TRANSITION_LOG_LINES = 1000;
 
@@ -16,8 +17,7 @@ export class TransitionLog implements Transitions {
     this.cap = cap;
     this.lines = readLines(filePath).slice(-cap);
     const last = this.lines[this.lines.length - 1];
-    this.seq =
-      last === undefined ? 0 : (JSON.parse(last) as TransitionEntry).seq;
+    this.seq = last === undefined ? 0 : entryOf(last, filePath).seq;
   }
 
   get cursor(): number {
@@ -44,10 +44,12 @@ export class TransitionLog implements Transitions {
   }
 
   read(): TransitionEntry[] {
-    return readLines(this.filePath).map(
-      (line) => JSON.parse(line) as TransitionEntry,
-    );
+    return readLines(this.filePath).map((line) => entryOf(line, this.filePath));
   }
+}
+
+function entryOf(line: string, filePath: string): TransitionEntry {
+  return parse(TransitionEntry, JSON.parse(line), "transition", filePath);
 }
 
 function readLines(filePath: string): string[] {

@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import type { CommandChannel } from "../app/ports/command-channel.ts";
-import { type Command, Command as CommandSchema } from "../domain/command.ts";
+import { Command } from "../domain/command.ts";
+import { type Runtime, writeAtomic } from "./runtime.ts";
 
 export type { Command };
-import { type Runtime, writeAtomic } from "./runtime.ts";
 
 export function writeCommand(
   runtime: { consoleCommand: string },
@@ -23,7 +23,7 @@ function parseCommand(raw: string): Command | null {
   } catch {
     return null;
   }
-  const result = CommandSchema.safeParse(value);
+  const result = Command.safeParse(value);
   return result.success ? result.data : null;
 }
 

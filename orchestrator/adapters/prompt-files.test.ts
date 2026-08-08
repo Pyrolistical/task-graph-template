@@ -42,7 +42,7 @@ async function toolsOf(state: ClaimState): Promise<Map<string, Tool>> {
   const tools = new Map<string, Tool>();
   factory({
     registerTool: (tool: Tool) => tools.set(tool.name, tool),
-  } as never);
+  });
   return tools;
 }
 

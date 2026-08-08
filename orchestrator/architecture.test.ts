@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { memberOf } from "./domain/lookup.ts";
 
 const ROOT = import.meta.dir;
 
 const LAYERS = ["domain", "policy", "app", "adapters", "main"] as const;
 
 type Layer = (typeof LAYERS)[number];
+
+const isLayer = memberOf(LAYERS);
 
 const INNER: Layer[] = ["domain", "policy"];
 
@@ -37,12 +40,9 @@ function modules(): Module[] {
         continue;
       }
       const relative = path.relative(ROOT, full);
-      const head = relative.split(path.sep)[0]!;
       found.push({
         path: relative,
-        layer: (LAYERS as readonly string[]).includes(head)
-          ? (head as Layer)
-          : null,
+        layer: layerOf(relative),
         source: fs.readFileSync(full, "utf-8"),
       });
     }
@@ -81,7 +81,7 @@ function importsOf(module: Module): string[] {
 
 function layerOf(relative: string): Layer | null {
   const head = relative.split(path.sep)[0]!;
-  return (LAYERS as readonly string[]).includes(head) ? (head as Layer) : null;
+  return isLayer(head) ? head : null;
 }
 
 describe("Feature: the dependency rule", () => {

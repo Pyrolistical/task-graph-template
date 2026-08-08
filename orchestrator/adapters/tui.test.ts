@@ -329,7 +329,8 @@ describe("Feature: reading the views the server publishes", () => {
     const attempt = () => readView(runtime);
 
     // Then it says what is missing rather than drawing a switch it cannot trust
-    expect(attempt).toThrow(/has no "scheduling" flag/);
+    expect(attempt).toThrow(/Invalid queue view in .*queue\.json/);
+    expect(attempt).toThrow(/scheduling: /);
   });
 
   testInTempDirs("a runtime directory with no views at all is refused", () => {
@@ -355,7 +356,8 @@ describe("Feature: reading the views the server publishes", () => {
     const attempt = () => readView(runtime);
 
     // Then it names the view and the array it expected to find in it
-    expect(attempt).toThrow(/has no "tasks" array/);
+    expect(attempt).toThrow(/Invalid tasks view in .*tasks\.json/);
+    expect(attempt).toThrow(/tasks: .*expected array/);
   });
 
   testInTempDirs("a console with no views to read draws the failure", () => {

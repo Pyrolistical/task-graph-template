@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ClaimArgs, CreatedTask, Tasks } from "../app/ports/tasks.ts";
+import { messageOf } from "../domain/errors.ts";
 import {
   type TaskId,
   type TaskMeta,
@@ -12,12 +13,12 @@ import {
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
-  type ValidState,
   CLAIM_STATES,
   ENTRY_STATE,
   decide,
   isClaimState,
   isHeld,
+  isValidState,
   requireText,
 } from "../domain/state-machine.ts";
 import {
@@ -51,7 +52,7 @@ export function readActiveTasks(tasksDir: string): Scan {
       const meta = parseTaskMeta(raw, filePath);
       tasks.set(meta.id, meta);
     } catch (err) {
-      problems.set(filePath, (err as Error).message);
+      problems.set(filePath, messageOf(err));
     }
   }
 
@@ -115,7 +116,13 @@ export function applyTransition(
       throw new Error(`Task file ${filePath} declares id "${meta.id}"`);
     }
 
-    const from = meta.state as ValidState;
+    if (!isValidState(meta.state)) {
+      throw new Error(
+        `Task "${meta.id}" is ${meta.state} and has no further transitions`,
+      );
+    }
+
+    const from = meta.state;
     const now = new Date().toISOString();
     const decided = decide(meta, body, name, args);
 
@@ -164,12 +171,12 @@ export function applyTransition(
 }
 
 function requirePid(value: unknown): number {
-  if (!Number.isInteger(value) || (value as number) <= 0) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     throw new Error(
       `"pid" must be a positive integer, got ${JSON.stringify(value)}`,
     );
   }
-  return value as number;
+  return value;
 }
 
 function workSession(

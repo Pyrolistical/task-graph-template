@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { attemptOf, historyName, rotate } from "./task-files.ts";
-import { TransitionLog } from "./transition-log.ts";
+import { type TransitionEntry, TransitionLog } from "./transition-log.ts";
 import { isProcessAlive } from "./task-store.ts";
 import { splitDocument } from "../domain/task.ts";
 import {
@@ -416,10 +416,10 @@ describe("Feature: telling whether a process is still running", () => {
 });
 
 describe("Feature: the log of every transition applied", () => {
-  const entry = (to: TaskState) => ({
+  const entry = (to: TaskState): Omit<TransitionEntry, "seq" | "at"> => ({
     task_id: "000042",
     transition: "t",
-    from: "WORK" as TaskState,
+    from: "WORK",
     to,
     by: "pi-1",
   });

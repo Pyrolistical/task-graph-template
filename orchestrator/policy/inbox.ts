@@ -1,3 +1,4 @@
+import { memberOf } from "../domain/lookup.ts";
 import { type TaskId, type TaskMeta } from "../domain/task.ts";
 
 export const INBOX_RANKS = [
@@ -9,6 +10,8 @@ export const INBOX_RANKS = [
 ] as const;
 
 export type InboxRank = (typeof INBOX_RANKS)[number];
+
+export const isInboxRank = memberOf(INBOX_RANKS);
 
 export interface InboxRow {
   task_id: TaskId;
@@ -27,13 +30,13 @@ export function inbox(
   const rows: InboxRow[] = [];
 
   for (const [id, task] of tasks) {
-    if (!(INBOX_RANKS as readonly string[]).includes(task.state)) {
+    if (!isInboxRank(task.state)) {
       continue;
     }
     rows.push({
       task_id: id,
       title: task.title,
-      rank: task.state as InboxRank,
+      rank: task.state,
       blocking: blocking.get(id) ?? 0,
       held_reason: task.held_reason,
       branch: task.workspace?.branch ?? null,

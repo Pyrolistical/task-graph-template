@@ -1,8 +1,25 @@
-export type Activity =
-  | { kind: "tool-call"; tool: string; target: string; started_at: number }
-  | { kind: "thinking"; started_at: number }
-  | { kind: "compacting"; reason: string; started_at: number }
-  | { kind: "none" };
+import { z } from "zod";
+
+export const Activity = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("tool-call"),
+    tool: z.string(),
+    target: z.string(),
+    started_at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal("thinking"),
+    started_at: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal("compacting"),
+    reason: z.string(),
+    started_at: z.number(),
+  }),
+  z.strictObject({ kind: z.literal("none") }),
+]);
+
+export type Activity = z.infer<typeof Activity>;
 
 export type ToolCall = Extract<Activity, { kind: "tool-call" }>;
 

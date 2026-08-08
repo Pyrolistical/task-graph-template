@@ -1,10 +1,15 @@
 import fs from "node:fs";
-import type { SlotRow } from "../domain/agents.ts";
-import type { RunningCheck } from "../domain/checks.ts";
-import type { TaskRow } from "../domain/graph.ts";
+import { z } from "zod";
+import type { ViewName } from "../app/ports/publisher.ts";
+import { SlotsView } from "../domain/agents.ts";
+import { ChecksView } from "../domain/checks.ts";
+import { messageOf } from "../domain/errors.ts";
+import { TasksView } from "../domain/graph.ts";
+import { parse } from "../domain/schema.ts";
 import { type Sample, push, tokensPerSecond } from "../domain/rates.ts";
 import {
   type Entry,
+  SessionRecord,
   appendEntries,
   recordEntries,
   stamp,
@@ -30,7 +35,7 @@ import {
   scrollTop,
 } from "../policy/console.ts";
 import { hitAt, keys, mouse, within } from "../policy/keys.ts";
-import type { Candidate } from "../policy/scheduler.ts";
+import { QueueView } from "../policy/scheduler.ts";
 import { writeCommand } from "./command.ts";
 import { Runtime } from "./runtime.ts";
 
@@ -94,7 +99,12 @@ export class SessionTail {
           if (line.trim() === "") {
             continue;
           }
-          const record = JSON.parse(line) as Record<string, unknown>;
+          const record = parse(
+            SessionRecord,
+            JSON.parse(line),
+            "session record",
+            this.path,
+          );
           const result = recordEntries(record);
           appendEntries(this.entries, result);
           if (result.usage !== null) {
@@ -168,27 +178,17 @@ export class Sessions {
   }
 }
 
-function readEnvelope(filePath: string): Record<string, unknown> {
-  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<
-    string,
-    unknown
-  >;
-}
-
-function rowsOf<T>(
-  envelope: Record<string, unknown>,
+function readEnvelope<T>(
+  schema: z.ZodType<T>,
   filePath: string,
-  key: string,
-): T[] {
-  const rows = envelope[key];
-  if (!Array.isArray(rows)) {
-    throw new Error(`${filePath} has no "${key}" array`);
-  }
-  return rows as T[];
-}
-
-function readRows<T>(filePath: string, key: string): T[] {
-  return rowsOf<T>(readEnvelope(filePath), filePath, key);
+  what: ViewName,
+): T {
+  return parse(
+    schema,
+    JSON.parse(fs.readFileSync(filePath, "utf-8")),
+    `${what} view`,
+    filePath,
+  );
 }
 
 export function readView(runtime: Runtime): ConsoleView {
@@ -196,22 +196,15 @@ export function readView(runtime: Runtime): ConsoleView {
     throw new Error(`console: no server state at ${runtime.root}`);
   }
 
-  const queue = readEnvelope(runtime.queueView);
-  if (typeof queue.scheduling !== "boolean") {
-    throw new Error(`${runtime.queueView} has no "scheduling" flag`);
-  }
-
-  const slots = readEnvelope(runtime.slotsView);
-  if (typeof slots.agents_file !== "string") {
-    throw new Error(`${runtime.slotsView} has no "agents_file" path`);
-  }
+  const slots = readEnvelope(SlotsView, runtime.slotsView, "slots");
+  const queue = readEnvelope(QueueView, runtime.queueView, "queue");
 
   return {
     agentsFile: slots.agents_file,
-    slots: rowsOf<SlotRow>(slots, runtime.slotsView, "slots"),
-    tasks: readRows<TaskRow>(runtime.tasksView, "tasks"),
-    checks: readRows<RunningCheck>(runtime.checksView, "checks"),
-    queue: rowsOf<Candidate>(queue, runtime.queueView, "queue"),
+    slots: slots.slots,
+    tasks: readEnvelope(TasksView, runtime.tasksView, "tasks").tasks,
+    checks: readEnvelope(ChecksView, runtime.checksView, "checks").checks,
+    queue: queue.queue,
     scheduling: queue.scheduling,
   };
 }
@@ -262,7 +255,7 @@ export function frameOrError(
   try {
     return frame(runtime, sessions, layout, collapsed);
   } catch (err) {
-    return errorFrame((err as Error).message, layout);
+    return errorFrame(messageOf(err), layout);
   }
 }
 

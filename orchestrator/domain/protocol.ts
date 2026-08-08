@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { type Activity, toolCall, toolTarget } from "./activity.ts";
-import { RESULT_TOOLS, type ResultCall } from "./results.ts";
+import { type ResultCall, isResultTool } from "./results.ts";
 import type { Sample } from "./rates.ts";
 
 export const STOP_REASONS = [
@@ -43,6 +43,11 @@ const MessageEnd = z.looseObject({
     errorMessage: z.string().nullish(),
     usage: z.looseObject({ output: z.number().optional() }).optional(),
   }),
+});
+
+export const SessionStats = z.looseObject({
+  tokens: z.looseObject({ total: z.number().optional() }).optional(),
+  contextUsage: z.looseObject({ percent: z.number().optional() }).optional(),
 });
 
 export type PiRecord = z.infer<typeof Envelope>;
@@ -151,7 +156,7 @@ export class PiStream {
         const { toolName, args } = ToolStart.parse(record);
         this.state.activity = toolCall(toolName, args ?? {});
         this.repeat(record);
-        if ((RESULT_TOOLS as readonly string[]).includes(toolName)) {
+        if (isResultTool(toolName)) {
           this.onResult({ tool: toolName, args: args ?? {} });
         }
         break;

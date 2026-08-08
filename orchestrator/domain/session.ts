@@ -1,4 +1,7 @@
+import { z } from "zod";
 import { oneLine } from "./text.ts";
+
+export const SessionRecord = z.record(z.string(), z.unknown());
 
 export interface Entry {
   timestampMs: number;
@@ -76,8 +79,11 @@ function contentText(content: unknown): string {
     return typeof content === "string" ? content : "";
   }
   return content
-    .filter((part) => isObject(part) && part.type === "text")
-    .map((part) => String((part as Record<string, unknown>).text ?? ""))
+    .filter(
+      (part): part is Record<string, unknown> =>
+        isObject(part) && part.type === "text",
+    )
+    .map((part) => String(part.text ?? ""))
     .join("")
     .trim();
 }

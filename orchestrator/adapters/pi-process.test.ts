@@ -358,8 +358,7 @@ describe("Feature: matching a reply to what was asked", () => {
       script,
       ["bun"],
     );
-    const aborting = () => (proc as unknown as { aborting: boolean }).aborting;
-    expect(aborting()).toBe(false);
+    expect(proc.aborting).toBe(false);
 
     // When it is aborted, and the write to the dead process fails
     try {
@@ -369,7 +368,7 @@ describe("Feature: matching a reply to what was asked", () => {
     }
 
     // Then the abort is still recorded, so the settle is read as an abort
-    expect(aborting()).toBe(true);
+    expect(proc.aborting).toBe(true);
     proc.kill();
   });
 });

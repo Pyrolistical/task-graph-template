@@ -48,9 +48,9 @@ function apply(
   dir: string,
   id: string,
   name: TransitionName,
-  args: unknown,
+  args: TransitionArgs,
 ): TransitionResult {
-  return applyTransition(dir, id, name, args as TransitionArgs);
+  return applyTransition(dir, id, name, args);
 }
 
 describe("Feature: a task that waits on other tasks", () => {
@@ -71,7 +71,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a task with a dependency waits instead of starting", () => {
     // Given a new task edited to depend on another
     const { dir, ids } = newTasks(2);
-    const [main, dep] = ids as [string, string];
+    const main = ids[0]!;
+    const dep = ids[1]!;
     addDeps(dir, main, dep);
 
     // When the task is submitted
@@ -85,7 +86,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a blocked task submitted again stays where it is", () => {
     // Given a task already blocked behind a dependency
     const { dir, ids } = newTasks(2);
-    const [main, dep] = ids as [string, string];
+    const main = ids[0]!;
+    const dep = ids[1]!;
     addDeps(dir, main, dep);
     run(dir, main, "submit");
 
@@ -102,7 +104,9 @@ describe("Feature: a task that waits on other tasks", () => {
     () => {
       // Given a task blocked behind two dependencies, one since edited out
       const { dir, ids } = newTasks(3);
-      const [main, first, second] = ids as [string, string, string];
+      const main = ids[0]!;
+      const first = ids[1]!;
+      const second = ids[2]!;
       addDeps(dir, main, first, second);
       run(dir, main, "submit");
       editTask(dir, main, (meta) => {
@@ -765,7 +769,7 @@ describe("Feature: a transition that is refused writes nothing", () => {
       const before = fs.readFileSync(filePath, "utf-8");
 
       // When transitions are applied with arguments the machine refuses
-      const rejected: [TransitionName, unknown][] = [
+      const rejected: [TransitionName, TransitionArgs][] = [
         ["feedback", { findings: [] }],
         ["hold", {}],
         ["submit", {}],
@@ -815,7 +819,8 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the clock moves even when the task does not", async () => {
     // Given a blocked task, and when it last entered that state
     const { dir, ids } = newTasks(2);
-    const [main, dep] = ids as [string, string];
+    const main = ids[0]!;
+    const dep = ids[1]!;
     addDeps(dir, main, dep);
     run(dir, main, "submit");
     const before = metaOf(dir, main).state_entered;
@@ -833,7 +838,8 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the clock moves when the task moves", async () => {
     // Given a blocked task whose dependency has since been edited out
     const { dir, ids } = newTasks(2);
-    const [main, dep] = ids as [string, string];
+    const main = ids[0]!;
+    const dep = ids[1]!;
     addDeps(dir, main, dep);
     run(dir, main, "submit");
     const before = metaOf(dir, main).state_entered;

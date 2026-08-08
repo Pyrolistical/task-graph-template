@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { Publisher, ViewName, Views } from "../app/ports/publisher.ts";
-import type { SlotRow } from "../domain/agents.ts";
+import { type SlotRow, SlotsView } from "../domain/agents.ts";
+import { parse } from "../domain/schema.ts";
 import { Runtime, viewJson, writeAtomic } from "./runtime.ts";
 
 export class ViewFiles implements Publisher {
@@ -42,12 +43,12 @@ export class ViewFiles implements Publisher {
     if (!fs.existsSync(this.runtime.slotsView)) {
       return null;
     }
-    const view = JSON.parse(
-      fs.readFileSync(this.runtime.slotsView, "utf-8"),
-    ) as { slots?: SlotRow[] };
-    if (!Array.isArray(view.slots)) {
-      throw new Error(`${this.runtime.slotsView} has no slots array`);
-    }
+    const view = parse(
+      SlotsView,
+      JSON.parse(fs.readFileSync(this.runtime.slotsView, "utf-8")),
+      "slots view",
+      this.runtime.slotsView,
+    );
     return view.slots;
   }
 

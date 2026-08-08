@@ -7,6 +7,7 @@ import { PromptFiles } from "../adapters/prompt-files.ts";
 import type { ResultCall } from "../domain/results.ts";
 import {
   CLAIM_STATES,
+  isClaimState,
   STAGE_OF,
   type ClaimState,
 } from "../domain/state-machine.ts";
@@ -226,9 +227,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const wanted = (flag("--states") ?? STATES.join(",")).split(",");
-  const unknown = wanted.filter(
-    (state) => !STATES.includes(state as ClaimState),
-  );
+  const unknown = wanted.filter((state) => !isClaimState(state));
   if (unknown.length > 0) {
     console.error(`unknown state(s): ${unknown.join(", ")}`);
     process.exit(2);

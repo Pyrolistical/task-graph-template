@@ -105,3 +105,10 @@ one of them is wrong.
 - `xOf(y)` derives an `x` from a `y` (`agentOf`, `tailOf`, `runOf`, `varsOf`)
 - `isX` and `hasX` are predicates; `requireX` throws instead of returning null
 - `XRow` is a projection that exists only to be published in a view
+- a serialized row is one zod schema and the type inferred from it, under the
+  same name (`SlotRow`, `TaskRow`, `Command`, `TransitionEntry`); anything read
+  back off disk or off the wire is parsed through it, never asserted
+- `as` is not how a value is typed: `memberOf` narrows a string to the union it
+  belongs to, `tableOf` builds a table keyed by one, `requireX` throws on what
+  an agent sent, and the two assertions the compiler cannot prove for itself are
+  both in [`domain/lookup.ts`](../orchestrator/domain/lookup.ts)

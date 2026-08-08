@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { TaskId, TaskMeta } from "./task.ts";
 
 export const RECENT_TASKS = 100;
@@ -32,17 +33,21 @@ export function blockingCounts(
   return counts;
 }
 
-export interface TaskRow {
-  id: TaskId;
-  title: string;
-  state: string;
-  state_entered: string | null;
-  depends_on: TaskId[];
-  blocking: number;
-  claimed_by: string | null;
-  held_reason: string | null;
-  worktree: string | null;
-}
+export const TaskRow = z.strictObject({
+  id: z.string(),
+  title: z.string(),
+  state: z.string(),
+  state_entered: z.string().nullable(),
+  depends_on: z.array(z.string()),
+  blocking: z.int(),
+  claimed_by: z.string().nullable(),
+  held_reason: z.string().nullable(),
+  worktree: z.string().nullable(),
+});
+
+export type TaskRow = z.infer<typeof TaskRow>;
+
+export const TasksView = z.looseObject({ tasks: z.array(TaskRow) });
 
 export function taskRow(task: TaskMeta, blocking: number): TaskRow {
   return {

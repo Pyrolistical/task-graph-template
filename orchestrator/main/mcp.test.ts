@@ -4,6 +4,11 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
+import { SlotRow, SlotsView } from "../domain/agents.ts";
+import { TaskRow } from "../domain/graph.ts";
+import { parse } from "../domain/schema.ts";
+import { QueueView } from "../policy/scheduler.ts";
 import { applyTransition } from "../adapters/task-documents.ts";
 import { takeClaim } from "../adapters/task-documents.ts";
 import {
@@ -71,17 +76,29 @@ async function connect(fixture: Fixture) {
   return client;
 }
 
+const TextBlocks = z.array(z.looseObject({ text: z.string() }));
+
 function textOf(result: unknown): string {
-  return (result as { content: { text: string }[] }).content[0]!.text;
+  return z.looseObject({ content: TextBlocks }).parse(result).content[0]!.text;
 }
 
-async function resourceOf(client: Client, uri: string) {
+async function resourceOf<T>(
+  client: Client,
+  uri: string,
+  schema: z.ZodType<T>,
+): Promise<T> {
   const read = await client.readResource({ uri });
-  return JSON.parse((read.contents as { text: string }[])[0]!.text);
+  return parse(
+    schema,
+    JSON.parse(TextBlocks.parse(read.contents)[0]!.text),
+    "resource",
+    uri,
+  );
 }
 
 async function schedulingBecomes(client: Client, wanted: boolean) {
-  return (await resourceOf(client, "orchestrator://queue")).scheduling;
+  return (await resourceOf(client, "orchestrator://queue", QueueView))
+    .scheduling;
 }
 
 describe("Feature: the tool surface the manager works through", () => {
@@ -152,12 +169,17 @@ describe("Feature: the tool surface the manager works through", () => {
       const client = await connect(fixture);
 
       // When the manager reads the paths resource
-      const paths = await client.readResource({ uri: "orchestrator://paths" });
+      const parsed = await resourceOf(
+        client,
+        "orchestrator://paths",
+        z.looseObject({
+          tasks_dir: z.string(),
+          agents_file: z.string(),
+          overrides_prompts_dir: z.string(),
+        }),
+      );
 
       // Then the graph, the pool and the prompts are each named in it
-      const parsed = JSON.parse(
-        (paths.contents as { text: string }[])[0]!.text,
-      ) as Record<string, unknown>;
       expect(parsed.tasks_dir).toBe(fixture.tasksDir);
       expect(parsed.agents_file).toBe(defaultAgentsPath(fixture.tasksDir));
       expect(parsed.overrides_prompts_dir).toBe(
@@ -515,10 +537,13 @@ describe("Feature: the tool surface the manager works through", () => {
       });
 
       // When the tasks view is read as a resource
-      const view = await client.readResource({ uri: "orchestrator://tasks" });
+      const parsed = await resourceOf(
+        client,
+        "orchestrator://tasks",
+        z.looseObject({ seq: z.number(), tasks: z.array(TaskRow) }),
+      );
 
       // Then the tasks view carries rows and a cursor the manager can track
-      const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
       expect(parsed.seq).toBeGreaterThan(0);
       expect(Array.isArray(parsed.tasks)).toBe(true);
 
@@ -526,7 +551,7 @@ describe("Feature: the tool surface the manager works through", () => {
       const workspace = await client.readResource({
         uri: "orchestrator://workspace_path",
       });
-      expect((workspace.contents as { text: string }[])[0]!.text).toContain(
+      expect(TextBlocks.parse(workspace.contents)[0]!.text).toContain(
         "task-graph-server",
       );
 
@@ -552,41 +577,39 @@ describe("Feature: the tool surface the manager works through", () => {
       const client = await connect(fixture);
 
       // When the manager disables one of the agents
-      const disabled = JSON.parse(
-        textOf(
-          await client.callTool({
-            name: "disable_agent",
-            arguments: { agent: "pi-a-a" },
-          }),
+      const disabled = z.array(SlotRow).parse(
+        JSON.parse(
+          textOf(
+            await client.callTool({
+              name: "disable_agent",
+              arguments: { agent: "pi-a-a" },
+            }),
+          ),
         ),
-      ) as { name: string; state: string; enabled: boolean }[];
+      );
 
       // Then every slot of that agent is disabled, and no other agent's is
       expect(disabled.map((row) => row.name)).toEqual(["pi-a-a-1", "pi-a-a-2"]);
       expect(disabled.every((row) => row.state === "DISABLED")).toBe(true);
 
-      const view = await client.readResource({ uri: "orchestrator://slots" });
-      const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
-      expect(
-        parsed.slots.map((slot: { name: string; state: string }) => [
-          slot.name,
-          slot.state,
-        ]),
-      ).toEqual([
+      const view = await resourceOf(client, "orchestrator://slots", SlotsView);
+      expect(view.slots.map((slot) => [slot.name, slot.state])).toEqual([
         ["pi-a-a-1", "DISABLED"],
         ["pi-a-a-2", "DISABLED"],
         ["pi-b-b-1", "IDLE"],
       ]);
 
       // Then enabling it again returns every one of its slots to the queue
-      const enabled = JSON.parse(
-        textOf(
-          await client.callTool({
-            name: "enable_agent",
-            arguments: { agent: "pi-a-a" },
-          }),
+      const enabled = z.array(SlotRow).parse(
+        JSON.parse(
+          textOf(
+            await client.callTool({
+              name: "enable_agent",
+              arguments: { agent: "pi-a-a" },
+            }),
+          ),
         ),
-      ) as { state: string }[];
+      );
       expect(enabled.every((row) => row.state === "IDLE")).toBe(true);
 
       await client.close();
@@ -608,11 +631,10 @@ describe("Feature: the tool surface the manager works through", () => {
       const client = await connect(fixture);
 
       // When the manager reads the slots view
-      const view = await client.readResource({ uri: "orchestrator://slots" });
+      const view = await resourceOf(client, "orchestrator://slots", SlotsView);
 
       // Then the slots come from that file, so the pool travels with the graph
-      const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
-      expect(parsed.slots.map((slot: { name: string }) => slot.name)).toEqual([
+      expect(view.slots.map((slot) => slot.name)).toEqual([
         "pi-tasks-tasks-1",
         "pi-tasks-tasks-2",
       ]);
@@ -750,7 +772,11 @@ describe("Feature: the tool surface the manager works through", () => {
       const client = await connect(fixture);
 
       // When the manager reads the error resource
-      const error = await resourceOf(client, "orchestrator://error");
+      const error = await resourceOf(
+        client,
+        "orchestrator://error",
+        z.looseObject({ error: z.string().nullable() }),
+      );
 
       // Then there is no error on it
       expect(error.error).toBeNull();
@@ -764,9 +790,8 @@ describe("Feature: the tool surface the manager works through", () => {
     // Given a pool whose slots are all sitting idle
     const fixture = makeFixture();
     const client = await connect(fixture);
-    const slots = (await resourceOf(client, "orchestrator://slots")).slots as {
-      name: string;
-    }[];
+    const slots = (await resourceOf(client, "orchestrator://slots", SlotsView))
+      .slots;
 
     // When the manager aborts one of them
     const result = await client.callTool({
@@ -822,7 +847,11 @@ describe("Feature: a server that could not start", () => {
       const client = await connect(fixture);
 
       // When the manager reads the error resource
-      const error = await resourceOf(client, "orchestrator://error");
+      const error = await resourceOf(
+        client,
+        "orchestrator://error",
+        z.looseObject({ error: z.string().nullable() }),
+      );
 
       // Then it says the server failed to start, and what the pool file lacks
       expect(error.error).toContain("the server failed to start");

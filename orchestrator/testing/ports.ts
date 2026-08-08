@@ -12,6 +12,7 @@ import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
 import type {
+  Role,
   TransitionArgs,
   TransitionName,
   TransitionResult,
@@ -323,16 +324,59 @@ export class FakeAssignments implements Assignments {
   }
 }
 
-export class FakePaths {
+export class FakePaths implements Paths {
   readonly prepared: TaskId[] = [];
   readonly discarded: TaskId[] = [];
+  readonly lines: string[] = [];
+
+  readonly root = "/runtime";
+  readonly serverLog = "/runtime/server.log";
+  readonly transitionLog = "/runtime/transitions.jsonl";
+  readonly slotsView = "/runtime/slots.json";
+  readonly checksView = "/runtime/checks.json";
+  readonly tasksView = "/runtime/tasks.json";
+  readonly inboxView = "/runtime/inbox.json";
+  readonly queueView = "/runtime/queue.json";
+  readonly consoleCommand = "/runtime/command.json";
+
+  taskRoot(id: TaskId): string {
+    return `/runtime/${id}`;
+  }
+
+  worktree(id: TaskId): string {
+    return `/runtime/${id}/worktree`;
+  }
+
+  assignment(id: TaskId): string {
+    return `/runtime/${id}/ASSIGNMENT.md`;
+  }
+
+  history(id: TaskId): string {
+    return `/runtime/${id}/history`;
+  }
+
+  findings(id: TaskId): string {
+    return `/runtime/${id}/findings.json`;
+  }
+
+  reviewFailures(id: TaskId): string {
+    return `/runtime/${id}/review-failures`;
+  }
+
+  sessionDir(id: TaskId, role: Role): string {
+    return `/runtime/${id}/sessions/${role}`;
+  }
 
   rpcLog(id: TaskId): string {
     return `/rpc/${id}.jsonl`;
   }
 
-  worktree(id: TaskId): string {
-    return `/runtime/${id}/worktree`;
+  checkLog(id: TaskId, index: number): string {
+    return `/runtime/${id}/checks/${index}.log`;
+  }
+
+  messagesDir(id: TaskId): string {
+    return `/runtime/${id}/messages`;
   }
 
   prepare(id: TaskId): void {
@@ -342,10 +386,18 @@ export class FakePaths {
   discard(id: TaskId): void {
     this.discarded.push(id);
   }
+
+  log(line: string): void {
+    this.lines.push(line);
+  }
+
+  takeLock(): void {}
+
+  clearLock(): void {}
 }
 
 export function fakePaths(): Paths {
-  return new FakePaths() as unknown as Paths;
+  return new FakePaths();
 }
 
 export function fakeAgents(
@@ -356,7 +408,7 @@ export function fakeAgents(
     slots: () => slots,
     hasSession: () => true,
     spawn: () => session(),
-  } as unknown as Agents;
+  };
 }
 
 export class FakePrompts implements Prompts {

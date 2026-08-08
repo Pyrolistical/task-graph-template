@@ -130,7 +130,7 @@ export class TaskGraph {
     if (name === "submit" && isReviewState(result.from)) {
       this.reviews.clearFailures(taskId);
     }
-    const to = (result.to ?? before?.state ?? "NEW") as TaskState;
+    const to = result.to ?? before?.state ?? "NEW";
 
     if (to === "CLOSED" && before !== undefined) {
       this.closed.set(taskId, {

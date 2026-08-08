@@ -4,6 +4,7 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
+import { messageOf } from "./orchestrator/domain/errors.ts";
 import { type TaskId, isValidId } from "./orchestrator/domain/task.ts";
 import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
@@ -272,7 +273,7 @@ export async function boot(options: WiringOptions): Promise<Boot> {
   } catch (err) {
     return {
       server: null,
-      error: `the server failed to start: ${(err as Error).message}`,
+      error: `the server failed to start: ${messageOf(err)}`,
     };
   }
 }
@@ -329,7 +330,7 @@ if (import.meta.main) {
     await main();
   } catch (err) {
     new Runtime(process.cwd(), process.env.TASK_GRAPH_SERVER_ROOT).log(
-      `the server crashed: ${(err as Error).message}`,
+      `the server crashed: ${messageOf(err)}`,
     );
     throw err;
   }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { keysOf } from "./lookup.ts";
 import { parse } from "./schema.ts";
 import { ALL_STATES } from "./state-machine.ts";
 
@@ -34,9 +35,7 @@ const Workspace = z.strictObject({
 
 export type Workspace = z.infer<typeof Workspace>;
 
-export const WORKSPACE_FIELDS = Object.keys(
-  Workspace.shape,
-) as (keyof Workspace)[];
+export const WORKSPACE_FIELDS = keysOf(Workspace.shape);
 
 const TaskFields = z.strictObject({
   id: taskId,
@@ -61,7 +60,7 @@ const Meta = TaskFields.refine(
 
 export type TaskMeta = z.infer<typeof Meta>;
 
-export const FIELD_ORDER = Object.keys(TaskFields.shape) as (keyof TaskMeta)[];
+export const FIELD_ORDER = keysOf(TaskFields.shape);
 
 const ID_FIELDS = new Set(["id"]);
 
@@ -138,7 +137,7 @@ export function serializeMeta(meta: TaskMeta): string {
     const value = meta[key];
 
     if (key === "depends_on" || key === "checks") {
-      const items = value as string[];
+      const items = meta[key];
       if (items.length === 0) {
         lines.push(`${key}: []`);
       } else {
@@ -151,7 +150,7 @@ export function serializeMeta(meta: TaskMeta): string {
     }
 
     if (key === "workspace") {
-      const workspace = value as Workspace | null;
+      const workspace = meta[key];
       if (workspace === null) {
         lines.push(`${key}: null`);
         continue;

@@ -1,10 +1,13 @@
+import { z } from "zod";
+import { tableOf } from "../domain/lookup.ts";
 import { type TaskId, type TaskMeta } from "../domain/task.ts";
 import { type Slot, agentOf } from "../domain/agents.ts";
 import {
   type ClaimStage,
   type ClaimState,
-  type Role,
+  ALL_ROLES,
   CLAIM_STAGES,
+  CLAIM_STATES,
   STAGE_OF,
   isClaimState,
 } from "../domain/state-machine.ts";
@@ -23,22 +26,33 @@ export const RANKS = [
 
 export type Rank = (typeof RANKS)[number];
 
-export interface Candidate {
-  task_id: TaskId;
-  rank: Rank;
-  state: ClaimState;
-  role: Role;
-  blocking: number;
-  prefer_slot: string | null;
-  session: string | null;
+export const Candidate = z.strictObject({
+  task_id: z.string(),
+  rank: z.enum(RANKS),
+  state: z.enum(CLAIM_STATES),
+  role: z.enum(ALL_ROLES),
+  blocking: z.int(),
+  prefer_slot: z.string().nullable(),
+  session: z.string().nullable(),
+});
+
+export type Candidate = z.infer<typeof Candidate>;
+
+export const QueueView = z.looseObject({
+  scheduling: z.boolean(),
+  queue: z.array(Candidate),
+});
+
+function stateOfRank(rank: Rank): ClaimState {
+  const state =
+    rank === "resume" ? "WORK" : rank.replace(/_(STARTED|FRESH)$/, "");
+  if (!isClaimState(state)) {
+    throw new Error(`rank "${rank}" does not name a state an agent claims`);
+  }
+  return state;
 }
 
-export const STATE_OF = Object.fromEntries(
-  RANKS.map((rank) => [
-    rank,
-    rank === "resume" ? "WORK" : rank.replace(/_(STARTED|FRESH)$/, ""),
-  ]),
-) as Record<Rank, ClaimState>;
+export const STATE_OF = tableOf(RANKS, (rank) => rank, stateOfRank);
 
 export function rankLabel(rank: Rank): string {
   return rank === "resume" ? rank : STATE_OF[rank];
