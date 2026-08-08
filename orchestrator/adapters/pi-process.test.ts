@@ -35,6 +35,31 @@ function bashCall(command: string): string {
   });
 }
 
+async function settleWait(
+  stream: PiStream,
+  settledRecord: string,
+): Promise<[boolean, boolean]> {
+  stream.starting();
+  let settled = false;
+  void stream.settled().then(() => {
+    settled = true;
+  });
+  await Bun.sleep(5);
+  const before = settled;
+  stream.feed(settledRecord);
+  await Bun.sleep(5);
+  return [before, settled];
+}
+
+function spreadAcrossTurns(stream: PiStream, command: string, turns = 3): void {
+  for (let turn = 0; turn < turns; turn++) {
+    stream.starting();
+    for (let i = 0; i < LOOP_LIMIT - 1; i++) {
+      stream.feed(command);
+    }
+  }
+}
+
 function deadProcess(): PiProcess {
   const dir = tempDir("orchestrator-");
   const command = path.join(dir, "exits.ts");
@@ -148,15 +173,10 @@ describe("Feature: knowing when an agent's turn is over", () => {
       await stream.settled();
 
       // When a new turn is started and waited on
-      stream.starting();
-      let settled = false;
-      void stream.settled().then(() => {
-        settled = true;
-      });
-      await Bun.sleep(5);
-      const before = settled;
-      stream.feed(record({ type: "agent_settled" }));
-      await Bun.sleep(5);
+      const [before, settled] = await settleWait(
+        stream,
+        record({ type: "agent_settled" }),
+      );
 
       // Then only the new turn's own settle satisfies the wait
       expect([before, settled]).toEqual([false, true]);
@@ -211,12 +231,14 @@ describe("Feature: knowing when an agent's turn is over", () => {
       const samples: Sample[] = [];
       const stream = new PiStream((sample) => samples.push(sample));
       const message = (role: string, usage: unknown) =>
-        stream.feed(record({ type: "message_end", message: { role, usage } }));
+        record({ type: "message_end", message: { role, usage } });
 
       // When all three are fed to the stream
-      message("assistant", { input: 900, output: 40, cost: { total: 0.1 } });
-      message("assistant", { cost: { total: 0.1 } });
-      message("toolResult", { output: 999 });
+      stream.feed(
+        message("assistant", { input: 900, output: 40, cost: { total: 0.1 } }) +
+          message("assistant", { cost: { total: 0.1 } }) +
+          message("toolResult", { output: 999 }),
+      );
 
       // Then only the measured assistant message becomes a sample of the rate
       expect(samples).toEqual([{ timestampMs: Date.now(), tokens: 40 }]);
@@ -234,16 +256,19 @@ describe("Feature: matching a reply to what was asked", () => {
 
       // When both of the replies arrive
       stream.feed(
-        record({ type: "response", id: "1", command: "prompt", success: true }),
-      );
-      stream.feed(
         record({
           type: "response",
-          id: "2",
-          command: "get_state",
+          id: "1",
+          command: "prompt",
           success: true,
-          data: { sessionFile: "/tmp/s.jsonl" },
-        }),
+        }) +
+          record({
+            type: "response",
+            id: "2",
+            command: "get_state",
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl" },
+          }),
       );
 
       // Then the waiting request is answered by its own reply
@@ -399,8 +424,7 @@ describe("Feature: what an agent is doing right now", () => {
       });
 
       // When two compactions happen in one turn
-      stream.feed(compaction);
-      stream.feed(compaction);
+      for (let i = 0; i < 2; i++) stream.feed(compaction);
 
       // Then the server hears about both, so it can steer the agent each time
       expect(calls).toBe(2);
@@ -596,9 +620,7 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     stream.feed(bashCall("zig build -Doptimize=Debug"));
 
     // When the original command is repeated again, up to one short of the limit
-    for (let i = 0; i < LOOP_LIMIT - 1; i++) {
-      stream.feed(bashCall("zig build"));
-    }
+    for (let i = 0; i < LOOP_LIMIT - 1; i++) stream.feed(bashCall("zig build"));
 
     // Then it is not a loop, because the count starts over at any difference
     expect(stream.state.looping).toBeNull();
@@ -610,12 +632,7 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     const build = bashCall("zig build");
 
     // When all three turns run
-    for (let turn = 0; turn < 3; turn++) {
-      stream.starting();
-      for (let i = 0; i < LOOP_LIMIT - 1; i++) {
-        stream.feed(build);
-      }
-    }
+    spreadAcrossTurns(stream, build);
 
     // Then nothing is a loop, because a loop is repetition within one turn
     expect(stream.state.looping).toBeNull();

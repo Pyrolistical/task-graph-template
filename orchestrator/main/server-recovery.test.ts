@@ -18,9 +18,12 @@ import {
   editTaskFile,
   reaches,
   serverFor,
+  settleTo,
+  settleUntil,
   stateOf,
   unclaimed,
   until,
+  walkTo,
 } from "../testing/server-jig.ts";
 
 describe("Feature: picking a project back up at startup", () => {
@@ -142,8 +145,10 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       server.setSchedulerEnabled(true);
       await claimed(server, id);
 
-      // When the agent dies and the server ticks on
+      // Given a server with its scheduler stopped, so the reaper must find it
       server.setSchedulerEnabled(false);
+
+      // When the agent dies and the server ticks on
       await unclaimed(server, id);
 
       // Then the slot is idle and the task is back in the queue where it stood
@@ -273,10 +278,10 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // When the manager holds and aborts the task before the claim lands
       abortable(server, id);
-      await ticking;
-      await server.drain();
 
       // Then the task is closed, and the dispatch never claimed it
+      await ticking;
+      await server.drain();
       expect(stateOf(server, id)).toBe("CLOSED");
       expect(server.tasks().get(id)).toBeUndefined();
       expect(server.agentRows()[0]!.state).toBe("IDLE");
@@ -303,10 +308,10 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // When the manager holds and aborts the task before the claim lands
       abortable(server, id);
-      await ticking;
-      await server.drain();
 
       // Then the slot goes back to idle, and the lost dispatch is logged
+      await ticking;
+      await server.drain();
       const row = server.agentRows()[0]!;
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
@@ -384,8 +389,7 @@ describe("Feature: a task document that does not parse", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs over the graph
-      server.setSchedulerEnabled(true);
-      await reaches(server, fine, "MANAGER_REVIEW");
+      await walkTo(server, fine, "MANAGER_REVIEW");
 
       // Then the good task is worked to completion and the broken one ignored
       expect(server.tasks().has(broken)).toBe(false);
@@ -454,11 +458,11 @@ describe("Feature: a task document that does not parse", () => {
         logLines().filter((line) => line.includes("ignoring")),
       ).toHaveLength(1);
 
-      // When the document is repaired and the server ticks five times more
+      // Given the document is repaired
       fs.writeFileSync(path.join(fixture.tasksDir, `${broken}.md`), good);
-      for (let i = 0; i < 5; i++) {
-        await server.tick();
-      }
+
+      // When the server ticks five times more
+      for (let i = 0; i < 5; i++) await server.tick();
 
       // Then the repair is logged once, and the task is back in the graph
       expect(
@@ -496,10 +500,7 @@ describe("Feature: an agent that compacts mid-turn", () => {
       const server = await serverFor(fixture);
 
       // When it runs to its submit
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "DESIGN_REVIEW");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "DESIGN_REVIEW");
 
       // Then the worktree is reset and the agent steered back to its assignment
       expect(
@@ -541,10 +542,7 @@ describe("Feature: an agent that compacts mid-turn", () => {
       const server = await serverFor(fixture);
 
       // When it runs to its submit
-      server.setSchedulerEnabled(true);
-      await until(server, () => stateOf(server, id) !== "WORK", 20);
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleUntil(server, () => stateOf(server, id) !== "WORK", 20);
 
       // Then its work is kept, and it is only steered back to the assignment
       expect(
@@ -580,10 +578,7 @@ describe("Feature: an agent that compacts mid-turn", () => {
       const server = await serverFor(fixture);
 
       // When it runs to its submit
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "PLAN");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "PLAN");
 
       // Then it is left alone to settle, rather than steered off its result
       expect(steersTo(server.runtime.sessionDir(id, "reviewer"))).toEqual([]);
@@ -616,9 +611,7 @@ describe("Feature: a dependency that can never be satisfied", () => {
       const server = await serverFor(fixture);
 
       // When the server ticks five times over them
-      for (let i = 0; i < 5; i++) {
-        await server.tick();
-      }
+      for (let i = 0; i < 5; i++) await server.tick();
 
       // Then each is reported once, rather than on every tick forever
       const cycles = fs

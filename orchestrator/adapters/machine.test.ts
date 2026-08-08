@@ -51,6 +51,26 @@ const ARGS: Record<TransitionName, string[]> = {
   abort: [],
 };
 
+function rejectOnce(
+  dir: string,
+  id: string,
+  author: string,
+  reviewer: string,
+  finding: string,
+): void {
+  claim(dir, id, author);
+  run(dir, id, "submit");
+  claim(dir, id, reviewer);
+  run(dir, id, "feedback", finding);
+}
+
+function walkThroughReviews(dir: string, id: string): string[] {
+  const walked = [run(dir, id, "pass").to];
+  claim(dir, id, "reviewer");
+  walked.push(run(dir, id, "submit").to, run(dir, id, "submit").to);
+  return walked;
+}
+
 function build(state: ValidState): { dir: string; id: string } {
   const dir = makeTasksDir();
   const id = createTask(dir, ORCHESTRATOR_DIR, "the task under test").id;
@@ -2191,16 +2211,10 @@ describe("Feature: what a review does to the task body", () => {
     () => {
       // Given a design that has been sent back once already
       const { dir, id } = toDesign();
-      claim(dir, id, "designer");
-      run(dir, id, "submit");
-      claim(dir, id, "design-reviewer");
-      run(dir, id, "feedback", "finding one");
+      rejectOnce(dir, id, "designer", "design-reviewer", "finding one");
 
       // When it is sent back a second time
-      claim(dir, id, "designer");
-      run(dir, id, "submit");
-      claim(dir, id, "design-reviewer");
-      run(dir, id, "feedback", "finding two");
+      rejectOnce(dir, id, "designer", "design-reviewer", "finding two");
 
       // Then the body still carries neither round of findings
       expect(metaOf(dir, id).state).toBe("DESIGN");
@@ -2246,16 +2260,10 @@ describe("Feature: what a review does to the task body", () => {
     () => {
       // Given a plan that has been sent back once already
       const { dir, id } = toPlan();
-      claim(dir, id, "planner");
-      run(dir, id, "submit");
-      claim(dir, id, "plan-reviewer");
-      run(dir, id, "feedback", "finding one");
+      rejectOnce(dir, id, "planner", "plan-reviewer", "finding one");
 
       // When it is sent back a second time
-      claim(dir, id, "planner");
-      run(dir, id, "submit");
-      claim(dir, id, "plan-reviewer");
-      run(dir, id, "feedback", "finding two");
+      rejectOnce(dir, id, "planner", "plan-reviewer", "finding two");
 
       // Then the body still carries neither round of findings
       expect(metaOf(dir, id).state).toBe("PLAN");
@@ -2302,9 +2310,7 @@ describe("Feature: what a review does to the task body", () => {
       const { dir, id } = toChecking();
 
       // When it passes, is reviewed, and is accepted by the manager
-      const walked = [run(dir, id, "pass").to];
-      claim(dir, id, "reviewer");
-      walked.push(run(dir, id, "submit").to, run(dir, id, "submit").to);
+      const walked = walkThroughReviews(dir, id);
 
       // Then it goes through the agent review and the manager review, and closes
       expect(walked).toEqual(["WORK_REVIEW", "MANAGER_REVIEW", "CLOSED"]);

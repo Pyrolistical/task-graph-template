@@ -49,8 +49,10 @@ describe("Feature: tailing the session an agent is writing", () => {
     const tail: SessionTail = new SessionTail(file);
     expect(tail.read().map((entry) => entry.text)).toEqual(["first"]);
 
-    // When another turn is appended and the file is read again
+    // Given another turn appended to the file
     write(file, [assistant("second")]);
+
+    // When the file is read again
     const entries = tail.read();
 
     // Then the new turn joins the old ones rather than replacing them
@@ -71,8 +73,10 @@ describe("Feature: tailing the session an agent is writing", () => {
       Array.from({ length: 12 }, (_, index) => assistant(`m${index}`)),
     );
 
-    // When the whole session is read
+    // Given a tail over the session file
     const tail: SessionTail = new SessionTail(file);
+
+    // When the whole session is read
     const entries = tail.read();
 
     // Then every turn is in the transcript, but the rate is over the recent ones
@@ -107,8 +111,10 @@ describe("Feature: tailing the session an agent is writing", () => {
       const tail: SessionTail = new SessionTail(file);
       expect(tail.read()).toEqual([]);
 
-      // When the rest of the line, and its newline, are written
+      // Given the rest of the line, and its newline, written
       fs.appendFileSync(file, `${record.slice(12)}\n`, "utf-8");
+
+      // When the file is read
       const entries = tail.read();
 
       // Then the turn is parsed whole rather than half of it being dropped
@@ -271,10 +277,10 @@ describe("Feature: the command channel between console and server", () => {
 
       // When the console writes a command
       writeCommand(runtime, { command: "scheduler", enabled: true });
-      await eventually(() => taken.length > 0, "handed the command over", 100);
-      watcher.close();
 
       // Then the server is handed it without waiting for a tick, and consumes it
+      await eventually(() => taken.length > 0, "handed the command over", 100);
+      watcher.close();
       expect(taken).toEqual([{ command: "scheduler", enabled: true }]);
       expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
     },

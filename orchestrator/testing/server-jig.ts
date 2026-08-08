@@ -59,6 +59,56 @@ export async function until(
   }
 }
 
+export async function walkTo(
+  server: Server,
+  id: string,
+  state: string,
+  ticks = 12,
+): Promise<void> {
+  server.setSchedulerEnabled(true);
+  await reaches(server, id, state, ticks);
+  server.setSchedulerEnabled(false);
+}
+
+export async function settleTo(
+  server: Server,
+  id: string,
+  state: string,
+  ticks = 12,
+): Promise<void> {
+  await walkTo(server, id, state, ticks);
+  await server.drain();
+}
+
+export async function settleUntil(
+  server: Server,
+  done: () => boolean,
+  ticks = 12,
+): Promise<void> {
+  server.setSchedulerEnabled(true);
+  await until(server, done, ticks);
+  server.setSchedulerEnabled(false);
+  await server.drain();
+}
+
+export async function runOnce(server: Server): Promise<void> {
+  server.setSchedulerEnabled(true);
+  await server.tick();
+  server.setSchedulerEnabled(false);
+  await server.drain();
+}
+
+export async function dispatchOnce(server: Server): Promise<void> {
+  await runOnce(server);
+  await server.tick();
+  await server.drain();
+}
+
+export async function reviewCycle(server: Server): Promise<void> {
+  await dispatchOnce(server);
+  await runOnce(server);
+}
+
 export async function reaches(
   server: Server,
   id: string,

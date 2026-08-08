@@ -29,11 +29,15 @@ import {
 import { startServer } from "../testing/server-jig.ts";
 import { ISSUES } from "../domain/issues.ts";
 import {
+  dispatchOnce,
   reaches,
+  runOnce,
   serverFor,
   settle,
+  settleTo,
   stateOf,
   until,
+  walkTo,
 } from "../testing/server-jig.ts";
 
 describe("Feature: where a project's task graph is found", () => {
@@ -119,10 +123,9 @@ describe("Feature: a task that goes all the way through", () => {
 
       // Given a task with a check, and agents that will do and review the work
       const server = await serverFor(fixture);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
-      // When the scheduler runs it to the manager and the manager merges it
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
+      // When the manager merges it
       const merged = await server.attemptMerge(id);
 
       // Then the task closes and nothing of its workspace is left behind
@@ -166,8 +169,7 @@ describe("Feature: measuring how fast an agent writes", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs it to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the agent that ran has a measured rate and an idle one has none
       expect(server.rates.rate("pi-fake-fake")).toBeGreaterThan(0);
@@ -215,8 +217,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs it as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then the design and the plan are both in the task body
       const body = fs.readFileSync(
@@ -277,8 +278,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then the designer was told what the reviewer found, in its own words
       const designer = server.runtime.sessionDir(id, "designer");
@@ -324,10 +324,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the plan review
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "PLAN_REVIEW");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "PLAN_REVIEW");
 
       // Then the designer read the findings in its next prompt
       expect(promptsTo(server.runtime.sessionDir(id, "designer"))[1]).toBe(
@@ -385,10 +382,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the planning stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "PLAN");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "PLAN");
 
       // Then the steer it was given still carried the findings to answer
       expect(steersTo(server.runtime.sessionDir(id, "designer"))).toEqual([
@@ -419,8 +413,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_DESIGN");
+      await walkTo(server, id, "HELD_DESIGN");
 
       // Then the task is held, saying what the designer never wrote
       const task = server.tasks().get(id)!;
@@ -459,8 +452,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
       expect(promptsTo(server.runtime.sessionDir(id, "reviewer"))).toHaveLength(
@@ -498,8 +490,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then the planner was told what the reviewer found, in its own words
       const planner = server.runtime.sessionDir(id, "planner");
@@ -543,8 +534,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then it was asked once for the plan and never held
       expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
@@ -575,8 +565,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_PLAN");
+      await walkTo(server, id, "HELD_PLAN");
 
       // Then the task is held, saying what the planner never wrote
       const task = server.tasks().get(id)!;
@@ -619,8 +608,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its plan was accepted
       expect(promptsTo(server.runtime.sessionDir(id, "planner"))).toHaveLength(
@@ -657,8 +645,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_PLAN");
+      await walkTo(server, id, "HELD_PLAN");
 
       // Then the task is held, saying which rule the planner broke
       const task = server.tasks().get(id)!;
@@ -694,8 +681,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "WORK");
+      await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
       expect(promptsTo(server.runtime.sessionDir(id, "reviewer"))).toHaveLength(
@@ -811,12 +797,12 @@ describe("Feature: the design and planning phases", () => {
 
       // Given a task held because its goal was unclear to the agent
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "HELD_WORK");
 
-      // When the manager rewrites the goal and resumes it
+      // Given the manager rewrites the goal in the task body
       writeTaskBody(fixture.tasksDir, id, "# Goal\n\nclarified the criteria");
+
+      // When the manager resumes it
       server.transition(id, "resume", {}, "manager");
 
       // Then the task goes back into the queue with the clearer goal
@@ -890,8 +876,10 @@ describe("Feature: the design and planning phases", () => {
         /not in MANAGER_REVIEW or HELD_DESIGN or HELD_PLAN or HELD_WORK/,
       );
 
-      // When the manager holds it and then aborts it
+      // Given the manager holds it, abandoning it
       server.transition(id, "hold", { reason: "abandoning" }, "manager");
+
+      // When the manager aborts it
       const result = server.attemptAbort(id);
 
       // Then it closes and leaves the graph
@@ -924,10 +912,11 @@ describe("Feature: handing a task to an agent", () => {
         base: "master",
       });
 
-      // When a task is dispatched
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
-      await server.tick();
-      await server.drain();
+
+      // When a task is dispatched
+      await settle(server, 1);
 
       // Then the prompts came from the orchestrator's own directory
       expect(server.orchestratorDir).toBe(path.join(import.meta.dir, ".."));
@@ -955,10 +944,11 @@ describe("Feature: handing a task to an agent", () => {
       // Given a project that carries its own copy of the work prompt
       const server = await serverFor(fixture);
 
-      // When a task is dispatched
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
-      await server.tick();
-      await server.drain();
+
+      // When a task is dispatched
+      await settle(server, 1);
 
       // Then the agent read the project's words, over the task's own body
       const sessionDir = server.runtime.sessionDir(id, "worker");
@@ -1018,10 +1008,11 @@ describe("Feature: handing a task to an agent", () => {
       // Given a project that overrides the design prompt but not the work one
       const server = await serverFor(fixture);
 
-      // When a task is dispatched into the work stage
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
-      await server.tick();
-      await server.drain();
+
+      // When a task is dispatched into the work stage
+      await settle(server, 1);
 
       // Then the agent read the orchestrator's own work prompt, untouched
       const sessionDir = server.runtime.sessionDir(id, "worker");
@@ -1049,10 +1040,11 @@ describe("Feature: handing a task to an agent", () => {
       // Given a task with a goal written into its body
       const server = await serverFor(fixture);
 
-      // When the task is dispatched
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
-      await server.tick();
-      await server.drain();
+
+      // When the task is dispatched
+      await settle(server, 1);
 
       // Then it has a worktree, a branch, and its assignment beside the worktree
       const worktree = server.runtime.worktree(id);
@@ -1082,10 +1074,11 @@ describe("Feature: handing a task to an agent", () => {
       // Given a task about to be dispatched into the design stage
       const server = await serverFor(fixture);
 
-      // When the task is dispatched
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
-      await server.tick();
-      await server.drain();
+
+      // When the task is dispatched
+      await settle(server, 1);
 
       // Then the assignment is the body plus the empty heading to fill in
       expect(fs.readFileSync(server.runtime.assignment(id), "utf-8")).toBe(
@@ -1119,8 +1112,10 @@ describe("Feature: handing a task to an agent", () => {
       // Given a task about to be dispatched
       const server = await serverFor(fixture);
 
-      // When the agent claims it
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the agent claims it
       await server.tick();
 
       // Then the document names the agent, its process and everything it needs
@@ -1177,9 +1172,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(stateOf(server, id)).toBe("WORK_REVIEW");
 
       // When the task is reviewed and merged under the current server
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the branch it recorded is the one used, not the one it would pick
       expect(server.tasks().get(id)!.workspace!.branch).toBe(legacy);
@@ -1208,10 +1201,11 @@ describe("Feature: handing a task to an agent", () => {
       // Given one queued task and a pool of two free slots
       const server = await serverFor(fixture);
 
-      // When two ticks run at the same time
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When two ticks run at the same time
       await Promise.all([server.tick(), server.tick()]);
-      server.setSchedulerEnabled(false);
 
       // Then only one slot took the task, and no dispatch failed
       expect(
@@ -1274,10 +1268,10 @@ describe("Feature: handing a task to an agent", () => {
 
       // When the scheduler is stopped while the agent is still working
       server.setSchedulerEnabled(false);
-      await server.drain();
-      await settle(server, 2);
 
       // Then its submit is still applied and its checks still run
+      await server.drain();
+      await settle(server, 2);
       expect(stateOf(server, id)).toBe("WORK_REVIEW");
       expect(server.schedulerEnabled).toBe(false);
 
@@ -1391,12 +1385,7 @@ describe("Feature: landing work on the base branch", () => {
       const server = await serverFor(fixture);
 
       // When the work is done and the check runs against it
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
 
       // Then the write is refused, and the project is untouched
       const queued = fs.readFileSync(

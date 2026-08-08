@@ -1923,7 +1923,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a log reopened by a new server continues its sequence
 
 - **Given** a log a previous server appended to
-- **When** a new server opens the same log and appends to it
+- **Given** a new server opening the same log
+- **When** it appends to it
 - **Then** it picks up where the last one left off, so no number repeats
 
 #### a reader is given every transition in the order applied
@@ -1956,7 +1957,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### rotating never writes over what an agent wrote before
 
 - **Given** a task whose first attempt has already been rotated into history
-- **When** a second attempt is written and rotated
+- **Given** a second attempt written to the live assignment
+- **When** the live file is rotated into history
 - **Then** both attempts are kept, numbered in the order they were made
 
 #### rotating when there is nothing to rotate is harmless
@@ -1970,24 +1972,28 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a workspace borrows the repository's objects
 
 - **Given** a repository with a commit in it
+- **Given** a path the clone will land on
 - **When** a workspace is cloned from it
 - **Then** it points at the repository's objects instead of copying them
 
 #### a workspace inherits the repository's commit identity
 
 - **Given** a repository configured with an author
+- **Given** a path the clone will land on
 - **When** a workspace is cloned from it
 - **Then** the agent's commits carry that author, which a plain clone would not
 
 #### a workspace starts on its task branch, cut from the base
 
 - **Given** a repository with a base branch
+- **Given** a path the clone will land on
 - **When** a workspace is cloned for a task
 - **Then** it is on the task's own branch, standing where the base does
 
 #### a recloned workspace comes back to the work already done
 
 - **Given** a workspace whose commits were harvested before it was removed
+- **Given** a path the new clone will land on
 - **When** it is cloned again for the same task
 - **Then** it checks out the branch that survived, not the base it was cut from
 
@@ -2006,6 +2012,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a cloned workspace has refs of its own
 
 - **Given** a repository with a commit in it
+- **Given** a path the clone will land on
 - **When** a workspace is cloned from it
 - **Then** it does not share the repository's refs, so harvesting is a real fetch
 
@@ -2024,6 +2031,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a fresh workspace carries no commit and no change
 
 - **Given** a repository with a commit in it
+- **Given** a path the clone will land on
 - **When** a workspace is cloned from it
 - **Then** the guard sees nothing committed and nothing changed
 
@@ -2176,13 +2184,15 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a document written and read back is unchanged
 
 - **Given** a task using every field, with awkward characters in its title
-- **When** it is written, parsed and written again
+- **Given** the document written once
+- **When** it is parsed and written again
 - **Then** nothing drifts, so a person's edit and the server's agree
 
 #### ids are written quoted, so their leading zeros survive
 
 - **Given** a task with a dependency, both with leading zeros in their ids
-- **When** the document is written and read back
+- **Given** the document written out
+- **When** it is read back
 - **Then** the ids are quoted on disk and come back as strings
 
 #### an id someone unquoted by hand is refused
@@ -2451,7 +2461,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a blocked task starts once its last dependency is gone
 
 - **Given** a task blocked behind two dependencies, one since edited out
-- **When** the last dependency is edited out and it is submitted
+- **Given** the last dependency edited out of it
+- **When** it is submitted with its dependencies gone
 - **Then** it starts, because nothing is left for it to wait on
 
 #### a dependency on a task that is gone can be edited away
@@ -2817,13 +2828,15 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### only what was appended since the last read is parsed
 
 - **Given** a session file with one turn in it, already read once
-- **When** another turn is appended and the file is read again
+- **Given** another turn appended to the file
+- **When** the file is read again
 - **Then** the new turn joins the old ones rather than replacing them
 - **Then** each turn leaves one usage sample behind for the rate meter
 
 #### only the last ten usage samples are kept
 
 - **Given** a session with twelve turns written to it
+- **Given** a tail over the session file
 - **When** the whole session is read
 - **Then** every turn is in the transcript, but the rate is over the recent ones
 
@@ -2836,7 +2849,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a half written line is held until its newline arrives
 
 - **Given** a session file caught mid-write, with no newline yet
-- **When** the rest of the line, and its newline, are written
+- **Given** the rest of the line, and its newline, written
+- **When** the file is read
 - **Then** the turn is parsed whole rather than half of it being dropped
 
 #### a session file that is not there yet reads as empty
@@ -3337,7 +3351,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### slots of the same model share one window
 
 - **Given** two messages recorded against one agent key
-- **When** both that agent and another are read
+- **When** its rate is read
 - **Then** the samples belong to the agent, not to the slot that produced them
 - **Then** a different agent is still untried
 
@@ -4338,7 +4352,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### reload_prompts picks up an override written after startup
 
 - **Given** a running server whose project overrides no prompts yet
-- **When** an override is written and the prompts are reloaded
+- **Given** an override written after the server started
+- **When** the prompts are reloaded
 - **Then** the new file is cached, without the server being restarted
 
 #### task_create returns a path the manager can edit directly
@@ -4363,7 +4378,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a task is authored by creating it, writing its body and submitting it
 
 - **Given** a project with no tasks in it yet
-- **When** the manager creates a task, writes its goal and submits it
+- **Given** a task created with a goal and a check, waiting to be submitted
+- **When** the manager submits it
 - **Then** it enters the pipeline at the design phase
 
 #### a task with dependencies is submitted into BLOCKED
@@ -4387,7 +4403,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### the views are readable as resources and carry a cursor
 
 - **Given** a project with a task in it
-- **When** the manager creates another task and reads the views
+- **Given** another task created beside the first
+- **When** the tasks view is read as a resource
 - **Then** the tasks view carries rows and a cursor the manager can track
 - **Then** the runtime directory is named, so logs can be read from outside
 
@@ -4498,6 +4515,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### the whole output of a check is written where a person can read it
 
 - **Given** a task whose check writes to its output
+- **Given** a server with its scheduler enabled
 - **When** the work is done and the check runs against it
 - **Then** the output is on disk in the task's own directory
 
@@ -4519,6 +4537,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a session opened under an older role directory is reopened where it lies
 
 - **Given** a task whose session was opened where an older server put it
+- **Given** a server with its scheduler enabled
 - **When** the agent is dispatched again
 - **Then** the session is reopened where the document says it lies
 
@@ -4582,7 +4601,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### work, checks, agent review and manager review close the task
 
 - **Given** a task with a check, and agents that will do and review the work
-- **When** the scheduler runs it to the manager and the manager merges it
+- **When** the manager merges it
 - **Then** the task closes and nothing of its workspace is left behind
 
 ### Feature: measuring how fast an agent writes
@@ -4692,7 +4711,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### the manager resolves a held task by writing the body and resuming
 
 - **Given** a task held because its goal was unclear to the agent
-- **When** the manager rewrites the goal and resumes it
+- **Given** the manager rewrites the goal in the task body
+- **When** the manager resumes it
 - **Then** the task goes back into the queue with the clearer goal
 
 #### design and planning rank below work, reviews above their fresh states
@@ -4704,7 +4724,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a task still queued in PLAN can be held and aborted
 
 - **Given** a task queued for design that nothing has started
-- **When** the manager holds it and then aborts it
+- **Given** the manager holds it, abandoning it
+- **When** the manager aborts it
 - **Then** it closes and leaves the graph
 
 ### Feature: handing a task to an agent
@@ -4712,12 +4733,14 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### the prompts and templates come from the orchestrator's own directory, not the driven repo
 
 - **Given** a driven project with no orchestrator directory of its own
+- **Given** a server with its scheduler enabled
 - **When** a task is dispatched
 - **Then** the prompts came from the orchestrator's own directory
 
 #### the driven repo's own orchestrator/ overrides the prompts and templates it names
 
 - **Given** a project that carries its own copy of the work prompt
+- **Given** a server with its scheduler enabled
 - **When** a task is dispatched
 - **Then** the agent read the project's words, over the task's own body
 
@@ -4730,24 +4753,28 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### an override of one file leaves every other prompt as the orchestrator ships it
 
 - **Given** a project that overrides the design prompt but not the work one
+- **Given** a server with its scheduler enabled
 - **When** a task is dispatched into the work stage
 - **Then** the agent read the orchestrator's own work prompt, untouched
 
 #### a dispatched task gets a worktree, a branch and an ASSIGNMENT.md beside it
 
 - **Given** a task with a goal written into its body
+- **Given** a server with its scheduler enabled
 - **When** the task is dispatched
 - **Then** it has a worktree, a branch, and its assignment beside the worktree
 
 #### the assignment is handed over with the empty section the agent is to write
 
 - **Given** a task about to be dispatched into the design stage
+- **Given** a server with its scheduler enabled
 - **When** the task is dispatched
 - **Then** the assignment is the body plus the empty heading to fill in
 
 #### the claim records the agent, its pid and the session it opened
 
 - **Given** a task about to be dispatched
+- **Given** a server with its scheduler enabled
 - **When** the agent claims it
 - **Then** the document names the agent, its process and everything it needs
 - **Then** the claim is released once the work is done
@@ -4761,6 +4788,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### two ticks in flight at once dispatch a task to one slot, not two
 
 - **Given** one queued task and a pool of two free slots
+- **Given** a server with its scheduler enabled
 - **When** two ticks run at the same time
 - **Then** only one slot took the task, and no dispatch failed
 
@@ -4829,6 +4857,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### an agent that dies mid-task frees its slot and releases the task
 
 - **Given** a task dispatched to an agent that will exit without settling
+- **Given** a server with its scheduler stopped, so the reaper must find it
 - **When** the agent dies and the server ticks on
 - **Then** the slot is idle and the task is back in the queue where it stood
 
@@ -4887,7 +4916,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### the file is logged once when it breaks and once when it is repaired
 
 - **Given** a server that has ticked five times over an unreadable task
-- **When** the document is repaired and the server ticks five times more
+- **Given** the document is repaired
+- **When** the server ticks five times more
 - **Then** the repair is logged once, and the task is back in the graph
 
 ### Feature: an agent that compacts mid-turn
@@ -4955,6 +4985,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a first review failure bounces the work back and is counted
 
 - **Given** work a reviewer will send back
+- **Given** a server with its scheduler enabled
 - **When** the work is done, checked and reviewed once
 - **Then** the failure is counted and the work only bounced back
 
@@ -4975,13 +5006,14 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### manager review bounces are never counted
 
 - **Given** work the manager will send back twice
-- **When** the manager sends it back, and again after the redo
+- **When** the manager sends it back again after the redo
 - **Then** it is back in WORK, never held, and no review was ever counted
 
 #### resume after a review-failure hold starts the count fresh
 
 - **Given** work held after two review failures
-- **When** the manager resumes it and the redo fails once
+- **Given** the manager resumes it, and a server with its scheduler enabled
+- **When** the redo fails once
 - **Then** one failure only bounces it, never holds it again
 
 ### Feature: a submit with nothing committed behind it
@@ -5068,7 +5100,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a re-dispatch rotates the previous attempt into history
 
 - **Given** a task held after an attempt that wrote notes into its assignment
-- **When** the manager resumes it and the second attempt finishes the work
+- **Given** the manager resumes it with a plan that lets the redo finish
+- **When** the second attempt finishes the work
 - **Then** the first attempt is kept in history and the second is the one that counts
 
 #### every process against one task appends to a single rpc log
@@ -5098,6 +5131,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a busy slot names its task, role, pid and activity
 
 - **Given** a task the scheduler is about to dispatch
+- **Given** a server with its scheduler enabled
 - **When** the agent is dispatched and the views are published
 - **Then** its row names the task, the role, the process and what it is doing
 
@@ -5147,19 +5181,21 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### tokens, context and the session file reach the view
 
 - **Given** a task the scheduler is about to dispatch
+- **Given** a server with its scheduler enabled
 - **When** the agent is dispatched and the views are published
 - **Then** the console can show how much context is left and where to read it
 
 #### compactions are counted in the view
 
 - **Given** an agent that will compact part way through its turn
+- **Given** a server with its scheduler enabled
 - **When** it is dispatched and runs until it compacts
 - **Then** the console can see how often it has compacted on this task
 
 #### a closed task stays in the tasks view
 
 - **Given** work that has been reviewed and is waiting on the manager
-- **When** the manager merges it and the views are published
+- **When** the manager merges it
 - **Then** the closed task is still shown, so the manager sees what just landed
 
 ### Feature: the log of every transition applied
@@ -5176,7 +5212,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a written command toggles the scheduler and an agent, and is consumed
 
 - **Given** a running server watching for console commands
-- **When** the console writes each of the three commands in turn
+- **When** the console writes the first of the three commands
 - **Then** each is applied and the file is consumed rather than reapplied
 
 #### a command left behind by a dead server is applied at startup
@@ -5196,6 +5232,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### an agent configured disabled is never dispatched to
 
 - **Given** a queued task and a pool whose only agent is turned off
+- **Given** a server with its scheduler enabled
 - **When** the scheduler runs over the graph
 - **Then** nothing is dispatched, and the console says why
 
@@ -5280,6 +5317,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a slot still running for a previous manager is not offered as capacity
 
 - **Given** a published view naming a slot whose process is still running
+- **Given** a server with its scheduler enabled
 - **When** a new server starts and ticks with the scheduler on
 - **Then** the slot is reattached rather than dispatched to again
 
@@ -5398,13 +5436,15 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### lines arriving below a scrolled pane do not move what it shows
 
 - **Given** a scrolled pane showing a fixed part of its transcript
-- **When** two more lines arrive under it
+- **Given** two more lines arriving under it
+- **When** the pane is shown again
 - **Then** the reader is still looking at the same lines
 
 #### lines arriving under a following pane do move it
 
 - **Given** a pane following the bottom of its transcript
-- **When** another line arrives under the pane
+- **Given** another line arriving under the pane
+- **When** the cache is updated
 - **Then** the pane moves down to it
 
 #### panes of different lengths scroll by the same number of lines
@@ -5516,7 +5556,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### lines already wrapped are kept rather than wrapped again
 
 - **Given** a pane whose transcript has already been laid out
-- **When** another entry arrives and the pane is laid out again
+- **Given** another entry arriving below it
+- **When** the pane is laid out again
 - **Then** the settled lines are the same objects, not rebuilt every frame
 
 #### the newest entry is laid out again, because it is still growing
@@ -5534,7 +5575,8 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a session rewritten from the start drops the lines it cached
 
 - **Given** a pane holding the lines of a session that has since been replaced
-- **When** the transcript comes back shorter than it was
+- **Given** a transcript that has come back shorter than it was
+- **When** the pane is updated to the shorter transcript
 - **Then** the old lines are thrown away and only the new session is drawn
 
 ### Feature: drawing the whole screen
@@ -5632,7 +5674,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### emoji in a transcript keep the divider in the same column
 
 - **Given** two screens differing only in the emoji one transcript carries
-- **When** both screens are drawn
+- **When** the emoji screen is drawn
 - **Then** the divider stands in the same column on every row of both
 
 #### lines arriving below a scrolled screen raise the new messages button

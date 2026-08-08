@@ -325,8 +325,10 @@ describe("Feature: which lines of a transcript a pane shows", () => {
     const base = baseOf(cache.update(entries, 40).length, 2, undefined);
     const before = shown(body(cache.update(entries, 40), 2, base, 1));
 
-    // When two more lines arrive under it
+    // Given two more lines arriving under it
     entries.push(entryOf("five"), entryOf("six"));
+
+    // When the pane is shown again
     const after = shown(
       body(cache.update(entries, 40), 2, baseOf(6, 2, base), 1),
     );
@@ -341,8 +343,10 @@ describe("Feature: which lines of a transcript a pane shows", () => {
     const cache: PaneLines = new PaneLines();
     const entries = ["one", "two"].map((text) => entryOf(text));
 
-    // When another line arrives under the pane
+    // Given another line arriving under the pane
     entries.push(entryOf("three"));
+
+    // When the cache is updated
     const lines = cache.update(entries, 40);
 
     // Then the pane moves down to it
@@ -578,8 +582,10 @@ describe("Feature: keeping a pane's wrapped lines between frames", () => {
     const before = cache.update(entries, 40);
     const kept = before[0]!;
 
-    // When another entry arrives and the pane is laid out again
+    // Given another entry arriving below it
     entries.push(entryOf("four"));
+
+    // When the pane is laid out again
     const after = cache.update(entries, 40);
 
     // Then the settled lines are the same objects, not rebuilt every frame
@@ -623,13 +629,16 @@ describe("Feature: keeping a pane's wrapped lines between frames", () => {
     const entries = [entryOf("one"), entryOf("two"), entryOf("three")];
     cache.update(entries, 40);
 
-    // When the transcript comes back shorter than it was
+    // Given a transcript that has come back shorter than it was
     entries.length = 0;
     entries.push(entryOf("fresh"));
 
+    // When the pane is updated to the shorter transcript
+    const refreshed = cache.update(entries, 40);
+
     // Then the old lines are thrown away and only the new session is drawn
-    expect(renderLine(cache.update(entries, 40)[0]!)).toContain("fresh");
-    expect(cache.update(entries, 40)).toHaveLength(1);
+    expect(renderLine(refreshed[0]!)).toContain("fresh");
+    expect(refreshed).toHaveLength(1);
   });
 });
 
@@ -885,11 +894,11 @@ describe("Feature: drawing the whole screen", () => {
       return textWidth(line.slice(0, line.indexOf("│")));
     };
 
-    // When both screens are drawn
+    // When the emoji screen is drawn
     const { lines } = screen(emoji, [], layoutOf());
-    const expected = screen(cells(2), [], layoutOf()).lines;
 
     // Then the divider stands in the same column on every row of both
+    const expected = screen(cells(2), [], layoutOf()).lines;
     const rows = Array.from({ length: 12 - QUEUE_LINES - HEADER_LINES - 1 })
       .map((_, index) => index + QUEUE_LINES + HEADER_LINES + 1)
       .map((row) => columnOf(lines, row) === columnOf(expected, row));

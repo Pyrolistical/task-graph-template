@@ -273,9 +273,7 @@ describe("Feature: the server log", () => {
       const runtime = runtimeFor();
 
       // When far more is written to it than it can hold
-      for (let i = 0; i < 200; i++) {
-        runtime.log(`line ${i}`, 400);
-      }
+      for (let i = 0; i < 200; i++) runtime.log(`line ${i}`, 400);
 
       // Then what is left is under the cap, ends at the newest line, and is whole
       const contents = fs.readFileSync(runtime.serverLog, "utf-8");
@@ -388,8 +386,10 @@ describe("Feature: the log of every transition applied", () => {
       const filePath = path.join(tempDir("orchestrator-"), "transitions.jsonl");
       new TransitionLog(filePath).append(entry("CHECK"));
 
-      // When a new server opens the same log and appends to it
+      // Given a new server opening the same log
       const reopened = new TransitionLog(filePath);
+
+      // When it appends to it
       const appended = reopened.append(entry("WORK"));
 
       // Then it picks up where the last one left off, so no number repeats
@@ -439,9 +439,7 @@ describe("Feature: the log of every transition applied", () => {
     const log = new TransitionLog(filePath, 10);
 
     // When twenty-five transitions are appended
-    for (let i = 0; i < 25; i++) {
-      log.append(entry("WORK"));
-    }
+    for (let i = 0; i < 25; i++) log.append(entry("WORK"));
 
     // Then only the last ten are kept, still numbered from where they happened
     const kept = log.read();
@@ -493,8 +491,10 @@ describe("Feature: keeping what an agent wrote on an earlier attempt", () => {
       expect(rotate(live, history)).toBe(path.join(history, historyName(1)));
       expect(fs.existsSync(live)).toBe(false);
 
-      // When a second attempt is written and rotated
+      // Given a second attempt written to the live assignment
       fs.writeFileSync(live, assignment("the second attempt"));
+
+      // When the live file is rotated into history
       rotate(live, history);
 
       // Then both attempts are kept, numbered in the order they were made
@@ -531,8 +531,10 @@ describe("Feature: the workspace an agent works in", () => {
     // Given a repository with a commit in it
     const repo = tempRepo();
 
-    // When a workspace is cloned from it
+    // Given a path the clone will land on
     const workspace = path.join(tempDir("clone-"), "worktree");
+
+    // When a workspace is cloned from it
     git.addWorkspace(repo, "work/000001", workspace, "master");
 
     // Then it points at the repository's objects instead of copying them
@@ -552,8 +554,10 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a repository configured with an author
       const repo = tempRepo();
 
-      // When a workspace is cloned from it
+      // Given a path the clone will land on
       const workspace = path.join(tempDir("clone-"), "worktree");
+
+      // When a workspace is cloned from it
       git.addWorkspace(repo, "work/000001", workspace, "master");
 
       // Then the agent's commits carry that author, which a plain clone would not
@@ -569,8 +573,10 @@ describe("Feature: the workspace an agent works in", () => {
       // Given a repository with a base branch
       const repo = tempRepo();
 
-      // When a workspace is cloned for a task
+      // Given a path the clone will land on
       const workspace = path.join(tempDir("clone-"), "worktree");
+
+      // When a workspace is cloned for a task
       git.addWorkspace(repo, "work/000001", workspace, "master");
 
       // Then it is on the task's own branch, standing where the base does
@@ -594,8 +600,10 @@ describe("Feature: the workspace an agent works in", () => {
       git.harvest(repo, first, "work/000001");
       git.removeWorkspace(first);
 
-      // When it is cloned again for the same task
+      // Given a path the new clone will land on
       const second = path.join(tempDir("clone-"), "worktree");
+
+      // When it is cloned again for the same task
       git.addWorkspace(repo, "work/000001", second, "master");
 
       // Then it checks out the branch that survived, not the base it was cut from
@@ -662,8 +670,10 @@ describe("Feature: the workspace an agent works in", () => {
     // Given a repository with a commit in it
     const repo = tempRepo();
 
-    // When a workspace is cloned from it
+    // Given a path the clone will land on
     const workspace = path.join(tempDir("clone-"), "worktree");
+
+    // When a workspace is cloned from it
     git.addWorkspace(repo, "work/000001", workspace, "master");
 
     // Then it does not share the repository's refs, so harvesting is a real fetch
@@ -720,8 +730,10 @@ describe("Feature: the workspace an agent works in", () => {
     // Given a repository with a commit in it
     const repo = tempRepo();
 
-    // When a workspace is cloned from it
+    // Given a path the clone will land on
     const workspace = path.join(tempDir("clone-"), "worktree");
+
+    // When a workspace is cloned from it
     git.addWorkspace(repo, "work/000001", workspace, "master");
 
     // Then the guard sees nothing committed and nothing changed

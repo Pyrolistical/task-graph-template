@@ -15,12 +15,15 @@ import { writeCommand } from "../adapters/command.ts";
 import { eventually } from "../testing/wait.ts";
 import {
   compactionsOf,
+  dispatchOnce,
   editTaskFile,
   reaches,
+  runOnce,
   serverFor,
   settle,
   stateOf,
   until,
+  walkTo,
 } from "../testing/server-jig.ts";
 
 describe("Feature: the views the console and the manager read", () => {
@@ -58,8 +61,10 @@ describe("Feature: the views the console and the manager read", () => {
       // Given a task the scheduler is about to dispatch
       const server = await serverFor(fixture);
 
-      // When the agent is dispatched and the views are published
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the agent is dispatched and the views are published
       await server.tick();
 
       // Then its row names the task, the role, the process and what it is doing
@@ -281,8 +286,10 @@ describe("Feature: what the agents view says about a running agent", () => {
       // Given a task the scheduler is about to dispatch
       const server = await serverFor(fixture);
 
-      // When the agent is dispatched and the views are published
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the agent is dispatched and the views are published
       await server.tick();
 
       // Then the console can show how much context is left and where to read it
@@ -318,8 +325,10 @@ describe("Feature: what the agents view says about a running agent", () => {
       // Given an agent that will compact part way through its turn
       const server = await serverFor(fixture);
 
-      // When it is dispatched and runs until it compacts
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When it is dispatched and runs until it compacts
       await until(server, () => compactionsOf(server, id) === 1);
 
       // Then the console can see how often it has compacted on this task
@@ -355,11 +364,11 @@ describe("Feature: what the agents view says about a running agent", () => {
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
 
-      // When the manager merges it and the views are published
+      // When the manager merges it
       await server.attemptMerge(id);
-      await server.writeViews();
 
       // Then the closed task is still shown, so the manager sees what just landed
+      await server.writeViews();
       const view = JSON.parse(
         fs.readFileSync(server.runtime.tasksView, "utf-8"),
       );
@@ -398,8 +407,7 @@ describe("Feature: the log of every transition applied", () => {
       const server = await serverFor(fixture);
 
       // When it runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then every transition is one numbered line, in the order it happened
       const entries = server.transitions.read();
@@ -429,11 +437,11 @@ describe("Feature: commands the console writes for the server", () => {
       const fixture = makeFixture();
       const server = await serverFor(fixture);
 
-      // When the console writes each of the three commands in turn
+      // When the console writes the first of the three commands
       writeCommand(server.runtime, { command: "scheduler", enabled: true });
-      await applied(() => server.schedulerEnabled);
 
       // Then each is applied and the file is consumed rather than reapplied
+      await applied(() => server.schedulerEnabled);
       expect(fs.existsSync(server.runtime.consoleCommand)).toBe(false);
 
       writeCommand(server.runtime, {
@@ -485,6 +493,8 @@ describe("Feature: commands the console writes for the server", () => {
         agent: "pi-nobody-nothing",
         enabled: false,
       });
+
+      // Then the refusal is logged and the server carries on running
       await eventually(
         () =>
           fs
@@ -492,8 +502,6 @@ describe("Feature: commands the console writes for the server", () => {
             .includes("refused"),
         "logged the refusal",
       );
-
-      // Then the refusal is logged and the server carries on running
       expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
         "no agent named",
       );
@@ -523,8 +531,10 @@ describe("Feature: turning an agent off and on", () => {
       // Given a queued task and a pool whose only agent is turned off
       const server = await serverFor(fixture);
 
-      // When the scheduler runs over the graph
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the scheduler runs over the graph
       await settle(server);
 
       // Then nothing is dispatched, and the console says why
@@ -714,11 +724,11 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // When the manager aborts that command
       server.abortAgent(row.name);
+
+      // Then the command is killed and the agent finishes its turn from there
       server.setSchedulerEnabled(false);
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
-
-      // Then the command is killed and the agent finishes its turn from there
       expect(stateOf(server, id)).not.toBe("WORK");
       expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
         "aborted bash: git status",
@@ -813,6 +823,8 @@ describe("Feature: aborting the command an agent is running", () => {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
+
+      // Then the command is killed, exactly as the manager's own abort would
       await eventually(
         () =>
           fs
@@ -823,8 +835,6 @@ describe("Feature: aborting the command an agent is running", () => {
       server.setSchedulerEnabled(false);
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
-
-      // Then the command is killed, exactly as the manager's own abort would
       expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
         "aborted bash: git status",
       );
@@ -846,6 +856,8 @@ describe("Feature: aborting the command an agent is running", () => {
         command: "agent_abort",
         "agent-name-slot": "pi-fake-fake-1",
       });
+
+      // Then the refusal is logged and the server carries on running
       await eventually(
         () =>
           fs
@@ -853,8 +865,6 @@ describe("Feature: aborting the command an agent is running", () => {
             .includes("refused"),
         "logged the refusal",
       );
-
-      // Then the refusal is logged and the server carries on running
       expect(fs.readFileSync(server.runtime.serverLog, "utf-8")).toContain(
         "not running",
       );
@@ -937,10 +947,11 @@ describe("Feature: a manager that exits while its agents run on", () => {
       // Given a published view naming a slot whose process is still running
       const second = await serverFor(fixture);
 
-      // When a new server starts and ticks with the scheduler on
+      // Given a server with its scheduler enabled
       second.setSchedulerEnabled(true);
-      await second.tick();
-      await second.drain();
+
+      // When a new server starts and ticks with the scheduler on
+      await settle(second, 1);
 
       // Then the slot is reattached rather than dispatched to again
       const view = JSON.parse(

@@ -105,10 +105,12 @@ describe("Feature: a task that waits on other tasks", () => {
       });
       expect(run(dir, main, "submit").to).toBeNull();
 
-      // When the last dependency is edited out and it is submitted
+      // Given the last dependency edited out of it
       editTask(dir, main, (meta) => {
         meta.depends_on = [];
       });
+
+      // When it is submitted with its dependencies gone
       const result = run(dir, main, "submit");
 
       // Then it starts, because nothing is left for it to wait on

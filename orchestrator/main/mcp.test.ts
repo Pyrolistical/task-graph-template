@@ -225,11 +225,12 @@ describe("Feature: the tool surface the manager works through", () => {
       const override = path.join(fixture.tasksDir, "prompts", "WORK.md");
       expect(before).not.toContain(override);
 
-      // When an override is written and the prompts are reloaded
+      // Given an override written after the server started
       writeOverride(fixture, "prompts/WORK.md", "Start on ../ASSIGNMENT.md.\n");
       fs.mkdirSync(path.join(fixture.tasksDir, "prompts"), { recursive: true });
       fs.writeFileSync(override, "Start on ../ASSIGNMENT.md.\n");
 
+      // When the prompts are reloaded
       const after = JSON.parse(
         textOf(
           await client.callTool({ name: "reload_prompts", arguments: {} }),
@@ -336,7 +337,7 @@ describe("Feature: the tool surface the manager works through", () => {
       const fixture = makeFixture();
       const client = await connect(fixture);
 
-      // When the manager creates a task, writes its goal and submits it
+      // Given a task created with a goal and a check, waiting to be submitted
       const created = JSON.parse(
         textOf(
           await client.callTool({
@@ -352,6 +353,8 @@ describe("Feature: the tool surface the manager works through", () => {
       editTaskFile(fixture, created.id, (meta) => {
         meta.checks = ["bun test"];
       });
+
+      // When the manager submits it
       const done = JSON.parse(
         textOf(
           await client.callTool({
@@ -507,15 +510,14 @@ describe("Feature: the tool surface the manager works through", () => {
       readyTask(fixture, "A task");
       const client = await connect(fixture);
 
-      // When the manager creates another task and reads the views
+      // Given another task created beside the first
       await client.callTool({
         name: "task_create",
         arguments: { title: "another" },
       });
+
+      // When the tasks view is read as a resource
       const view = await client.readResource({ uri: "orchestrator://tasks" });
-      const workspace = await client.readResource({
-        uri: "orchestrator://workspace_path",
-      });
 
       // Then the tasks view carries rows and a cursor the manager can track
       const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
@@ -523,6 +525,9 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(Array.isArray(parsed.tasks)).toBe(true);
 
       // Then the runtime directory is named, so logs can be read from outside
+      const workspace = await client.readResource({
+        uri: "orchestrator://workspace_path",
+      });
       expect((workspace.contents as { text: string }[])[0]!.text).toContain(
         "task-graph-server",
       );

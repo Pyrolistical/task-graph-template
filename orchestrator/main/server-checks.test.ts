@@ -12,7 +12,15 @@ import {
   setPlan,
 } from "../testing/fixture.ts";
 import { Server } from "../app/server.ts";
-import { reaches, serverFor, stateOf, until } from "../testing/server-jig.ts";
+import {
+  dispatchOnce,
+  reaches,
+  runOnce,
+  serverFor,
+  stateOf,
+  until,
+  walkTo,
+} from "../testing/server-jig.ts";
 
 describe("Feature: running a task's checks", () => {
   testInTempDirs(
@@ -36,12 +44,7 @@ describe("Feature: running a task's checks", () => {
       const server = await serverFor(fixture);
 
       // When the work is done and the check runs against it
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
 
       // Then the task goes back to work with the failure queued for the agent
       const task = server.tasks().get(id)!;
@@ -79,12 +82,7 @@ describe("Feature: running a task's checks", () => {
       const server = await serverFor(fixture);
 
       // When the work is done and the checks run against it
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
 
       // Then the agent is told about both failures, not only the first
       const queued = fs.readFileSync(
@@ -151,8 +149,10 @@ describe("Feature: running a task's checks", () => {
       // Given a task whose check writes to its output
       const server = await serverFor(fixture);
 
-      // When the work is done and the check runs against it
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the work is done and the check runs against it
       await until(server, () => fs.existsSync(server.runtime.checkLog(id, 0)));
 
       // Then the output is on disk in the task's own directory
@@ -192,20 +192,13 @@ describe("Feature: sending a task back to the agent that did it", () => {
 
       // Given a task whose check failed once and whose session was kept
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
       const afterFailure = server.tasks().get(id)!;
       expect(afterFailure.state).toBe("WORK");
       expect(afterFailure.workspace!.session).not.toBeNull();
 
       // When the agent is dispatched again and finishes the work
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the assignment was never rotated, because the session was resumed
       const history = fs.readdirSync(server.runtime.history(id));
@@ -247,18 +240,10 @@ describe("Feature: sending a task back to the agent that did it", () => {
 
       // Given a task whose check failed after the first attempt
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
 
       // When the agent is dispatched again into the session it was using
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await runOnce(server);
 
       // Then its second prompt names the command that failed and how it failed
       const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
@@ -290,12 +275,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
 
       // Given a task whose session was opened where an older server put it
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
+      await dispatchOnce(server);
       const opened = server.tasks().get(id)!.workspace!.session!;
       const legacyDir = path.join(
         server.runtime.taskDir(id),
@@ -311,10 +291,11 @@ describe("Feature: sending a task back to the agent that did it", () => {
         fs.readFileSync(taskFile, "utf-8").replace(opened, legacy),
       );
 
-      // When the agent is dispatched again
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the agent is dispatched again
       await server.tick();
-      server.setSchedulerEnabled(false);
 
       // Then the session is reopened where the document says it lies
       expect(stateOf(server, id)).toBe("WORK");

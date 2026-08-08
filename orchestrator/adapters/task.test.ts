@@ -245,14 +245,18 @@ describe("Feature: reading and writing a task's fields", () => {
       checks: ["bun test"],
     });
 
-    // When it is written, parsed and written again
+    // Given the document written once
     const once = rebuildDocument(meta, "\n\n# Goal\n");
-    const reparsed = parseTaskMeta(parseDocument(once).raw);
-    const twice = rebuildDocument(reparsed, "\n\n# Goal\n");
+
+    // When it is parsed and written again
+    const twice = rebuildDocument(
+      parseTaskMeta(parseDocument(once).raw),
+      "\n\n# Goal\n",
+    );
 
     // Then nothing drifts, so a person's edit and the server's agree
     expect(twice).toBe(once);
-    expect(reparsed).toEqual(meta);
+    expect(parseTaskMeta(parseDocument(twice).raw)).toEqual(meta);
   });
 
   testInTempDirs(
@@ -261,8 +265,10 @@ describe("Feature: reading and writing a task's fields", () => {
       // Given a task with a dependency, both with leading zeros in their ids
       const meta = baseMeta({ depends_on: ["000007"] });
 
-      // When the document is written and read back
+      // Given the document written out
       const document = rebuildDocument(meta, "\n");
+
+      // When it is read back
       const parsed = parseTaskMeta(parseDocument(document).raw);
 
       // Then the ids are quoted on disk and come back as strings

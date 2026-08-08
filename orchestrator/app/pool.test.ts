@@ -229,9 +229,9 @@ describe("Feature: releasing a slot when its work ends", () => {
 
     // When the work the pool is tracking rejects
     pool.track(worker, Promise.reject(new Error("the provider hung up")));
-    await pool.settled();
 
     // Then the failure is logged against the slot and the task it was on
+    await pool.settled();
     expect(log).toEqual([
       "pi-fake-fake-1 on 000042 failed: the provider hung up",
     ]);

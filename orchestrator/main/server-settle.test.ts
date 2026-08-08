@@ -17,10 +17,15 @@ import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { bodyOf } from "../testing/graph-jig.ts";
 import {
   reaches,
+  reviewCycle,
+  runOnce,
   serverFor,
   settle,
+  settleTo,
+  settleUntil,
   stateOf,
   until,
+  walkTo,
 } from "../testing/server-jig.ts";
 
 describe("Feature: what a reviewer sends back to the worker", () => {
@@ -48,16 +53,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       const server = await serverFor(fixture);
 
       // When the work is done, checked and reviewed
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.tick();
-      await server.drain();
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await reviewCycle(server);
 
       // Then the finding is written into the task body for the worker to read
       const body = fs.readFileSync(
@@ -114,10 +110,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "MANAGER_REVIEW");
 
       // Then the worker's second prompt carried the findings it had to answer
       expect(promptsTo(server.runtime.sessionDir(id, "worker"))[1]).toBe(
@@ -166,9 +159,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the worker was resumed in its own session, twice, never the review's
       const worked = path.join(
@@ -210,9 +201,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the reviewer saw a worktree with the work committed on it
       const head = git
@@ -262,12 +251,13 @@ describe("Feature: a review that fails twice", () => {
       // Given work a reviewer will send back
       const server = await serverFor(fixture);
 
-      // When the work is done, checked and reviewed once
+      // Given a server with its scheduler enabled
       server.setSchedulerEnabled(true);
+
+      // When the work is done, checked and reviewed once
       await until(server, () =>
         server.transitions.read().some((e) => e.transition === "feedback"),
       );
-      server.setSchedulerEnabled(false);
 
       // Then the failure is counted and the work only bounced back
       expect(readFailureCount(server.runtime.reviewFailures(id))).toBe(1);
@@ -308,10 +298,7 @@ describe("Feature: a review that fails twice", () => {
       const server = await serverFor(fixture);
 
       // When the review fails a second time
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
-      server.setSchedulerEnabled(false);
-      await server.drain();
+      await settleTo(server, id, "HELD_WORK");
 
       // Then the task is held with the second round's findings as the reason
       const task = server.tasks().get(id)!;
@@ -367,9 +354,7 @@ describe("Feature: a review that fails twice", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the passing review cleared the count
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
@@ -408,20 +393,16 @@ describe("Feature: a review that fails twice", () => {
 
       // Given work the manager will send back twice
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
-
-      // When the manager sends it back, and again after the redo
+      await walkTo(server, id, "MANAGER_REVIEW");
       server.transition(
         id,
         "feedback",
         { findings: ["the manager wants changes"] },
         "manager",
       );
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
+
+      // When the manager sends it back again after the redo
       server.transition(
         id,
         "feedback",
@@ -475,18 +456,17 @@ describe("Feature: a review that fails twice", () => {
 
       // Given work held after two review failures
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "HELD_WORK");
 
-      // When the manager resumes it and the redo fails once
+      // Given the manager resumes it, and a server with its scheduler enabled
       server.transition(id, "resume", {}, "manager");
       server.setSchedulerEnabled(true);
+
+      // When the redo fails once
       await until(
         server,
         () => readFailureCount(server.runtime.reviewFailures(id)) === 1,
       );
-      server.setSchedulerEnabled(false);
 
       // Then one failure only bounces it, never holds it again
       expect(stateOf(server, id)).toBe("WORK");
@@ -520,9 +500,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was nudged once and never held, because the second try passed
       const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
@@ -564,9 +542,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was told which file it had left behind, and committed it
       const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
@@ -595,8 +571,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK", 20);
+      await walkTo(server, id, "HELD_WORK", 20);
 
       // Then the task is held with a reason the manager can act on
       const task = server.tasks().get(id)!;
@@ -636,8 +611,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the server settles its turn
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
+      await walkTo(server, id, "HELD_WORK");
 
       // Then the task is parked with the agent's own words as the reason
       const task = server.tasks().get(id)!;
@@ -676,9 +650,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked about the command it repeated, and never held
       const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
@@ -704,8 +676,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
+      await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, naming the command it was stuck on
       expect(server.tasks().get(id)!.held_reason).toContain("zig build");
@@ -743,9 +714,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked once and the task was never held
       const prompts = promptsTo(server.runtime.sessionDir(id, "reviewer"));
@@ -802,8 +771,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK", 40);
+      await walkTo(server, id, "HELD_WORK", 40);
 
       // Then no nudge was sent into a turn the agent was still inside
       const sessionDir = server.runtime.sessionDir(id, "worker");
@@ -842,9 +810,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then what it changed was put back and only its own section survives
       const prompts = promptsTo(server.runtime.sessionDir(id, "worker"));
@@ -877,8 +843,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
+      await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, saying which part of the assignment is missing
       const task = server.tasks().get(id)!;
@@ -926,9 +891,7 @@ describe("Feature: a review that comes back unusable", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the task never went back to the worker over the reviewer's mistake
       const log = server.transitions.read();
@@ -965,11 +928,9 @@ describe("Feature: keeping the attempts an agent already made", () => {
 
       // Given a task held after an attempt that wrote notes into its assignment
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_WORK");
-      server.setSchedulerEnabled(false);
+      await walkTo(server, id, "HELD_WORK");
 
-      // When the manager resumes it and the second attempt finishes the work
+      // Given the manager resumes it with a plan that lets the redo finish
       setPlan(fixture, {
         [id]: {
           WORK: [
@@ -983,9 +944,9 @@ describe("Feature: keeping the attempts an agent already made", () => {
         },
       });
       server.transition(id, "resume", {}, "manager");
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+
+      // When the second attempt finishes the work
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the first attempt is kept in history and the second is the one that counts
       const history = fs.readdirSync(server.runtime.history(id)).sort();
@@ -1030,8 +991,7 @@ describe("Feature: keeping the attempts an agent already made", () => {
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
-      server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
+      await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then both turns are in one log, so the task reads as one story
       const log = fs.readFileSync(server.runtime.rpcLog(id), "utf-8");
@@ -1060,13 +1020,10 @@ describe("Feature: a failure while finishing with an agent", () => {
       const server = await serverFor(fixture);
 
       // When the server settles its turn and finishes with it
-      server.setSchedulerEnabled(true);
-      await server.tick();
-      server.setSchedulerEnabled(false);
-      await server.drain();
-      await server.writeViews();
+      await runOnce(server);
 
       // Then the slot is freed and the failure is logged rather than thrown away
+      await server.writeViews();
       const view = JSON.parse(
         fs.readFileSync(server.runtime.agentsView, "utf-8"),
       );

@@ -117,14 +117,13 @@ describe("Feature: the rate table the scheduler picks slots by", () => {
     rates.record("pi-anthropic-m", { timestampMs: NOW, tokens: 10 });
     rates.record("pi-anthropic-m", { timestampMs: NOW + 1000, tokens: 30 });
 
-    // When both that agent and another are read
+    // When its rate is read
     const measured = rates.rateOf("pi-anthropic-m");
-    const other = rates.rateOf("pi-openai-m");
 
     // Then the samples belong to the agent, not to the slot that produced them
     expect(measured).toBe(40);
 
     // Then a different agent is still untried
-    expect(other).toBeNull();
+    expect(rates.rateOf("pi-openai-m")).toBeNull();
   });
 });
