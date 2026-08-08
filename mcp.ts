@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
-import fs from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { messageOf } from "./orchestrator/domain/errors.ts";
-import { type TaskId, isValidId } from "./orchestrator/domain/task.ts";
+import { isValidId } from "./orchestrator/domain/task.ts";
 import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
 import { Server } from "./orchestrator/app/server.ts";

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { parse } from "./schema.ts";
-import type { TaskId } from "./task.ts";
 import { ALL_ROLES, type Role } from "./state-machine.ts";
 import { Activity } from "./activity.ts";
 

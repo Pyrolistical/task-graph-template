@@ -28,7 +28,6 @@ import {
   editTaskFile,
   filesOf,
   reaches,
-  runtimeOf,
   serverFor,
 } from "../testing/server-jig.ts";
 import type { Server } from "../app/server.ts";
@@ -96,7 +95,7 @@ async function resourceOf<T>(
   );
 }
 
-async function schedulingBecomes(client: Client, wanted: boolean) {
+async function schedulingOf(client: Client) {
   return (await resourceOf(client, "orchestrator://queue", QueueView))
     .scheduling;
 }
@@ -737,7 +736,7 @@ describe("Feature: the tool surface the manager works through", () => {
       await client.callTool({ name: "enable_scheduler", arguments: {} });
 
       // Then the next published queue says the scheduler is dispatching
-      expect(await schedulingBecomes(client, true)).toBe(true);
+      expect(await schedulingOf(client)).toBe(true);
 
       await client.close();
     },
@@ -751,13 +750,13 @@ describe("Feature: the tool surface the manager works through", () => {
       const fixture = makeFixture();
       const client = await connect(fixture);
       await client.callTool({ name: "enable_scheduler", arguments: {} });
-      expect(await schedulingBecomes(client, true)).toBe(true);
+      expect(await schedulingOf(client)).toBe(true);
 
       // When the manager pauses it
       await client.callTool({ name: "disable_scheduler", arguments: {} });
 
       // Then the next published queue says the scheduler is paused
-      expect(await schedulingBecomes(client, false)).toBe(false);
+      expect(await schedulingOf(client)).toBe(false);
 
       await client.close();
     },

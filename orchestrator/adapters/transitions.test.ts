@@ -1,7 +1,6 @@
 import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
-import path from "node:path";
 import {
   activeTaskPath,
   closedTaskPath,
@@ -34,7 +33,6 @@ import {
   run,
   toAgentReview,
   toChecking,
-  toDesign,
   toDesignReview,
   toManagerReview,
   toPlan,

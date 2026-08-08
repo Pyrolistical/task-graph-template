@@ -10,14 +10,18 @@
     "test": "bun test",
     "bdd": "bun orchestrator/testing/bdd-doc.ts",
     "typecheck": "tsc --noEmit",
-    "fmt": "prettier --write ."
+    "lint": "eslint --fix ."
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/bun": "^1.3.14",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6",
-    "typescript": "^7.0.2"
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.66.0"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

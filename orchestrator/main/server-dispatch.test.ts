@@ -39,13 +39,11 @@ import {
   pathsOf,
   promptsOf,
   reaches,
-  runOnce,
   runtimeOf,
   serverFor,
   settle,
   settleTo,
   stateOf,
-  until,
   walkTo,
 } from "../testing/server-jig.ts";
 
@@ -825,10 +823,10 @@ describe("Feature: the design and planning phases", () => {
     async () => {
       // Given one task in each of the four states the scheduler ranks
       const fixture = makeFixture();
-      const worked = readyTask(fixture, "Ready for work");
+      readyTask(fixture, "Ready for work");
       const reviewing = unplannedTask(fixture, "Plan awaiting review");
       const planFresh = unplannedTask(fixture, "Ready to be planned");
-      const designFresh = unplannedTask(fixture, "Not yet designed");
+      unplannedTask(fixture, "Not yet designed");
 
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(false);

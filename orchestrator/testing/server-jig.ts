@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import { type TaskMeta, rebuildDocument } from "../domain/task.ts";
 import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";

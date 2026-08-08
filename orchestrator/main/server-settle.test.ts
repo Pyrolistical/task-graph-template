@@ -28,7 +28,6 @@ import {
   serverFor,
   settle,
   settleTo,
-  settleUntil,
   stateOf,
   until,
   walkTo,
