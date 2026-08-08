@@ -70,7 +70,7 @@ stateDiagram-v2
     CLOSED --> [*]
 ```
 
-There is one state per stage, and `claimed_by` says whether an agent is on it: `WORK` with no claim is a task waiting for a worker slot, `WORK` claimed by `pi-fake-2` is that slot working on it. A claim is refused when the field is already set, and that refusal — under the graph lock, on one field — is what makes a task exactly one agent's.
+There is one state per stage, and `claimed_by` names the slot that is on it: `WORK` with no claim is a task waiting for a worker slot, `WORK` claimed by `pi-fake-2` is that slot working on it. A claim is refused when the field is already set, and that refusal — under the graph lock, on one field — is what makes a task exactly one slot's.
 
 </details>
 
@@ -179,4 +179,4 @@ bun ../task-graph-template/console.ts
 
 ## Design documentation
 
-[`docs/`](docs/) is how the orchestrator works and why — start with [Authority](docs/authority.md), [States](docs/states.md) and [ASSIGNMENT.md](docs/assignment.md).
+[`docs/`](docs/) is how the orchestrator works and why — start with [The dictionary](docs/dictionary.md), [Authority](docs/authority.md), [States](docs/states.md) and [ASSIGNMENT.md](docs/assignment.md).
