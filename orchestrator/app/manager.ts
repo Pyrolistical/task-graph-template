@@ -1,5 +1,5 @@
 import type { CreatedTask, ViewName } from "./ports.ts";
-import type { AgentRow } from "../domain/agents.ts";
+import type { SlotRow } from "../domain/agents.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 import type { TransitionResult } from "../domain/state-machine.ts";
 
@@ -26,8 +26,8 @@ export interface Manager {
   resume(id: TaskId): TransitionResult;
   abort(id: TaskId): TransitionResult;
   setSchedulerEnabled(enabled: boolean): void;
-  setAgentEnabled(agent: string, enabled: boolean): AgentRow[];
-  abortAgent(name: string): AgentRow;
+  setAgentEnabled(agent: string, enabled: boolean): SlotRow[];
+  abortAgent(name: string): SlotRow;
   reloadPrompts(): string[];
   writeViews(): Promise<void>;
   view(name: ViewName): string;

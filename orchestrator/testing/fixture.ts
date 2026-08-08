@@ -491,18 +491,18 @@ export function readyTask(
   checks: string[] = [],
 ): string {
   const id = unplannedTask(fixture, title, checks);
-  takeClaim(fixture.tasksDir, id, { agentName: "designer", pid: process.pid });
+  takeClaim(fixture.tasksDir, id, { slotName: "designer", pid: process.pid });
   applyTransition(fixture.tasksDir, id, "submit", {});
   takeClaim(fixture.tasksDir, id, {
-    agentName: "design-reviewer",
+    slotName: "design-reviewer",
     pid: process.pid,
   });
   const designed = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
   applyTransition(fixture.tasksDir, id, "submit", { body: designed });
-  takeClaim(fixture.tasksDir, id, { agentName: "planner", pid: process.pid });
+  takeClaim(fixture.tasksDir, id, { slotName: "planner", pid: process.pid });
   applyTransition(fixture.tasksDir, id, "submit", {});
   takeClaim(fixture.tasksDir, id, {
-    agentName: "plan-reviewer",
+    slotName: "plan-reviewer",
     pid: process.pid,
   });
   const body = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;

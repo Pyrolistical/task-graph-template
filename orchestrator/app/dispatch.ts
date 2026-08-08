@@ -5,10 +5,10 @@ import type {
   Publisher,
   Workspaces,
 } from "./ports.ts";
-import { type Worker, Pool } from "./pool.ts";
+import { type Runner, Pool } from "./pool.ts";
 import { SettleAgent } from "./settle-agent.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
-import type { AgentSlot } from "../domain/agents.ts";
+import type { Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
 import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
@@ -61,7 +61,7 @@ export class Dispatch {
         this.publisher.log(
           `dispatch of ${task.id} to ${slot.name} failed: ${(err as Error).message}`,
         );
-        this.pool.finish(this.pool.worker(slot.name));
+        this.pool.finish(this.pool.runner(slot.name));
       }
     }
   }
@@ -69,18 +69,18 @@ export class Dispatch {
   private async assign(
     task: TaskMeta,
     candidate: Candidate,
-    slot: AgentSlot,
+    slot: Slot,
   ): Promise<void> {
-    const worker = this.pool.worker(slot.name);
-    worker.state = "SPAWNING";
-    worker.task_id = task.id;
-    worker.started_at = new Date().toISOString();
-    worker.stage = candidate.stage;
-    worker.role = candidate.role;
-    worker.issues.clear();
+    const runner = this.pool.runner(slot.name);
+    runner.state = "SPAWNING";
+    runner.task_id = task.id;
+    runner.started_at = new Date().toISOString();
+    runner.stage = candidate.stage;
+    runner.role = candidate.role;
+    runner.issues.clear();
 
     if (candidate.rank === "resume") {
-      await this.resume(task, worker, candidate.role);
+      await this.resume(task, runner, candidate.role);
       return;
     }
 
@@ -94,7 +94,7 @@ export class Dispatch {
     }
 
     const section = STAGE_OF[stage].section;
-    worker.checkout = {
+    runner.checkout = {
       branch,
       worktree,
       head: this.git.head(worktree),
@@ -105,41 +105,41 @@ export class Dispatch {
     };
 
     const process = this.pool.spawn(
-      worker,
+      runner,
       { taskId: task.id, state: stage, role: candidate.role, cwd: worktree },
       (settling) => this.settle.compacted(settling),
     );
-    worker.process = process;
+    runner.process = process;
 
     const session = await process.newSession();
-    worker.session = session;
+    runner.session = session;
     this.requireStill(task, slot);
     this.graph.claim(task.id, {
-      agentName: slot.name,
+      slotName: slot.name,
       pid: process.pid,
       branch,
       worktree,
       session,
     });
 
-    worker.state = "BUSY";
+    runner.state = "BUSY";
     const queued = this.inbox.drain(task.id, stage);
     const message = this.settle.nudge(task.id, stage);
     await this.settle.prompt(
-      this.pool.runOf(worker),
+      this.pool.runOf(runner),
       queued === "" ? message : `${queued}\n\n${message}`,
     );
-    this.settle.watch(worker);
+    this.settle.watch(runner);
   }
 
   private async resume(
     task: TaskMeta,
-    worker: Worker,
+    runner: Runner,
     role: Role,
   ): Promise<void> {
-    const slot = worker.slot;
+    const slot = runner.slot;
     const workspace = task.workspace!;
-    worker.checkout = {
+    runner.checkout = {
       branch: workspace.branch,
       worktree: workspace.worktree,
       head: this.git.head(workspace.worktree),
@@ -147,7 +147,7 @@ export class Dispatch {
     };
 
     const process = this.pool.spawn(
-      worker,
+      runner,
       {
         taskId: task.id,
         state: "WORK",
@@ -156,30 +156,30 @@ export class Dispatch {
       },
       (settling) => this.settle.compacted(settling),
     );
-    worker.process = process;
+    runner.process = process;
 
     await process.switchSession(workspace.session!);
-    worker.session = workspace.session;
+    runner.session = workspace.session;
     this.requireStill(task, slot);
     this.graph.claim(task.id, {
-      agentName: slot.name,
+      slotName: slot.name,
       pid: process.pid,
       branch: workspace.branch,
       worktree: workspace.worktree,
       session: workspace.session!,
     });
 
-    worker.state = "BUSY";
+    runner.state = "BUSY";
 
     const queued = this.inbox.drain(task.id, "WORK");
     await this.settle.prompt(
-      this.pool.runOf(worker),
+      this.pool.runOf(runner),
       queued === "" ? this.settle.nudge(task.id, "WORK") : queued,
     );
-    this.settle.watch(worker);
+    this.settle.watch(runner);
   }
 
-  private requireStill(task: TaskMeta, slot: AgentSlot): void {
+  private requireStill(task: TaskMeta, slot: Slot): void {
     const current = this.graph.list().get(task.id);
     if (current?.state !== task.state) {
       throw new Error(

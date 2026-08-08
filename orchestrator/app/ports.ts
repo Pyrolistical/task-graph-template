@@ -1,4 +1,4 @@
-import type { AgentRow, AgentSlot } from "../domain/agents.ts";
+import type { SlotRow, Slot } from "../domain/agents.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import type { Command } from "../domain/command.ts";
 import type { TaskRow } from "../domain/graph.ts";
@@ -20,7 +20,7 @@ import type { InboxRow } from "../policy/inbox.ts";
 import type { Candidate } from "../policy/scheduler.ts";
 
 export interface ClaimArgs {
-  agentName: string;
+  slotName: string;
   pid: number;
   branch?: string;
   worktree?: string;
@@ -68,11 +68,11 @@ export interface AgentSpec {
   taskId: TaskId;
   state: ClaimState;
   role: Role;
-  slot: AgentSlot;
+  slot: Slot;
   cwd: string;
 }
 
-export interface AgentSession {
+export interface AgentProcess {
   readonly pid: number;
   readonly alive: boolean;
   readonly stream: { readonly state: StreamState; settled(): Promise<void> };
@@ -89,14 +89,14 @@ export interface AgentSession {
 }
 
 export interface Agents {
-  slots(): AgentSlot[];
+  slots(): Slot[];
   hasSession(path: string): boolean;
   spawn(
     spec: AgentSpec,
     onUsage: (sample: Sample) => void,
     onCompaction: () => void,
     onResult: (call: ResultCall) => void,
-  ): AgentSession;
+  ): AgentProcess;
 }
 
 export interface Checks {
@@ -161,7 +161,7 @@ export interface Journal {
 export interface Views {
   seq: number;
   agentsFile: string;
-  agents: AgentRow[];
+  slots: SlotRow[];
   checks: RunningCheck[];
   tasks: TaskRow[];
   inbox: InboxRow[];
@@ -170,7 +170,7 @@ export interface Views {
 }
 
 export const VIEW_NAMES = [
-  "agents",
+  "slots",
   "checks",
   "tasks",
   "inbox",
@@ -182,7 +182,7 @@ export type ViewName = (typeof VIEW_NAMES)[number];
 export interface Publisher {
   publish(views: Views): void;
   read(name: ViewName): string;
-  lastAgents(): AgentRow[] | null;
+  lastSlots(): SlotRow[] | null;
   log(line: string): void;
 }
 
@@ -195,7 +195,7 @@ export interface Paths {
   readonly root: string;
   readonly serverLog: string;
   readonly transitionLog: string;
-  readonly agentsView: string;
+  readonly slotsView: string;
   readonly checksView: string;
   readonly tasksView: string;
   readonly inboxView: string;

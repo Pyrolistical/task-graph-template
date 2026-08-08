@@ -136,7 +136,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await dead.exited;
 
       takeClaim(fixture.tasksDir, id, {
-        agentName: "pi-fake-fake-1",
+        slotName: "pi-fake-fake-1",
         pid: dead.pid,
         branch: branchName(id),
         worktree: "/tmp/gone",
@@ -261,7 +261,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       const fixture = makeFixture();
       const id = readyTask(fixture, "A task");
       takeClaim(fixture.tasksDir, id, {
-        agentName: "pi-fake-fake-1",
+        slotName: "pi-fake-fake-1",
         pid: process.pid,
       });
 
@@ -436,7 +436,7 @@ describe("Feature: a task document that does not parse", () => {
       await dead.exited;
 
       takeClaim(fixture.tasksDir, claimed, {
-        agentName: "pi-fake-fake-1",
+        slotName: "pi-fake-fake-1",
         pid: dead.pid,
         branch: branchName(claimed),
         worktree: "/tmp/gone",
@@ -564,7 +564,7 @@ describe("Feature: an agent that compacts mid-turn", () => {
         },
       });
 
-      // Given a worker that commits its work and then compacts
+      // Given a runner that commits its work and then compacts
       const server = await serverFor(fixture);
 
       // When it runs to its submit

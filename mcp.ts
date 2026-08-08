@@ -219,7 +219,7 @@ export function build(startup: Startup): McpServer {
     ].join(" "),
   );
 
-  view("agents", "every agent slot, idle ones included");
+  view("slots", "every agent slot, idle ones included");
 
   view("checks", "the check processes running right now");
 

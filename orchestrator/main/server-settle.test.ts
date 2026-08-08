@@ -59,7 +59,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       // When the work is done, checked and reviewed
       await reviewCycle(server);
 
-      // Then the finding is written into the task body for the worker to read
+      // Then the finding is written into the task body for the runner to read
       const body = fs.readFileSync(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
@@ -122,7 +122,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
           findings: [{ finding: "the null case is untested" }],
         }),
       );
-      // Then nothing is left queued once the worker has answered them
+      // Then nothing is left queued once the runner has answered them
       expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
       expect(fs.existsSync(pathsOf(server).queueFile(id, "WORK"))).toBe(false);
 
@@ -163,7 +163,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       // When the task runs to the manager
       await walkTo(server, id, "MANAGER_REVIEW");
 
-      // Then the worker was resumed in its own session, twice, never the review's
+      // Then the runner was resumed in its own session, twice, never the review's
       const worked = path.join(
         pathsOf(server).sessionDir(id, "worker"),
         `${id}-worker.jsonl`,
@@ -501,7 +501,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         },
       });
 
-      // Given a worker that submits once without committing, then commits
+      // Given a runner that submits once without committing, then commits
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -545,7 +545,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         },
       });
 
-      // Given a worker that leaves one file uncommitted, then commits it
+      // Given a runner that leaves one file uncommitted, then commits it
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -574,7 +574,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         [id]: { WORK: [{ submit: true, notes: "forgot to commit" }] },
       });
 
-      // Given a worker that submits without ever committing anything
+      // Given a runner that submits without ever committing anything
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -614,7 +614,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a worker that reports it cannot go on
+      // Given a runner that reports it cannot go on
       const server = await serverFor(fixture);
 
       // When the server settles its turn
@@ -653,7 +653,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a worker that repeats one command and then does the work
+      // Given a runner that repeats one command and then does the work
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -681,7 +681,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const id = readyTask(fixture, "Do a thing");
       setPlan(fixture, { [id]: { WORK: [{ loop: LOOP_LIMIT }] } });
 
-      // Given a worker that repeats one command every time it is nudged
+      // Given a runner that repeats one command every time it is nudged
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -817,7 +817,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a worker that rewrites the part of its assignment it may not
+      // Given a runner that rewrites the part of its assignment it may not
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -850,7 +850,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a worker that commits but never writes its notes
+      // Given a runner that commits but never writes its notes
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -904,7 +904,7 @@ describe("Feature: a review that comes back unusable", () => {
       // When the task runs to the manager
       await walkTo(server, id, "MANAGER_REVIEW");
 
-      // Then the task never went back to the worker over the reviewer's mistake
+      // Then the task never went back to the runner over the reviewer's mistake
       const log = journalOf(server).read();
       expect(log.some((e) => e.transition === "fail")).toBe(false);
 
@@ -1036,10 +1036,10 @@ describe("Feature: a failure while finishing with an agent", () => {
       // Then the slot is freed and the failure is logged rather than thrown away
       await server.writeViews();
       const view = JSON.parse(
-        fs.readFileSync(pathsOf(server).agentsView, "utf-8"),
+        fs.readFileSync(pathsOf(server).slotsView, "utf-8"),
       );
-      for (const agent of view.agents as { state: string }[]) {
-        expect(agent.state).toBe("IDLE");
+      for (const slot of view.slots as { state: string }[]) {
+        expect(slot.state).toBe("IDLE");
       }
       expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         `on ${id} failed:`,

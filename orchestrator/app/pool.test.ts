@@ -9,9 +9,9 @@ import {
   fakePaths,
 } from "../testing/ports.ts";
 import type { Activity } from "../domain/activity.ts";
-import type { AgentSlot } from "../domain/agents.ts";
+import type { Slot } from "../domain/agents.ts";
 
-function aPool(slots: AgentSlot[] = [aSlot()], alive = true) {
+function aPool(slots: Slot[] = [aSlot()], alive = true) {
   const git = new FakeWorkspaces();
   const publisher = new FakePublisher();
   const pool = new Pool(
@@ -89,9 +89,9 @@ describe("Feature: aborting the tool call an agent is inside", () => {
   test("a slot running a bash call has that call aborted", () => {
     // Given a slot whose agent is inside a bash tool call
     const { pool, log } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.process = aSession({
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.process = aSession({
       kind: "tool-call",
       tool: "bash",
       target: "sleep 600",
@@ -109,9 +109,9 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     // Given a busy slot whose session reports no activity at all
     const activity: Activity = { kind: "none" };
     const { pool } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.process = aSession(activity);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.process = aSession(activity);
 
     // When the slot is aborted
     const attempt = () => pool.abortAgent("pi-fake-fake-1");
@@ -124,9 +124,9 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     // Given a busy slot that is thinking rather than running a command
     const activity: Activity = { kind: "thinking", started_at: 0 };
     const { pool } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.process = aSession(activity);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.process = aSession(activity);
 
     // When the slot is aborted
     const attempt = () => pool.abortAgent("pi-fake-fake-1");
@@ -143,9 +143,9 @@ describe("Feature: aborting the tool call an agent is inside", () => {
       started_at: 0,
     };
     const { pool } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.process = aSession(activity);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.process = aSession(activity);
 
     // When the slot is aborted
     const attempt = () => pool.abortAgent("pi-fake-fake-1");
@@ -163,9 +163,9 @@ describe("Feature: aborting the tool call an agent is inside", () => {
       started_at: 0,
     };
     const { pool } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.process = aSession(activity);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.process = aSession(activity);
 
     // When the slot is aborted
     const attempt = () => pool.abortAgent("pi-fake-fake-1");
@@ -202,37 +202,37 @@ describe("Feature: releasing a slot when its work ends", () => {
     // Given a slot busy on a task in its own worktree
     const { pool, harvested, git } = aPool();
     git.present.add("/tmp/000042/worktree");
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.task_id = "000042";
-    worker.checkout = {
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.task_id = "000042";
+    runner.checkout = {
       branch: "task/000042",
       worktree: "/tmp/000042/worktree",
       head: "abc1234",
       dispatched: "the assignment\n",
     };
-    worker.process = aSession({ kind: "none" });
+    runner.process = aSession({ kind: "none" });
 
-    // When the worker is finished with
-    pool.finish(worker);
+    // When the runner is finished with
+    pool.finish(runner);
 
     // Then the commits in its worktree are harvested onto its branch
     expect(harvested).toEqual(["/tmp/000042/worktree"]);
 
     // Then the slot reads idle again, holding nothing
     expect(pool.rows()[0]!.state).toBe("IDLE");
-    expect(pool.worker("pi-fake-fake-1").task_id).toBeNull();
+    expect(pool.runner("pi-fake-fake-1").task_id).toBeNull();
   });
 
   test("work that throws stops the slot and says which task it failed on", async () => {
     // Given a slot busy on a task
     const { pool, log } = aPool();
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.task_id = "000042";
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.task_id = "000042";
 
     // When the work the pool is tracking rejects
-    pool.track(worker, Promise.reject(new Error("the provider hung up")));
+    pool.track(runner, Promise.reject(new Error("the provider hung up")));
 
     // Then the failure is logged against the slot and the task it was on
     await pool.settled();

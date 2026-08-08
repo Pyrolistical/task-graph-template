@@ -43,7 +43,7 @@ import { isProcessAlive } from "../adapters/task-store.ts";
 import { TaskDocuments } from "../adapters/task-documents.ts";
 import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
-import type { AgentRow } from "../domain/agents.ts";
+import type { SlotRow } from "../domain/agents.ts";
 
 const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
 
@@ -190,8 +190,8 @@ export function wire(options: WiringOptions): Server {
   const publisher: Publisher = {
     publish: (views) => {
       writeAtomic(
-        runtime.agentsView,
-        snapshot(views.seq, "agents", views.agents, {
+        runtime.slotsView,
+        snapshot(views.seq, "slots", views.slots, {
           agents_file: views.agentsFile,
         }),
       );
@@ -214,16 +214,16 @@ export function wire(options: WiringOptions): Server {
         ? fs.readFileSync(filePath, "utf-8")
         : "{}";
     },
-    lastAgents: () => {
-      if (!fs.existsSync(runtime.agentsView)) {
+    lastSlots: () => {
+      if (!fs.existsSync(runtime.slotsView)) {
         return null;
       }
       try {
         return (
-          JSON.parse(fs.readFileSync(runtime.agentsView, "utf-8")) as {
-            agents: AgentRow[];
+          JSON.parse(fs.readFileSync(runtime.slotsView, "utf-8")) as {
+            slots: SlotRow[];
           }
-        ).agents;
+        ).slots;
       } catch {
         return null;
       }

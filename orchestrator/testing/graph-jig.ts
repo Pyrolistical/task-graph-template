@@ -132,11 +132,11 @@ export function run(
 export function claim(
   dir: string,
   id: string,
-  agentName: string,
+  slotName: string,
   pid: number = process.pid,
-  workspace: Omit<ClaimArgs, "agentName" | "pid"> = {},
+  workspace: Omit<ClaimArgs, "slotName" | "pid"> = {},
 ): void {
-  takeClaim(dir, id, { agentName, pid, ...workspace });
+  takeClaim(dir, id, { slotName, pid, ...workspace });
 }
 
 export function unclaim(dir: string, id: string): void {

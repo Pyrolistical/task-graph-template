@@ -11,7 +11,8 @@ export interface ResultCall {
 }
 
 export type AgentResult =
-  { type: "blocked"; message: string } | { type: "submit"; findings: string[] };
+  | { type: "blocked"; message: string }
+  | { type: "submit"; findings: string[] };
 
 export function resultFromCall(
   state: ClaimState,

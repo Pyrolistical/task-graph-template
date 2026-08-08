@@ -206,7 +206,7 @@ export function takeClaim(
       );
     }
 
-    meta.claimed_by = requireText(args.agentName, "agentName");
+    meta.claimed_by = requireText(args.slotName, "slotName");
     meta.claimed_pid = requirePid(args.pid);
 
     if (args.branch !== undefined || args.worktree !== undefined) {

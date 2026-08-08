@@ -35,17 +35,17 @@ export class Recover {
   }
 
   reattach(): void {
-    const rows = this.publisher.lastAgents();
+    const rows = this.publisher.lastSlots();
     if (rows === null) {
       return;
     }
 
     for (const row of rows) {
-      const worker = this.pool
+      const runner = this.pool
         .workers()
         .find((one) => one.slot.name === row.name);
       if (
-        worker === undefined ||
+        runner === undefined ||
         row.pid === null ||
         row.task_id === null ||
         !this.alive(row.pid)
@@ -53,12 +53,12 @@ export class Recover {
         continue;
       }
 
-      worker.state = "BUSY";
-      worker.task_id = row.task_id;
-      worker.role = row.role;
-      worker.started_at = row.started_at;
-      worker.detachedPid = row.pid;
-      worker.session = row.session;
+      runner.state = "BUSY";
+      runner.task_id = row.task_id;
+      runner.role = row.role;
+      runner.started_at = row.started_at;
+      runner.detachedPid = row.pid;
+      runner.session = row.session;
 
       this.publisher.log(
         `${row.name} is still running ${row.task_id} as pid ${row.pid}; leaving it alone`,
@@ -84,10 +84,10 @@ export class Recover {
       this.pool.harvest(task.workspace);
       this.graph.releaseClaim(id);
 
-      for (const worker of this.pool.workers()) {
-        if (worker.task_id === id && worker.process?.alive !== true) {
-          worker.process?.close();
-          this.pool.release(worker.slot.name);
+      for (const runner of this.pool.workers()) {
+        if (runner.task_id === id && runner.process?.alive !== true) {
+          runner.process?.close();
+          this.pool.release(runner.slot.name);
         }
       }
     }

@@ -306,8 +306,8 @@ describe("Feature: sending a task back to the agent that did it", () => {
       // Then the session is reopened where the document says it lies
       expect(stateOf(server, id)).toBe("WORK");
       const view = readView(runtimeOf(fixture));
-      expect(view.agents[0]!.state).toBe("BUSY");
-      expect(view.agents[0]!.session).toBe(legacy);
+      expect(view.slots[0]!.state).toBe("BUSY");
+      expect(view.slots[0]!.session).toBe(legacy);
       expect(server.tasks().get(id)!.workspace!.session).toBe(legacy);
 
       server.shutdown();
@@ -424,7 +424,7 @@ describe("Feature: landing or abandoning finished work", () => {
       const fixture = makeFixture();
       const id = readyTask(fixture, "A task in flight");
       takeClaim(fixture.tasksDir, id, {
-        agentName: "pi-fake-fake-1",
+        slotName: "pi-fake-fake-1",
         pid: process.pid,
         branch: branchName(id),
         worktree: "/tmp/gone",
@@ -497,7 +497,7 @@ describe("Feature: landing or abandoning finished work", () => {
 
       for (let i = 0; i < 101; i++) {
         const other = readyTask(fixture, `filler ${i}`);
-        server.claim(other, { agentName: "filler", pid: process.pid });
+        server.claim(other, { slotName: "filler", pid: process.pid });
       }
       await server.writeViews();
 

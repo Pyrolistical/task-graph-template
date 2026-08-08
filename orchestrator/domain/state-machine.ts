@@ -273,7 +273,8 @@ export type TransitionResult = Landing &
   );
 
 export type Decision =
-  { kind: "stay" } | { kind: "move"; to: TaskState; body: string | null };
+  | { kind: "stay" }
+  | { kind: "move"; to: TaskState; body: string | null };
 
 function stay(): Decision {
   return { kind: "stay" };

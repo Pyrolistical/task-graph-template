@@ -60,29 +60,29 @@ function aRig(live = DISPATCHED) {
     "master",
   );
 
-  const worker = pool.worker("pi-fake-fake-1");
-  worker.state = "BUSY";
-  worker.task_id = task.id;
-  worker.stage = "WORK";
-  worker.role = "worker";
-  worker.checkout = {
+  const runner = pool.runner("pi-fake-fake-1");
+  runner.state = "BUSY";
+  runner.task_id = task.id;
+  runner.stage = "WORK";
+  runner.role = "worker";
+  runner.checkout = {
     branch: "task/000042",
     worktree: "/runtime/000042/worktree",
     head: "abc1234",
     dispatched: DISPATCHED,
   };
-  worker.process = aSession({ kind: "none" }, true, prompted);
+  runner.process = aSession({ kind: "none" }, true, prompted);
 
-  return { settle, pool, worker, store, assignments, prompted, publisher };
+  return { settle, pool, runner, store, assignments, prompted, publisher };
 }
 
 describe("Feature: what the server does with a settled turn", () => {
   test("an agent that ended without a result is prompted again", async () => {
     // Given an agent whose turn ended without calling a result tool
-    const { settle, worker, prompted, store } = aRig();
+    const { settle, runner, prompted, store } = aRig();
 
     // When the server settles that turn
-    await settle.settled(worker);
+    await settle.settled(runner);
 
     // Then it is prompted with the issue rather than the task being moved
     expect(prompted).toEqual(["issue:missing-result:WORK:{}"]);
@@ -91,11 +91,11 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an agent that keeps ending without a result has its task held", async () => {
     // Given an agent that has already used every attempt it is given
-    const { settle, worker, store } = aRig();
-    worker.issues.set("missing-result", ISSUES["missing-result"].attempts);
+    const { settle, runner, store } = aRig();
+    runner.issues.set("missing-result", ISSUES["missing-result"].attempts);
 
     // When the server settles another turn with no result in it
-    await settle.settled(worker);
+    await settle.settled(runner);
 
     // Then the task is held for a person, saying what the agent never did
     expect(store.applied).toEqual([
@@ -111,11 +111,11 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("a held task frees the slot that was working on it", async () => {
     // Given an agent that has already used every attempt it is given
-    const { settle, pool, worker } = aRig();
-    worker.issues.set("missing-result", ISSUES["missing-result"].attempts);
+    const { settle, pool, runner } = aRig();
+    runner.issues.set("missing-result", ISSUES["missing-result"].attempts);
 
     // When the server settles another turn with no result in it
-    await settle.settled(worker);
+    await settle.settled(runner);
 
     // Then the slot goes back to idle rather than being left holding the task
     expect(pool.rows()[0]!.state).toBe("IDLE");
@@ -123,13 +123,13 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an assignment the agent may not have changed is put back", async () => {
     // Given an agent that rewrote the part of the assignment it was given
-    const { settle, worker, assignments, prompted } = aRig(
+    const { settle, runner, assignments, prompted } = aRig(
       "the goal, rewritten\n\n## Implementation Notes\n\nI did the work\n",
     );
-    worker.results = [{ tool: "submit", args: {} }];
+    runner.results = [{ tool: "submit", args: {} }];
 
     // When the server settles that turn
-    await settle.settled(worker);
+    await settle.settled(runner);
 
     // Then what it changed is restored and only its own section survives
     expect(assignments.read("000042")).toBe(
@@ -142,11 +142,11 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an agent whose process died is finished with, not prompted", async () => {
     // Given an agent whose process exited without settling its turn
-    const { settle, pool, worker, prompted } = aRig();
-    worker.process = aSession({ kind: "none" }, false);
+    const { settle, pool, runner, prompted } = aRig();
+    runner.process = aSession({ kind: "none" }, false);
 
     // When the server settles that turn
-    await settle.settled(worker);
+    await settle.settled(runner);
 
     // Then nothing is asked of it and the slot goes back to idle
     expect(prompted).toEqual([]);

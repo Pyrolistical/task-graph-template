@@ -129,12 +129,12 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then every view the console draws is there to be read
       expect(resources.resources.map((r) => r.uri).sort()).toEqual([
-        "orchestrator://agents",
         "orchestrator://checks",
         "orchestrator://error",
         "orchestrator://inbox",
         "orchestrator://paths",
         "orchestrator://queue",
+        "orchestrator://slots",
         "orchestrator://tasks",
         "orchestrator://workspace_path",
       ]);
@@ -176,7 +176,7 @@ describe("Feature: the tool surface the manager works through", () => {
       const fixture = makeFixture();
       const id = readyTask(fixture, "A task");
       takeClaim(fixture.tasksDir, id, {
-        agentName: "manager",
+        slotName: "manager",
         pid: process.pid,
       });
       applyTransition(fixture.tasksDir, id, "submit", {
@@ -184,7 +184,7 @@ describe("Feature: the tool surface the manager works through", () => {
       });
       applyTransition(fixture.tasksDir, id, "pass", {});
       takeClaim(fixture.tasksDir, id, {
-        agentName: "manager",
+        slotName: "manager",
         pid: process.pid,
       });
       applyTransition(fixture.tasksDir, id, "submit", {});
@@ -565,12 +565,12 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(disabled.map((row) => row.name)).toEqual(["pi-a-a-1", "pi-a-a-2"]);
       expect(disabled.every((row) => row.state === "DISABLED")).toBe(true);
 
-      const view = await client.readResource({ uri: "orchestrator://agents" });
+      const view = await client.readResource({ uri: "orchestrator://slots" });
       const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
       expect(
-        parsed.agents.map((agent: { name: string; state: string }) => [
-          agent.name,
-          agent.state,
+        parsed.slots.map((slot: { name: string; state: string }) => [
+          slot.name,
+          slot.state,
         ]),
       ).toEqual([
         ["pi-a-a-1", "DISABLED"],
@@ -607,14 +607,15 @@ describe("Feature: the tool surface the manager works through", () => {
       );
       const client = await connect(fixture);
 
-      // When the manager reads the agents view
-      const view = await client.readResource({ uri: "orchestrator://agents" });
+      // When the manager reads the slots view
+      const view = await client.readResource({ uri: "orchestrator://slots" });
 
       // Then the slots come from that file, so the pool travels with the graph
       const parsed = JSON.parse((view.contents as { text: string }[])[0]!.text);
-      expect(
-        parsed.agents.map((agent: { name: string }) => agent.name),
-      ).toEqual(["pi-tasks-tasks-1", "pi-tasks-tasks-2"]);
+      expect(parsed.slots.map((slot: { name: string }) => slot.name)).toEqual([
+        "pi-tasks-tasks-1",
+        "pi-tasks-tasks-2",
+      ]);
 
       await client.close();
     },
@@ -763,18 +764,19 @@ describe("Feature: the tool surface the manager works through", () => {
     // Given a pool whose slots are all sitting idle
     const fixture = makeFixture();
     const client = await connect(fixture);
-    const agents = (await resourceOf(client, "orchestrator://agents"))
-      .agents as { name: string }[];
+    const slots = (await resourceOf(client, "orchestrator://slots")).slots as {
+      name: string;
+    }[];
 
     // When the manager aborts one of them
     const result = await client.callTool({
       name: "agent_abort",
-      arguments: { agent: agents[0]!.name },
+      arguments: { agent: slots[0]!.name },
     });
 
     // Then it is refused, because there is no command of its own to kill
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain(`${agents[0]!.name} is not running`);
+    expect(textOf(result)).toContain(`${slots[0]!.name} is not running`);
 
     await client.close();
   });
@@ -861,8 +863,8 @@ describe("Feature: a server that could not start", () => {
       const fixture = brokenPool();
       const client = await connect(fixture);
 
-      // When the manager reads the agents view
-      const attempt = client.readResource({ uri: "orchestrator://agents" });
+      // When the manager reads the slots view
+      const attempt = client.readResource({ uri: "orchestrator://slots" });
 
       // Then it is refused with why the server did not start
       await expect(attempt).rejects.toThrow(/the server failed to start/);

@@ -3,7 +3,7 @@ import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { agentModelKey } from "../domain/agents.ts";
+import { agentOf } from "../domain/agents.ts";
 import { parsePool } from "./agent-pool.ts";
 import { agentWrite, checkWrite, loadAgents } from "./agent-pool.ts";
 import { SchemaError } from "../domain/schema.ts";
@@ -89,7 +89,7 @@ describe("Feature: loading the pool of agents", () => {
         "pi-anthropic-m",
         "pi-openai-m",
       ]);
-      expect(slots.map((slot) => agentModelKey(slot.name))).toEqual(
+      expect(slots.map((slot) => agentOf(slot.name))).toEqual(
         slots.map((slot) => slot.agent),
       );
     },
@@ -102,7 +102,7 @@ describe("Feature: loading the pool of agents", () => {
       const slot = "pi-anthropic-claude-sonnet-4-5-2";
 
       // When it is reduced to the agent it belongs to
-      const reduced = agentModelKey(slot);
+      const reduced = agentOf(slot);
 
       // Then only the trailing slot number is dropped
       expect(reduced).toBe("pi-anthropic-claude-sonnet-4-5");
@@ -116,7 +116,7 @@ describe("Feature: loading the pool of agents", () => {
       const slot = "pi-llama.cpp-rocm-rocm-1";
 
       // When it is reduced to the agent it belongs to
-      const reduced = agentModelKey(slot);
+      const reduced = agentOf(slot);
 
       // Then only the trailing slot number is dropped
       expect(reduced).toBe("pi-llama.cpp-rocm-rocm");
@@ -260,7 +260,7 @@ describe("Feature: loading the pool of agents", () => {
         type: "pi",
         provider: "anthropic",
         model: "m",
-        slot: 1,
+        index: 1,
         enabled: true,
         write: DEFAULT_WRITE,
         roles: ["worker", "reviewer", "planner", "designer"],

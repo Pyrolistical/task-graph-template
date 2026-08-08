@@ -41,27 +41,27 @@ export interface AgentEntry {
   roles: Role[];
 }
 
-export interface AgentSlot {
+export interface Slot {
   name: string;
   agent: string;
   type: string;
   provider: string;
   model: string;
-  slot: number;
+  index: number;
   enabled: boolean;
   write: string[];
   roles: Role[];
 }
 
-export function agentKey(entry: AgentEntry): string {
+export function agentName(entry: AgentEntry): string {
   return `${entry.type}-${entry.provider}-${entry.model}`;
 }
 
-export function agentName(entry: AgentEntry, slot: number): string {
-  return `${agentKey(entry)}-${slot}`;
+export function slotName(entry: AgentEntry, index: number): string {
+  return `${agentName(entry)}-${index}`;
 }
 
-export function agentModelKey(name: string): string {
+export function agentOf(name: string): string {
   return name.slice(0, name.lastIndexOf("-"));
 }
 
@@ -69,19 +69,19 @@ export function parseAgents(
   raw: unknown,
   source = "agents.json",
   defaultWrite: string[] = [],
-): AgentSlot[] {
+): Slot[] {
   const pool = parse(poolSchema(defaultWrite), raw, "agent pool", source);
-  const slots: AgentSlot[] = [];
+  const slots: Slot[] = [];
 
   for (const entry of pool.agents) {
-    for (let slot = 1; slot <= entry.slots; slot++) {
+    for (let index = 1; index <= entry.slots; index++) {
       slots.push({
-        name: agentName(entry, slot),
-        agent: agentKey(entry),
+        name: slotName(entry, index),
+        agent: agentName(entry),
         type: entry.type,
         provider: entry.provider,
         model: entry.model,
-        slot,
+        index,
         enabled: entry.enabled,
         write: entry.write,
         roles: entry.roles,
@@ -92,7 +92,7 @@ export function parseAgents(
   return slots;
 }
 
-export type AgentState =
+export type SlotState =
   | "IDLE"
   | "DISABLED"
   | "SPAWNING"
@@ -101,15 +101,15 @@ export type AgentState =
   | "ABORTING"
   | "SETTLED";
 
-export interface AgentRow {
+export interface SlotRow {
   name: string;
   agent: string;
   type: string;
   provider: string;
   model: string;
-  slot: number;
+  index: number;
   enabled: boolean;
-  state: AgentState;
+  state: SlotState;
   task_id: TaskId | null;
   role: Role | null;
   pid: number | null;
@@ -128,14 +128,14 @@ export interface Retry {
   attempt: number;
 }
 
-export function idleRow(slot: AgentSlot, enabled = true): AgentRow {
+export function idleRow(slot: Slot, enabled = true): SlotRow {
   return {
     name: slot.name,
     agent: slot.agent,
     type: slot.type,
     provider: slot.provider,
     model: slot.model,
-    slot: slot.slot,
+    index: slot.index,
     enabled,
     state: enabled ? "IDLE" : "DISABLED",
     task_id: null,

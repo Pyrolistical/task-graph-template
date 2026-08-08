@@ -1,4 +1,4 @@
-import { type AgentRow, idleRow, parseAgents } from "../domain/agents.ts";
+import { type SlotRow, idleRow, parseAgents } from "../domain/agents.ts";
 import type { TaskRow } from "../domain/graph.ts";
 import type { Entry } from "../domain/session.ts";
 import type { Line } from "../domain/text.ts";
@@ -17,9 +17,9 @@ export const SLOTS = parseAgents({
 });
 
 export function busyRow(
-  overrides: Partial<AgentRow> = {},
+  overrides: Partial<SlotRow> = {},
   nowMs = Date.now(),
-): AgentRow {
+): SlotRow {
   return {
     ...idleRow(SLOTS[0]!),
     state: "BUSY",
@@ -59,7 +59,7 @@ export function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
 export function viewOf(overrides: Partial<View> = {}): View {
   return {
     agentsFile: "/tmp/tasks/agents.json",
-    agents: [busyRow()],
+    slots: [busyRow()],
     tasks: [taskRowOf()],
     checks: [],
     queue: [],

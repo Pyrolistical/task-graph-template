@@ -1,5 +1,5 @@
 import type {
-  AgentSession,
+  AgentProcess,
   AgentSpec,
   Agents,
   Paths,
@@ -7,9 +7,9 @@ import type {
   Workspaces,
 } from "./ports.ts";
 import {
-  type AgentRow,
-  type AgentSlot,
-  type AgentState,
+  type SlotRow,
+  type Slot,
+  type SlotState,
   type Retry,
   idleRow,
 } from "../domain/agents.ts";
@@ -29,14 +29,14 @@ export interface Checkout {
   dispatched: string;
 }
 
-export interface Worker {
-  slot: AgentSlot;
-  state: AgentState;
+export interface Runner {
+  slot: Slot;
+  state: SlotState;
   task_id: TaskId | null;
   stage: ClaimState | null;
   role: Role | null;
   checkout: Checkout | null;
-  process: AgentSession | null;
+  process: AgentProcess | null;
   started_at: string | null;
   detachedPid: number | null;
   session: string | null;
@@ -49,7 +49,7 @@ export interface Worker {
   retry: Retry | null;
 }
 
-function freshWorker(slot: AgentSlot): Worker {
+function freshRunner(slot: Slot): Runner {
   return {
     slot,
     state: "IDLE",
@@ -72,15 +72,15 @@ function freshWorker(slot: AgentSlot): Worker {
 }
 
 export interface Running {
-  worker: Worker;
-  process: AgentSession;
+  runner: Runner;
+  process: AgentProcess;
   taskId: TaskId;
   stage: ClaimState;
   checkout: Checkout;
 }
 
-export function running(worker: Worker): Running | null {
-  const { process, task_id, stage, checkout } = worker;
+export function running(runner: Runner): Running | null {
+  const { process, task_id, stage, checkout } = runner;
   if (
     process === null ||
     task_id === null ||
@@ -89,14 +89,14 @@ export function running(worker: Worker): Running | null {
   ) {
     return null;
   }
-  return { worker, process, taskId: task_id, stage, checkout };
+  return { runner, process, taskId: task_id, stage, checkout };
 }
 
 export class Pool {
-  readonly slots: AgentSlot[];
+  readonly slots: Slot[];
   readonly rates = new Rates();
 
-  private readonly members = new Map<string, Worker>();
+  private readonly members = new Map<string, Runner>();
   private readonly disabled = new Set<string>();
   private readonly inflight = new Set<Promise<void>>();
 
@@ -109,39 +109,39 @@ export class Pool {
   ) {
     this.slots = agents.slots();
     for (const slot of this.slots) {
-      this.members.set(slot.name, freshWorker(slot));
+      this.members.set(slot.name, freshRunner(slot));
       if (!slot.enabled) {
         this.disabled.add(slot.agent);
       }
     }
   }
 
-  workers(): Worker[] {
+  workers(): Runner[] {
     return [...this.members.values()];
   }
 
-  worker(name: string): Worker {
-    const worker = this.members.get(name);
-    if (worker === undefined) {
+  runner(name: string): Runner {
+    const runner = this.members.get(name);
+    if (runner === undefined) {
       throw new Error(`no agent slot named "${name}"`);
     }
-    return worker;
+    return runner;
   }
 
-  freeSlots(): AgentSlot[] {
+  freeSlots(): Slot[] {
     return this.workers()
       .filter(
-        (worker) =>
-          worker.state === "IDLE" && !this.disabled.has(worker.slot.agent),
+        (runner) =>
+          runner.state === "IDLE" && !this.disabled.has(runner.slot.agent),
       )
-      .map((worker) => worker.slot);
+      .map((runner) => runner.slot);
   }
 
   busyTasks(): Set<TaskId | null> {
     return new Set(
       this.workers()
-        .filter((worker) => worker.process?.alive === true)
-        .map((worker) => worker.task_id),
+        .filter((runner) => runner.process?.alive === true)
+        .map((runner) => runner.task_id),
     );
   }
 
@@ -149,14 +149,14 @@ export class Pool {
     return this.agents.hasSession(path);
   }
 
-  agentKeys(): string[] {
-    return [...new Set(this.workers().map((worker) => worker.slot.agent))];
+  agentNames(): string[] {
+    return [...new Set(this.workers().map((runner) => runner.slot.agent))];
   }
 
-  setAgentEnabled(agent: string, enabled: boolean): AgentRow[] {
-    if (!this.agentKeys().includes(agent)) {
+  setAgentEnabled(agent: string, enabled: boolean): SlotRow[] {
+    if (!this.agentNames().includes(agent)) {
       throw new Error(
-        `no agent named "${agent}"; the pool has ${this.agentKeys().join(", ")}`,
+        `no agent named "${agent}"; the pool has ${this.agentNames().join(", ")}`,
       );
     }
 
@@ -178,67 +178,67 @@ export class Pool {
     return rows;
   }
 
-  abortAgent(name: string): AgentRow {
-    const worker = this.members.get(name);
-    if (worker === undefined) {
+  abortAgent(name: string): SlotRow {
+    const runner = this.members.get(name);
+    if (runner === undefined) {
       throw new Error(
         `no agent slot named "${name}"; the pool has ${[...this.members.keys()].join(", ")}`,
       );
     }
 
-    if (worker.process === null || !worker.process.alive) {
+    if (runner.process === null || !runner.process.alive) {
       throw new Error(`${name} is not running`);
     }
 
-    const activity = worker.process.stream.state.activity;
+    const activity = runner.process.stream.state.activity;
     if (!abortable(activity)) {
       throw new Error(`${name} is not running a bash tool call to abort`);
     }
 
-    worker.process.abortBash();
+    runner.process.abortBash();
     this.publisher.log(`${name} aborted bash: ${activity.target}`);
 
     return this.rows().find((row) => row.name === name)!;
   }
 
   spawn(
-    worker: Worker,
+    runner: Runner,
     spec: Omit<AgentSpec, "slot">,
-    compacted: (worker: Worker) => Promise<void>,
-  ): AgentSession {
+    compacted: (runner: Runner) => Promise<void>,
+  ): AgentProcess {
     return this.agents.spawn(
-      { ...spec, slot: worker.slot },
+      { ...spec, slot: runner.slot },
       (sample) => {
-        this.rates.record(worker.slot.agent, sample);
+        this.rates.record(runner.slot.agent, sample);
       },
       () => {
-        worker.compactions += 1;
-        this.track(worker, compacted(worker));
+        runner.compactions += 1;
+        this.track(runner, compacted(runner));
       },
       (call) => {
-        worker.results.push(call);
+        runner.results.push(call);
       },
     );
   }
 
-  runOf(worker: Worker): Running {
-    const run = running(worker);
+  runOf(runner: Runner): Running {
+    const run = running(runner);
     if (run === null) {
       throw new Error(
-        `${worker.slot.name} has no session to work in: it holds ${worker.task_id ?? "no task"}`,
+        `${runner.slot.name} has no session to work in: it holds ${runner.task_id ?? "no task"}`,
       );
     }
     return run;
   }
 
-  track(worker: Worker, work: Promise<void>): void {
-    const taskId = worker.task_id;
+  track(runner: Runner, work: Promise<void>): void {
+    const taskId = runner.task_id;
     const tracked = work
       .catch((err: Error) => {
         this.publisher.log(
-          `${worker.slot.name} on ${taskId} failed: ${err.message}`,
+          `${runner.slot.name} on ${taskId} failed: ${err.message}`,
         );
-        this.stop(worker);
+        this.stop(runner);
       })
       .finally(() => {
         this.inflight.delete(tracked);
@@ -261,81 +261,81 @@ export class Pool {
     this.git.harvest(workspace.worktree, workspace.branch);
   }
 
-  stop(worker: Worker): void {
-    const process = worker.process;
+  stop(runner: Runner): void {
+    const process = runner.process;
     if (process !== null) {
       process.close();
       if (this.alive(process.pid)) {
         process.kill();
       }
     }
-    this.release(worker.slot.name);
+    this.release(runner.slot.name);
   }
 
-  finish(worker: Worker): void {
-    const { checkout } = worker;
-    this.stop(worker);
+  finish(runner: Runner): void {
+    const { checkout } = runner;
+    this.stop(runner);
     this.harvest(checkout);
   }
 
   release(name: string): void {
-    const worker = this.worker(name);
-    Object.assign(worker, freshWorker(worker.slot));
+    const runner = this.runner(name);
+    Object.assign(runner, freshRunner(runner.slot));
   }
 
-  rows(): AgentRow[] {
-    return this.workers().map((worker) => {
-      const enabled = !this.disabled.has(worker.slot.agent);
-      if (worker.state === "IDLE") {
-        return idleRow(worker.slot, enabled);
+  rows(): SlotRow[] {
+    return this.workers().map((runner) => {
+      const enabled = !this.disabled.has(runner.slot.agent);
+      if (runner.state === "IDLE") {
+        return idleRow(runner.slot, enabled);
       }
 
       return {
-        ...idleRow(worker.slot, enabled),
-        state: worker.state,
-        task_id: worker.task_id,
-        role: worker.role,
-        pid: worker.process?.pid ?? worker.detachedPid,
-        started_at: worker.started_at,
-        activity: worker.process?.stream.state.activity ?? { kind: "none" },
-        tokens: worker.tokens,
-        context_percent: worker.contextPercent,
-        compactions: worker.compactions,
-        session: worker.session,
-        log: worker.task_id === null ? null : this.paths.rpcLog(worker.task_id),
-        retry: worker.retry,
+        ...idleRow(runner.slot, enabled),
+        state: runner.state,
+        task_id: runner.task_id,
+        role: runner.role,
+        pid: runner.process?.pid ?? runner.detachedPid,
+        started_at: runner.started_at,
+        activity: runner.process?.stream.state.activity ?? { kind: "none" },
+        tokens: runner.tokens,
+        context_percent: runner.contextPercent,
+        compactions: runner.compactions,
+        session: runner.session,
+        log: runner.task_id === null ? null : this.paths.rpcLog(runner.task_id),
+        retry: runner.retry,
       };
     });
   }
 
   async readStats(): Promise<void> {
     await Promise.all(
-      this.workers().map(async (worker) => {
-        if (worker.process === null || !worker.process.alive) {
+      this.workers().map(async (runner) => {
+        if (runner.process === null || !runner.process.alive) {
           return;
         }
-        const stats = await worker.process.stats().catch(() => null);
+        const stats = await runner.process.stats().catch(() => null);
         if (stats === null) {
           return;
         }
-        worker.tokens = stats.tokens ?? worker.tokens;
-        worker.contextPercent = stats.contextPercent ?? worker.contextPercent;
+        runner.tokens = stats.tokens ?? runner.tokens;
+        runner.contextPercent = stats.contextPercent ?? runner.contextPercent;
       }),
     );
   }
 
   shutdown(): void {
-    for (const worker of this.workers()) {
-      if (worker.process === null) {
+    for (const runner of this.workers()) {
+      if (runner.process === null) {
         continue;
       }
-      worker.state = "ABORTING";
+      runner.state = "ABORTING";
       try {
-        worker.process.abort();
+        runner.process.abort();
       } catch {
         // the process is already gone
       }
-      worker.process.kill();
+      runner.process.kill();
     }
   }
 }

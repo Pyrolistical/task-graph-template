@@ -94,9 +94,9 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, pool, store } = aRig([task]);
 
     // Given the slot holding it still has a live process of its own
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.task_id = task.id;
-    worker.process = aSession({ kind: "none" }, true);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.task_id = task.id;
+    runner.process = aSession({ kind: "none" }, true);
 
     // When the reaper runs over the graph
     recover.reap(new Map([[task.id, task]]));
@@ -114,10 +114,10 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, pool, store } = aRig([task]);
 
     // Given the slot holding it kept a process that has already exited
-    const worker = pool.worker("pi-fake-fake-1");
-    worker.state = "BUSY";
-    worker.task_id = task.id;
-    worker.process = aSession({ kind: "none" }, false);
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.task_id = task.id;
+    runner.process = aSession({ kind: "none" }, false);
 
     // When the reaper runs over the graph
     recover.reap(new Map([[task.id, task]]));

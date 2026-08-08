@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type AgentSlot, agentModelKey } from "../domain/agents.ts";
+import { type Slot, agentOf } from "../domain/agents.ts";
 import { blockingCounts } from "../domain/graph.ts";
 import { inbox } from "./inbox.ts";
 import { candidates, pickSlot, plan } from "./scheduler.ts";
@@ -45,7 +45,7 @@ describe("Feature: which task is dispatched next", () => {
   function planOf(
     tasks: Map<string, TaskMeta>,
     resumable: Set<string>,
-    free: AgentSlot[],
+    free: Slot[],
     rate: RateOf = unmeasured,
   ) {
     return plan(tasks, resumable, blockingCounts(tasks), free, rate);
@@ -62,11 +62,11 @@ describe("Feature: which task is dispatched next", () => {
 
   const slot = (name: string) => ({
     name,
-    agent: agentModelKey(name),
+    agent: agentOf(name),
     type: "pi",
     provider: name.split("-")[1]!,
     model: "m",
-    slot: 1,
+    index: 1,
     enabled: true,
     write: ["~/.cache/zig"],
     roles: [...ALL_ROLES],
@@ -338,8 +338,8 @@ describe("Feature: which task is dispatched next", () => {
   });
 
   test("a slot restricted away from the candidate's role is passed over", () => {
-    // Given a task needing a worker, and a free slot restricted to reviewing
-    const free: AgentSlot[] = [
+    // Given a task needing a runner, and a free slot restricted to reviewing
+    const free: Slot[] = [
       { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
       slot("pi-anthropic-m-2"),
     ];
@@ -353,10 +353,8 @@ describe("Feature: which task is dispatched next", () => {
   });
 
   test("nothing is dispatched when no free slot may take the role", () => {
-    // Given a task needing a worker, and only reviewer slots free
-    const free: AgentSlot[] = [
-      { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
-    ];
+    // Given a task needing a runner, and only reviewer slots free
+    const free: Slot[] = [{ ...slot("pi-openai-m-1"), roles: ["reviewer"] }];
     const tasks = graph(task({ id: "000001" }));
 
     // When the dispatch is planned

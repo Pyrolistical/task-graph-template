@@ -110,20 +110,20 @@ describe("Feature: joining a slot to the task it is running", () => {
   test("a disabled slot's pane is drawn to the right of a running one", () => {
     // Given a view whose first slot is disabled and whose second is running
     const view = {
-      agents: [idleRow(SLOTS[0]!, false), busyRow({ ...SLOTS[1]! })],
+      slots: [idleRow(SLOTS[0]!, false), busyRow({ ...SLOTS[1]! })],
     };
 
     // When the view is joined into one pane per slot
     const drawn = panes(viewOf(view));
 
     // Then the running slot comes first, so the disabled ones group at the right
-    expect(drawn.map((pane) => pane.agent.enabled)).toEqual([true, false]);
-    expect(drawn[0]!.agent.name).toBe(SLOTS[1]!.name);
+    expect(drawn.map((pane) => pane.slot.enabled)).toEqual([true, false]);
+    expect(drawn[0]!.slot.name).toBe(SLOTS[1]!.name);
   });
 
   test("an idle slot shows no task, no check and no clock", () => {
     // Given a view whose only slot is idle
-    const view = { agents: [idleRow(SLOTS[1]!)] };
+    const view = { slots: [idleRow(SLOTS[1]!)] };
 
     // When the view is joined into one pane per slot
     const pane = paneOf(view);
@@ -152,7 +152,7 @@ describe("Feature: joining a slot to the task it is running", () => {
   test("a slot waiting to retry shows when it will and which attempt", () => {
     // Given a slot backing off after a provider error
     const view = {
-      agents: [
+      slots: [
         busyRow({
           state: "WAITING",
           retry: { at: new Date(1000).toISOString(), attempt: 3 },
@@ -182,7 +182,7 @@ describe("Feature: the numbers on a pane header", () => {
 
   test("an agent that has compacted has the count after its context", () => {
     // Given a pane whose agent has compacted three times on this task
-    const pane = paneOf({ agents: [busyRow({ compactions: 3 })] });
+    const pane = paneOf({ slots: [busyRow({ compactions: 3 })] });
 
     // When the stats line is drawn
     const stats = statsLine(pane, null);
@@ -646,7 +646,7 @@ describe("Feature: drawing the whole screen", () => {
   function cells(count: number) {
     return Array.from({ length: count }, (_, index) => ({
       pane: paneOf({
-        agents: [
+        slots: [
           busyRow({ ...SLOTS[index % SLOTS.length]!, task_id: "000123" }),
         ],
       }),
@@ -668,7 +668,7 @@ describe("Feature: drawing the whole screen", () => {
 
   function disabledCell(index: number) {
     return {
-      pane: paneOf({ agents: [idleRow(SLOTS[index % SLOTS.length]!, false)] }),
+      pane: paneOf({ slots: [idleRow(SLOTS[index % SLOTS.length]!, false)] }),
       rate: null,
       lines: (width: number) => new PaneLines().update([], width),
     };
@@ -1048,7 +1048,7 @@ describe("Feature: drawing the whole screen", () => {
     // Given a pane whose slot is idle
     const panes = [
       {
-        pane: paneOf({ agents: [idleRow(SLOTS[0]!)] }),
+        pane: paneOf({ slots: [idleRow(SLOTS[0]!)] }),
         rate: null,
         lines: (width: number) =>
           new PaneLines().update([entryOf("nothing")], width),
@@ -1182,7 +1182,7 @@ describe("Feature: the switches on a pane header", () => {
 
   test("a disabled slot reads as idle behind an off switch", () => {
     // Given a slot whose agent has been turned off
-    const pane = paneOf({ agents: [idleRow(SLOTS[0]!, false)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0]!, false)] });
 
     // When its header is drawn
     const line = renderLine(header(pane, null, 60, 1000)[0]!);
@@ -1197,7 +1197,7 @@ describe("Feature: the switches on a pane header", () => {
 describe("Feature: the abort button on a pane", () => {
   test("a slot doing nothing offers no button", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0]!)] });
 
     // When the button is drawn
     const button = abortButton(pane);
@@ -1220,7 +1220,7 @@ describe("Feature: the abort button on a pane", () => {
   test("a slot that is thinking offers no button", () => {
     // Given a slot that is thinking rather than inside a bash call
     const activity: Activity = { kind: "thinking", started_at: NOW };
-    const pane = paneOf({ agents: [busyRow({ activity })] });
+    const pane = paneOf({ slots: [busyRow({ activity })] });
 
     // When the button is drawn
     const drawn = plain(abortButton(pane));
@@ -1236,7 +1236,7 @@ describe("Feature: the abort button on a pane", () => {
       reason: "overflow",
       started_at: NOW,
     };
-    const pane = paneOf({ agents: [busyRow({ activity })] });
+    const pane = paneOf({ slots: [busyRow({ activity })] });
 
     // When the button is drawn
     const drawn = plain(abortButton(pane));
@@ -1253,7 +1253,7 @@ describe("Feature: the abort button on a pane", () => {
       target: "a.txt",
       started_at: NOW,
     };
-    const pane = paneOf({ agents: [busyRow({ activity })] });
+    const pane = paneOf({ slots: [busyRow({ activity })] });
 
     // When the button is drawn
     const drawn = plain(abortButton(pane));
@@ -1277,7 +1277,7 @@ describe("Feature: the abort button on a pane", () => {
 
   test("an idle pane's activity row is blank", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ agents: [idleRow(SLOTS[0]!)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0]!)] });
 
     // When the header is drawn
     const line = renderLine(header(pane, null, 60, 1000)[2]!);
@@ -1289,7 +1289,7 @@ describe("Feature: the abort button on a pane", () => {
   test("a long command is clipped rather than running under the button", () => {
     // Given a slot running a command far wider than its pane
     const pane = paneOf({
-      agents: [
+      slots: [
         busyRow({
           activity: {
             kind: "tool-call",

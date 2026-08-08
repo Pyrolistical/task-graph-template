@@ -835,19 +835,19 @@ describe("Feature: the design and planning phases", () => {
 
       for (const id of [reviewing, planFresh]) {
         takeClaim(fixture.tasksDir, id, {
-          agentName: "designer",
+          slotName: "designer",
           pid: process.pid,
         });
         applyTransition(fixture.tasksDir, id, "submit", {});
         takeClaim(fixture.tasksDir, id, {
-          agentName: "design-reviewer",
+          slotName: "design-reviewer",
           pid: process.pid,
         });
         applyTransition(fixture.tasksDir, id, "submit", {
           body: readTaskFile(findTaskFile(id, fixture.tasksDir)!).body,
         });
       }
-      server.claim(reviewing, { agentName: "planner", pid: process.pid });
+      server.claim(reviewing, { slotName: "planner", pid: process.pid });
       server.transition(reviewing, "submit", {}, "server");
 
       // When the queue is published
@@ -1165,7 +1165,7 @@ describe("Feature: handing a task to an agent", () => {
 
       const body = readTaskFile(activeTaskPath(fixture.tasksDir, id)).body;
       takeClaim(fixture.tasksDir, id, {
-        agentName: "pi-old-1",
+        slotName: "pi-old-1",
         pid: process.pid,
         branch: legacy,
         worktree,

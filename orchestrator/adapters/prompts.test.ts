@@ -557,7 +557,7 @@ describe("Feature: what an agent's result tool call means", () => {
   );
 
   testInTempDirs("a worker that is stuck can report itself blocked", () => {
-    // Given a worker that cannot get past the thing in its way
+    // Given a runner that cannot get past the thing in its way
     const state = "WORK";
 
     // When it calls the blocked tool
@@ -656,7 +656,7 @@ describe("Feature: what an agent's result tool call means", () => {
       // When the extension file it names is looked for on disk
       const file = path.join(ORCHESTRATOR_DIR, `result-tools-${tools}.ts`);
 
-      // Then it is the worker extension, and it is there to load
+      // Then it is the runner extension, and it is there to load
       expect(tools).toBe("worker");
       expect(fs.existsSync(file)).toBe(true);
     },
@@ -749,7 +749,7 @@ describe("Feature: what an agent's result tool call means", () => {
   testInTempDirs(
     "a worker's submit tool carries nothing beyond the submit",
     async () => {
-      // Given a worker, whose stage produces no findings
+      // Given a runner, whose stage produces no findings
       const state = "WORK";
 
       // When the extension it is spawned with is loaded and its submit read
@@ -858,7 +858,7 @@ describe("Feature: what an agent's result tool call means", () => {
   testInTempDirs(
     "a worker's result tools end the turn they are called in",
     async () => {
-      // Given the result tools a worker is spawned with
+      // Given the result tools a runner is spawned with
       const tools = await toolsOf("WORK");
 
       // When each of them is called with arguments its stage accepts
@@ -920,7 +920,7 @@ describe("Feature: what an agent's result tool call means", () => {
   testInTempDirs(
     "an agent that stops on a wall is told who reads it",
     async () => {
-      // Given a worker that cannot get past the thing in its way
+      // Given a runner that cannot get past the thing in its way
       const tools = await toolsOf("WORK");
 
       // When it reports itself blocked

@@ -1,5 +1,5 @@
 import type {
-  AgentSession,
+  AgentProcess,
   Agents,
   Assignments,
   CreatedTask,
@@ -15,7 +15,7 @@ import type {
   Workspaces,
 } from "../app/ports.ts";
 import type { Activity } from "../domain/activity.ts";
-import type { AgentRow, AgentSlot } from "../domain/agents.ts";
+import type { SlotRow, Slot } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
 import type {
   TransitionArgs,
@@ -24,14 +24,14 @@ import type {
 } from "../domain/state-machine.ts";
 import type { TemplateVars } from "../domain/template.ts";
 
-export function aSlot(overrides: Partial<AgentSlot> = {}): AgentSlot {
+export function aSlot(overrides: Partial<Slot> = {}): Slot {
   return {
     name: "pi-fake-fake-1",
     agent: "pi-fake-fake",
     type: "pi",
     provider: "fake",
     model: "fake",
-    slot: 1,
+    index: 1,
     enabled: true,
     write: [],
     roles: ["worker", "reviewer", "planner", "designer"],
@@ -59,7 +59,7 @@ export function aSession(
   activity: Activity = { kind: "none" },
   alive = true,
   prompts: string[] = [],
-): AgentSession {
+): AgentProcess {
   let settles = 0;
   return {
     pid: 4242,
@@ -103,7 +103,7 @@ export function aSession(
 
 export class FakePublisher implements Publisher {
   readonly lines: string[] = [];
-  rows: AgentRow[] | null = null;
+  rows: SlotRow[] | null = null;
   published: Views | null = null;
 
   publish(views: Views): void {
@@ -118,7 +118,7 @@ export class FakePublisher implements Publisher {
     return `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, null, 2)}\n`;
   }
 
-  lastAgents(): AgentRow[] | null {
+  lastSlots(): SlotRow[] | null {
     return this.rows;
   }
 
@@ -355,8 +355,8 @@ export function fakePaths(): Paths {
 }
 
 export function fakeAgents(
-  slots: AgentSlot[],
-  session: () => AgentSession = () => aSession(),
+  slots: Slot[],
+  session: () => AgentProcess = () => aSession(),
 ): Agents {
   return {
     slots: () => slots,

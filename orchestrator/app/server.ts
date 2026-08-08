@@ -16,7 +16,7 @@ import { Recover } from "./recover.ts";
 import { RunChecks } from "./run-checks.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Command } from "../domain/command.ts";
-import type { AgentRow } from "../domain/agents.ts";
+import type { SlotRow } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import type {
   TransitionArgs,
@@ -75,7 +75,7 @@ export class Server implements Manager {
       transition_log: this.layout.transitionLog,
       console_command: this.layout.consoleCommand,
       views: {
-        agents: this.layout.agentsView,
+        slots: this.layout.slotsView,
         checks: this.layout.checksView,
         tasks: this.layout.tasksView,
         inbox: this.layout.inboxView,
@@ -194,15 +194,15 @@ export class Server implements Manager {
     this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
   }
 
-  setAgentEnabled(agent: string, enabled: boolean): AgentRow[] {
+  setAgentEnabled(agent: string, enabled: boolean): SlotRow[] {
     return this.pool.setAgentEnabled(agent, enabled);
   }
 
-  abortAgent(name: string): AgentRow {
+  abortAgent(name: string): SlotRow {
     return this.pool.abortAgent(name);
   }
 
-  agentRows(): AgentRow[] {
+  agentRows(): SlotRow[] {
     return this.pool.rows();
   }
 
@@ -240,7 +240,7 @@ export class Server implements Manager {
     this.publisher.publish({
       seq: this.journal.cursor,
       agentsFile: this.config.agentsPath,
-      agents: this.pool.rows(),
+      slots: this.pool.rows(),
       checks: this.checker.view,
       tasks: this.graph.rows(snapshot),
       inbox: inbox(snapshot.tasks, snapshot.blocking),

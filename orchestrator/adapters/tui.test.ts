@@ -293,8 +293,8 @@ describe("Feature: reading the views the server publishes", () => {
   function seed(root: string): Runtime {
     const runtime: Runtime = new Runtime(path.join(root, "repo"), root);
     writeAtomic(
-      runtime.agentsView,
-      snapshot(1, "agents", [busyRow()], { agents_file: AGENTS_FILE }),
+      runtime.slotsView,
+      snapshot(1, "slots", [busyRow()], { agents_file: AGENTS_FILE }),
     );
     writeAtomic(runtime.tasksView, snapshot(1, "tasks", [taskRowOf()]));
     writeAtomic(runtime.checksView, snapshot(1, "checks", []));
@@ -313,7 +313,7 @@ describe("Feature: reading the views the server publishes", () => {
     const view = readView(runtime);
 
     // Then it has the agents, the tasks, the checks, the queue and the switch
-    expect(view.agents[0]!.name).toBe(SLOTS[0]!.name);
+    expect(view.slots[0]!.name).toBe(SLOTS[0]!.name);
     expect(view.tasks[0]!.id).toBe("000123");
     expect(view.checks).toEqual([]);
     expect(view.queue[0]!.task_id).toBe("000123");
@@ -380,8 +380,8 @@ describe("Feature: reading the views the server publishes", () => {
     const session = path.join(root, "session.jsonl");
     write(session, [assistant("hi")]);
     writeAtomic(
-      runtime.agentsView,
-      snapshot(1, "agents", [busyRow({ session })], {
+      runtime.slotsView,
+      snapshot(1, "slots", [busyRow({ session })], {
         agents_file: AGENTS_FILE,
       }),
     );
@@ -417,10 +417,10 @@ describe("Feature: reading the views the server publishes", () => {
       // Given views where every agent in the pool has been turned off
       const runtime = seed(tempDir("console-"));
       writeAtomic(
-        runtime.agentsView,
+        runtime.slotsView,
         snapshot(
           1,
-          "agents",
+          "slots",
           SLOTS.map((slot) => idleRow(slot, false)),
           { agents_file: AGENTS_FILE },
         ),

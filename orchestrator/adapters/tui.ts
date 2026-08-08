@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { AgentRow } from "../domain/agents.ts";
+import type { SlotRow } from "../domain/agents.ts";
 import type { RunningCheck } from "../domain/checks.ts";
 import type { TaskRow } from "../domain/graph.ts";
 import { type Sample, push, tokensPerSecond } from "../domain/rates.ts";
@@ -192,7 +192,7 @@ function readRows<T>(filePath: string, key: string): T[] {
 }
 
 export function readView(runtime: Runtime): View {
-  if (!fs.existsSync(runtime.agentsView)) {
+  if (!fs.existsSync(runtime.slotsView)) {
     throw new Error(`console: no server state at ${runtime.root}`);
   }
 
@@ -201,14 +201,14 @@ export function readView(runtime: Runtime): View {
     throw new Error(`${runtime.queueView} has no "scheduling" flag`);
   }
 
-  const agents = readEnvelope(runtime.agentsView);
-  if (typeof agents.agents_file !== "string") {
-    throw new Error(`${runtime.agentsView} has no "agents_file" path`);
+  const slots = readEnvelope(runtime.slotsView);
+  if (typeof slots.agents_file !== "string") {
+    throw new Error(`${runtime.slotsView} has no "agents_file" path`);
   }
 
   return {
-    agentsFile: agents.agents_file,
-    agents: rowsOf<AgentRow>(agents, runtime.agentsView, "agents"),
+    agentsFile: slots.agents_file,
+    slots: rowsOf<SlotRow>(slots, runtime.slotsView, "slots"),
     tasks: readRows<TaskRow>(runtime.tasksView, "tasks"),
     checks: readRows<RunningCheck>(runtime.checksView, "checks"),
     queue: rowsOf<Candidate>(queue, runtime.queueView, "queue"),
@@ -224,10 +224,10 @@ export function frame(
 ): Frame {
   const view = readView(runtime);
   const all = panes(view);
-  const running = all.filter((pane) => pane.agent.enabled);
+  const running = all.filter((pane) => pane.slot.enabled);
   const shown = collapsed && running.length > 0 ? running : all;
   const cells = shown.map((pane) => {
-    const session = pane.agent.session;
+    const session = pane.slot.session;
     sessions.entries(session);
     return {
       pane,
@@ -239,7 +239,7 @@ export function frame(
   sessions.keep(
     new Set(
       cells
-        .map(({ pane }) => pane.agent.session)
+        .map(({ pane }) => pane.slot.session)
         .filter((session): session is string => session !== null),
     ),
   );
@@ -268,7 +268,7 @@ export function frameOrError(
 
 export async function main(repo: string): Promise<void> {
   const runtime: Runtime = new Runtime(repo);
-  if (!fs.existsSync(runtime.agentsView)) {
+  if (!fs.existsSync(runtime.slotsView)) {
     throw new Error(`console: no server state at ${runtime.root}`);
   }
   if (!process.stdout.isTTY) {

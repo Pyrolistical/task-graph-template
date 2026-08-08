@@ -44,10 +44,10 @@ describe("Feature: the views the console and the manager read", () => {
 
       // Then every slot is a row, so the console shows the whole pool
       const view = readView(runtimeOf(fixture));
-      expect(view.agents).toHaveLength(2);
-      expect(view.agents[0]!.state).toBe("IDLE");
-      expect(view.agents[0]!.task_id).toBeNull();
-      expect(view.agents[1]!.name).toBe("pi-fake-fake-2");
+      expect(view.slots).toHaveLength(2);
+      expect(view.slots[0]!.state).toBe("IDLE");
+      expect(view.slots[0]!.task_id).toBeNull();
+      expect(view.slots[1]!.name).toBe("pi-fake-fake-2");
 
       server.shutdown();
     },
@@ -72,7 +72,7 @@ describe("Feature: the views the console and the manager read", () => {
 
       // Then its row names the task, the role, the process and what it is doing
       const view = readView(runtimeOf(fixture));
-      const busy = view.agents.find((agent) => agent.task_id === id)!;
+      const busy = view.slots.find((agent) => agent.task_id === id)!;
       expect(busy).toBeDefined();
       expect(["tool-call", "thinking", "compacting", "none"]).toContain(
         busy.activity.kind,
@@ -101,7 +101,7 @@ describe("Feature: the views the console and the manager read", () => {
 
       // Then every one of them is stamped with the same cursor
       const seqs = [
-        pathsOf(server).agentsView,
+        pathsOf(server).slotsView,
         pathsOf(server).checksView,
         pathsOf(server).tasksView,
         pathsOf(server).inboxView,
@@ -131,7 +131,7 @@ describe("Feature: the views the console and the manager read", () => {
 
       // Given a task another task waits on, held on something only a person can fix
       const server = await serverFor(fixture);
-      server.claim(dep, { agentName: "a", pid: process.pid });
+      server.claim(dep, { slotName: "a", pid: process.pid });
       server.transition(dep, "hold", { reason: "waiting on a person" }, "test");
 
       // When the views are published
@@ -230,7 +230,7 @@ describe("Feature: a pool with no agents in it", () => {
       // Then the task is queued, waiting for an agent to be added
       const view = readView(runtimeOf(fixture));
       expect(view.queue.map((one) => one.task_id)).toEqual([id]);
-      expect(view.agents).toEqual([]);
+      expect(view.slots).toEqual([]);
 
       server.shutdown();
     },
@@ -238,7 +238,7 @@ describe("Feature: a pool with no agents in it", () => {
   );
 
   testInTempDirs(
-    "the agents view names the pool file the console tells a person to edit",
+    "the slots view names the pool file the console tells a person to edit",
     async () => {
       // Given a server whose pool file declares no agents
       const fixture = emptyPoolFixture();
@@ -247,9 +247,9 @@ describe("Feature: a pool with no agents in it", () => {
       // When the views are published
       await server.writeViews();
 
-      // Then the agents view carries the path of that file
+      // Then the slots view carries the path of that file
       expect(
-        JSON.parse(fs.readFileSync(pathsOf(server).agentsView, "utf-8"))
+        JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8"))
           .agents_file,
       ).toBe(fixture.agentsPath);
 
@@ -259,7 +259,7 @@ describe("Feature: a pool with no agents in it", () => {
   );
 });
 
-describe("Feature: what the agents view says about a running agent", () => {
+describe("Feature: what the slots view says about a running agent", () => {
   testInTempDirs(
     "tokens, context and the session file reach the view",
     async () => {
@@ -280,7 +280,7 @@ describe("Feature: what the agents view says about a running agent", () => {
 
       // Then the console can show how much context is left and where to read it
       const view = readView(runtimeOf(fixture));
-      const busy = view.agents.find((agent) => agent.task_id === id)!;
+      const busy = view.slots.find((agent) => agent.task_id === id)!;
       expect(busy.state).toBe("BUSY");
       expect(busy.tokens).toBe(105000);
       expect(busy.context_percent).toBe(30);
@@ -874,7 +874,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       expect(server.schedulerEnabled).toBe(true);
 
       // Then the views it published are left on disk for the next manager
-      expect(fs.existsSync(pathsOf(server).agentsView)).toBe(true);
+      expect(fs.existsSync(pathsOf(server).slotsView)).toBe(true);
 
       server.shutdown();
     },
@@ -890,14 +890,14 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const alive = Bun.spawn(["sleep", "30"]);
       const runtime = runtimeOf(fixture);
       writeAtomic(
-        runtime.agentsView,
-        snapshot(1, "agents", [
+        runtime.slotsView,
+        snapshot(1, "slots", [
           {
             name: "pi-fake-fake-1",
             type: "pi",
             provider: "fake",
             model: "fake",
-            slot: 1,
+            index: 1,
             state: "BUSY",
             task_id: id,
             role: "worker",
@@ -913,7 +913,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       );
 
       takeClaim(fixture.tasksDir, id, {
-        agentName: "pi-fake-fake-1",
+        slotName: "pi-fake-fake-1",
         pid: alive.pid,
       });
 
@@ -928,8 +928,8 @@ describe("Feature: a manager that exits while its agents run on", () => {
 
       // Then the slot is reattached rather than dispatched to again
       const view = readView(runtimeOf(fixture));
-      expect(view.agents[0]!.state).toBe("BUSY");
-      expect(view.agents[0]!.pid).toBe(alive.pid);
+      expect(view.slots[0]!.state).toBe("BUSY");
+      expect(view.slots[0]!.pid).toBe(alive.pid);
       expect(stateOf(second, id)).toBe("WORK");
 
       alive.kill();

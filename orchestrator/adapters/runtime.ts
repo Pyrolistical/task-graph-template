@@ -98,8 +98,8 @@ export class Runtime {
     return path.join(this.root, `${name}.json`);
   }
 
-  get agentsView(): string {
-    return this.view("agents");
+  get slotsView(): string {
+    return this.view("slots");
   }
 
   get checksView(): string {

@@ -184,11 +184,11 @@ export async function reaches(
 }
 
 export function compactionsOf(server: Server, id: string): number | null {
-  if (!fs.existsSync(pathsOf(server).agentsView)) {
+  if (!fs.existsSync(pathsOf(server).slotsView)) {
     return null;
   }
-  const view = JSON.parse(fs.readFileSync(pathsOf(server).agentsView, "utf-8"));
-  const busy = view.agents.find(
+  const view = JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8"));
+  const busy = view.slots.find(
     (agent: { task_id: string | null }) => agent.task_id === id,
   );
   return busy?.compactions ?? null;

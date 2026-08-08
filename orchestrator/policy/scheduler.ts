@@ -1,5 +1,5 @@
 import { type TaskId, type TaskMeta } from "../domain/task.ts";
-import { type AgentSlot, agentModelKey } from "../domain/agents.ts";
+import { type Slot, agentOf } from "../domain/agents.ts";
 import {
   type AgentStage,
   type ClaimState,
@@ -94,19 +94,19 @@ export function candidates(
   );
 }
 
-function fastest(slots: AgentSlot[], rate: RateOf): AgentSlot {
-  const score = (slot: AgentSlot) => rate(slot.agent) ?? Infinity;
+function fastest(slots: Slot[], rate: RateOf): Slot {
+  const score = (slot: Slot) => rate(slot.agent) ?? Infinity;
   return slots.reduce((best, slot) =>
     score(slot) > score(best) ? slot : best,
   );
 }
 
 export function pickSlot(
-  free: AgentSlot[],
+  free: Slot[],
   candidate: Candidate,
   isTop: boolean,
   rate: RateOf,
-): AgentSlot | null {
+): Slot | null {
   const eligible = free.filter((slot) => slot.roles.includes(candidate.role));
   if (eligible.length === 0) {
     return null;
@@ -115,8 +115,8 @@ export function pickSlot(
     return fastest(eligible, rate);
   }
 
-  const wanted = agentModelKey(candidate.prefer_agent);
-  const same = eligible.find((slot) => agentModelKey(slot.name) === wanted);
+  const wanted = agentOf(candidate.prefer_agent);
+  const same = eligible.find((slot) => agentOf(slot.name) === wanted);
   if (same !== undefined) {
     return same;
   }
@@ -126,14 +126,14 @@ export function pickSlot(
 
 export interface Dispatch {
   candidate: Candidate;
-  slot: AgentSlot;
+  slot: Slot;
 }
 
 export function plan(
   tasks: Map<TaskId, TaskMeta>,
   resumable: Set<TaskId>,
   blocking: Map<TaskId, number>,
-  free: AgentSlot[],
+  free: Slot[],
   rate: RateOf,
 ): Dispatch[] {
   const remaining = [...free];

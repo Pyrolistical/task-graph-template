@@ -1,4 +1,4 @@
-import type { AgentRow } from "../domain/agents.ts";
+import type { SlotRow } from "../domain/agents.ts";
 import {
   abortable,
   describeActivity,
@@ -45,7 +45,7 @@ export type Local = { command: "hide_disabled" } | { command: "show_disabled" };
 
 export interface View {
   agentsFile: string;
-  agents: AgentRow[];
+  slots: SlotRow[];
   tasks: TaskRow[];
   checks: RunningCheck[];
   queue: Candidate[];
@@ -53,7 +53,7 @@ export interface View {
 }
 
 export interface Pane {
-  agent: AgentRow;
+  slot: SlotRow;
   task: TaskRow | null;
   check: RunningCheck | null;
   sinceMs: number | null;
@@ -70,15 +70,14 @@ export function panes(view: View): Pane[] {
     }
   }
 
-  return view.agents
-    .map((agent) => ({
-      agent,
-      task: agent.task_id === null ? null : (tasks.get(agent.task_id) ?? null),
-      check:
-        agent.task_id === null ? null : (checks.get(agent.task_id) ?? null),
-      sinceMs: agent.started_at === null ? null : Date.parse(agent.started_at),
+  return view.slots
+    .map((slot) => ({
+      slot,
+      task: slot.task_id === null ? null : (tasks.get(slot.task_id) ?? null),
+      check: slot.task_id === null ? null : (checks.get(slot.task_id) ?? null),
+      sinceMs: slot.started_at === null ? null : Date.parse(slot.started_at),
     }))
-    .sort((one, two) => Number(two.agent.enabled) - Number(one.agent.enabled));
+    .sort((one, two) => Number(two.slot.enabled) - Number(one.slot.enabled));
 }
 
 export function clock(timestampMs: number): string {
@@ -116,7 +115,7 @@ export function toggle(on: boolean, label: string): Line {
 }
 
 export function abortButton(pane: Pane): Line {
-  if (!abortable(pane.agent.activity)) {
+  if (!abortable(pane.slot.activity)) {
     return [];
   }
   return [{ text: "[abort]", sgr: RED }];
@@ -171,17 +170,17 @@ export function queueHeader(
   };
 }
 
-function identity(agent: AgentRow): string {
+function identity(slot: SlotRow): string {
   return [
-    agent.type,
-    `${agent.provider}/${agent.model}`,
-    `slot ${agent.slot}`,
+    slot.type,
+    `${slot.provider}/${slot.model}`,
+    `slot ${slot.index}`,
   ].join(" ");
 }
 
 function stateLine(pane: Pane, nowMs: number): string {
   const state =
-    pane.agent.state === "DISABLED" ? "idle" : pane.agent.state.toLowerCase();
+    pane.slot.state === "DISABLED" ? "idle" : pane.slot.state.toLowerCase();
   if (pane.sinceMs === null) {
     return state;
   }
@@ -190,24 +189,24 @@ function stateLine(pane: Pane, nowMs: number): string {
 }
 
 export function detailLine(pane: Pane): string {
-  const { agent, task } = pane;
-  if (agent.task_id === null) {
+  const { slot, task } = pane;
+  if (slot.task_id === null) {
     return "no task";
   }
 
-  const parts = [`task ${agent.task_id}`];
-  if (agent.role !== null) {
-    parts.push(agent.role);
+  const parts = [`task ${slot.task_id}`];
+  if (slot.role !== null) {
+    parts.push(slot.role);
   }
   if (task !== null) {
     parts.push(task.state);
   }
-  if (agent.pid !== null) {
-    parts.push(`pid ${agent.pid}`);
+  if (slot.pid !== null) {
+    parts.push(`pid ${slot.pid}`);
   }
-  if (agent.retry !== null) {
+  if (slot.retry !== null) {
     parts.push(
-      `retry ${agent.retry.attempt} at ${clock(Date.parse(agent.retry.at))}`,
+      `retry ${slot.retry.attempt} at ${clock(Date.parse(slot.retry.at))}`,
     );
   }
   return parts.join(" ");
@@ -217,7 +216,7 @@ export function activityLine(pane: Pane): string {
   if (pane.check !== null) {
     return `check ${pane.check.index}: ${oneLine(pane.check.command)}`;
   }
-  return describeActivity(pane.agent.activity);
+  return describeActivity(pane.slot.activity);
 }
 
 export function statsLine(pane: Pane, rate: number | null): string {
@@ -226,9 +225,9 @@ export function statsLine(pane: Pane, rate: number | null): string {
     parts.push(`${thousands(Math.round(rate * 10) / 10)} tok/s`);
   }
   const compactions =
-    pane.agent.compactions > 0 ? ` x${pane.agent.compactions}` : "";
-  if (pane.agent.context_percent !== null) {
-    parts.push(`ctx ${Math.round(pane.agent.context_percent)}%${compactions}`);
+    pane.slot.compactions > 0 ? ` x${pane.slot.compactions}` : "";
+  if (pane.slot.context_percent !== null) {
+    parts.push(`ctx ${Math.round(pane.slot.context_percent)}%${compactions}`);
   }
   return parts.join(" ");
 }
@@ -239,10 +238,10 @@ export function header(
   width: number,
   nowMs: number,
 ): Line[] {
-  const enabled = toggle(pane.agent.enabled, "");
+  const enabled = toggle(pane.slot.enabled, "");
   const right = stateLine(pane, nowMs);
   const room = width - spanWidth(enabled) - textWidth(right) - 1;
-  const left = clip([{ text: ` ${identity(pane.agent)}` }], room);
+  const left = clip([{ text: ` ${identity(pane.slot)}` }], room);
   const gap = Math.max(
     1,
     width - spanWidth(enabled) - spanWidth(left) - textWidth(right),
@@ -263,9 +262,9 @@ export function header(
         ...button,
       ];
     }
-    const suffix = elapsedSuffix(pane.agent.activity);
+    const suffix = elapsedSuffix(pane.slot.activity);
     const suffixWidth = textWidth(suffix);
-    const label = [{ text: describeLabel(pane.agent.activity), sgr: DIM }];
+    const label = [{ text: describeLabel(pane.slot.activity), sgr: DIM }];
     const labelRoom = width - buttonWidth - suffixWidth;
     const clippedLabel = clip(label, Math.max(0, labelRoom));
     const suffixSpan: Line = suffix === "" ? [] : [{ text: suffix, sgr: DIM }];
@@ -501,7 +500,7 @@ export function screen(
   hidden = 0,
 ): Frame {
   if (cells.length === 0) {
-    throw new Error("console: the agents view is empty");
+    throw new Error("console: the slots view is empty");
   }
 
   const { columns, rows, nowMs, scroll } = layout;
@@ -527,11 +526,11 @@ export function screen(
     hits.push({
       row: QUEUE_LINES,
       from,
-      to: from + spanWidth(toggle(pane.agent.enabled, "")),
+      to: from + spanWidth(toggle(pane.slot.enabled, "")),
       command: {
         command: "agent",
-        agent: pane.agent.agent,
-        enabled: !pane.agent.enabled,
+        agent: pane.slot.agent,
+        enabled: !pane.slot.enabled,
       },
     });
     const button = abortButton(pane);
@@ -543,7 +542,7 @@ export function screen(
         to: from + width,
         command: {
           command: "agent_abort",
-          "agent-name-slot": pane.agent.name,
+          "agent-name-slot": pane.slot.name,
         },
       });
     }
@@ -555,7 +554,7 @@ export function screen(
   });
 
   const off = cells.flatMap((cell, index) =>
-    cell.pane.agent.enabled ? [] : [index],
+    cell.pane.slot.enabled ? [] : [index],
   );
   const hide =
     off.length === 0 || off.length === cells.length
