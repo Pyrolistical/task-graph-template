@@ -18,7 +18,7 @@ import { Server } from "../app/server.ts";
 import {
   claimed,
   editTaskFile,
-  journalOf,
+  transitionsOf,
   pathsOf,
   promptsOf,
   reaches,
@@ -91,14 +91,14 @@ describe("Feature: picking a project back up at startup", () => {
       // Given a server that has applied a transition and then exited
       const first = await serverFor(fixture);
       first.transition(id, "hold", { reason: "waiting on a person" }, "test");
-      const cursor = journalOf(first).cursor;
+      const cursor = transitionsOf(first).cursor;
       first.shutdown();
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then it carries on the sequence, so the manager's cursor still means something
-      expect(journalOf(second).cursor).toBe(cursor);
+      expect(transitionsOf(second).cursor).toBe(cursor);
 
       second.shutdown();
     },
@@ -564,7 +564,7 @@ describe("Feature: an agent that compacts mid-turn", () => {
         },
       });
 
-      // Given a runner that commits its work and then compacts
+      // Given a worker that commits its work and then compacts
       const server = await serverFor(fixture);
 
       // When it runs to its submit

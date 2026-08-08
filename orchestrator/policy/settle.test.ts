@@ -40,7 +40,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a worker hands in its assignment as the new task body", () => {
-    // Given a runner settled after calling submit
+    // Given a worker settled after calling submit
     const settled = anAgent("WORK");
 
     // Given it appended notes and committed its work
@@ -117,7 +117,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a worker that appended nothing is asked for its notes", () => {
-    // Given a runner settled after calling submit
+    // Given a worker settled after calling submit
     const settled = anAgent("WORK");
 
     // Given the assignment came back exactly as it was dispatched
@@ -133,7 +133,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a worker that rewrote the assignment above its section has it restored", () => {
-    // Given a runner settled after calling submit
+    // Given a worker settled after calling submit
     const settled = anAgent("WORK");
 
     // Given it changed the assignment above the notes it was allowed to append
@@ -175,7 +175,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a worker that committed nothing is told its work is uncommitted", () => {
-    // Given a runner settled after calling submit with notes appended
+    // Given a worker settled after calling submit with notes appended
     const settled = anAgent("WORK");
 
     // Given its branch carries no commit of its own
@@ -206,7 +206,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("an agent that stopped without a result tool call is nudged for one", () => {
-    // Given a runner settled having called no result tool
+    // Given a worker settled having called no result tool
     const settled = anAgent("WORK");
     settled.calls = [];
 
@@ -220,7 +220,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("an agent that ran out of context is nudged for a result", () => {
-    // Given a runner whose turn ended because it ran out of context
+    // Given a worker whose turn ended because it ran out of context
     const settled = anAgent("WORK");
     settled.stopReason = "length";
 
@@ -253,7 +253,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("an agent caught repeating one command is raised as looping", () => {
-    // Given a runner whose turn was cut short for repeating a command
+    // Given a worker whose turn was cut short for repeating a command
     const settled = anAgent("WORK");
     settled.looping = "zig build";
 
@@ -272,7 +272,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a provider error backs off instead of blaming the agent", () => {
-    // Given a runner whose turn ended in a provider error
+    // Given a worker whose turn ended in a provider error
     const settled = anAgent("WORK");
     settled.stopReason = "error";
 
@@ -284,7 +284,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("an aborted turn releases the slot without touching the graph", () => {
-    // Given a runner whose turn was aborted
+    // Given a worker whose turn was aborted
     const settled = anAgent("WORK");
     settled.stopReason = "aborted";
 
@@ -296,7 +296,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a process that died before settling is abandoned", () => {
-    // Given a runner whose process is no longer alive
+    // Given a worker whose process is no longer alive
     const settled = anAgent("WORK");
     settled.alive = false;
 
@@ -308,7 +308,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("a loop is decided before the result the agent managed to call", () => {
-    // Given a runner that both looped and called submit
+    // Given a worker that both looped and called submit
     const settled = anAgent("WORK");
     settled.looping = "zig build";
 

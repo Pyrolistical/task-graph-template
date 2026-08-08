@@ -5,7 +5,7 @@ import { TaskGraph } from "./task-graph.ts";
 import {
   FakeAssignments,
   FakeTaskFiles,
-  FakeJournal,
+  FakeTransitions,
   FakePrompts,
   FakePublisher,
   FakeTasks,
@@ -37,7 +37,7 @@ function aRig(live = DISPATCHED) {
     store,
     workspaces,
     new FakeTaskFiles(),
-    new FakeJournal(),
+    new FakeTransitions(),
     publisher,
     paths,
   );

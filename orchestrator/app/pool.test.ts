@@ -203,7 +203,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
 });
 
 describe("Feature: releasing a slot when its work ends", () => {
-  test("finishing a worker harvests its worktree and returns the slot to idle", () => {
+  test("finishing a runner harvests its worktree and returns the slot to idle", () => {
     // Given a slot busy on a task in its own worktree
     const { pool, harvested, workspaces } = aPool();
     workspaces.present.add("/tmp/000042/worktree");

@@ -49,7 +49,7 @@ export function promptsOf(server: Server): Prompts {
   return rigOf(server).prompts;
 }
 
-export function journalOf(server: Server): TransitionLog {
+export function transitionsOf(server: Server): TransitionLog {
   return new TransitionLog(pathsOf(server).transitionLog);
 }
 

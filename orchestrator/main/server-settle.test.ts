@@ -17,7 +17,7 @@ import { LOOP_LIMIT } from "../domain/protocol.ts";
 import { bodyOf } from "../testing/graph-jig.ts";
 import {
   filesOf,
-  journalOf,
+  transitionsOf,
   pathsOf,
   promptsOf,
   reaches,
@@ -59,7 +59,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       // When the work is done, checked and reviewed
       await reviewCycle(server);
 
-      // Then the finding is written into the task body for the runner to read
+      // Then the finding is written into the task body for the worker to read
       const body = fs.readFileSync(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
@@ -73,7 +73,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       ]);
 
       // Then the transition is recorded as the server's, not the reviewer's
-      const applied = journalOf(server)
+      const applied = transitionsOf(server)
         .read()
         .find((e) => e.transition === "feedback" && e.from === "WORK_REVIEW")!;
       expect(applied.to).toBe("WORK");
@@ -122,7 +122,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
           findings: [{ finding: "the null case is untested" }],
         }),
       );
-      // Then nothing is left queued once the runner has answered them
+      // Then nothing is left queued once the worker has answered them
       expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
       expect(fs.existsSync(pathsOf(server).messageFile(id, "WORK"))).toBe(
         false,
@@ -165,7 +165,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       // When the task runs to the manager
       await walkTo(server, id, "MANAGER_REVIEW");
 
-      // Then the runner was resumed in its own session, twice, never the review's
+      // Then the worker was resumed in its own session, twice, never the review's
       const worked = path.join(
         pathsOf(server).sessionDir(id, "worker"),
         `${id}-worker.jsonl`,
@@ -260,7 +260,7 @@ describe("Feature: a review that fails twice", () => {
 
       // When the work is done, checked and reviewed once
       await until(server, () =>
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "feedback"),
       );
@@ -364,7 +364,7 @@ describe("Feature: a review that fails twice", () => {
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
       expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
@@ -419,7 +419,7 @@ describe("Feature: a review that fails twice", () => {
       // Then it is back in WORK, never held, and no review was ever counted
       expect(stateOf(server, id)).toBe("WORK");
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
@@ -476,7 +476,7 @@ describe("Feature: a review that fails twice", () => {
       // Then one failure only bounces it, never holds it again
       expect(stateOf(server, id)).toBe("WORK");
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .filter((e) => e.transition === "hold"),
       ).toHaveLength(1);
@@ -503,7 +503,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         },
       });
 
-      // Given a runner that submits once without committing, then commits
+      // Given a worker that submits once without committing, then commits
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -513,7 +513,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
@@ -547,7 +547,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         },
       });
 
-      // Given a runner that leaves one file uncommitted, then commits it
+      // Given a worker that leaves one file uncommitted, then commits it
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -576,7 +576,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
         [id]: { WORK: [{ submit: true, notes: "forgot to commit" }] },
       });
 
-      // Given a runner that submits without ever committing anything
+      // Given a worker that submits without ever committing anything
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -616,7 +616,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a runner that reports it cannot go on
+      // Given a worker that reports it cannot go on
       const server = await serverFor(fixture);
 
       // When the server settles its turn
@@ -655,7 +655,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a runner that repeats one command and then does the work
+      // Given a worker that repeats one command and then does the work
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -666,7 +666,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("zig build");
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
@@ -683,7 +683,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const id = readyTask(fixture, "Do a thing");
       setPlan(fixture, { [id]: { WORK: [{ loop: LOOP_LIMIT }] } });
 
-      // Given a runner that repeats one command every time it is nudged
+      // Given a worker that repeats one command every time it is nudged
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -731,7 +731,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const prompts = promptsTo(pathsOf(server).sessionDir(id, "reviewer"));
       expect(prompts).toHaveLength(2);
       expect(
-        journalOf(server)
+        transitionsOf(server)
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
@@ -819,7 +819,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a runner that rewrites the part of its assignment it may not
+      // Given a worker that rewrites the part of its assignment it may not
       const server = await serverFor(fixture);
 
       // When the task runs to the manager
@@ -852,7 +852,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         },
       });
 
-      // Given a runner that commits but never writes its notes
+      // Given a worker that commits but never writes its notes
       const server = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
@@ -906,8 +906,8 @@ describe("Feature: a review that comes back unusable", () => {
       // When the task runs to the manager
       await walkTo(server, id, "MANAGER_REVIEW");
 
-      // Then the task never went back to the runner over the reviewer's mistake
-      const log = journalOf(server).read();
+      // Then the task never went back to the worker over the reviewer's mistake
+      const log = transitionsOf(server).read();
       expect(log.some((e) => e.transition === "fail")).toBe(false);
 
       // Then the reviewer was prompted again in place, and its edit was undone

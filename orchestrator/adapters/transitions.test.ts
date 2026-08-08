@@ -294,7 +294,7 @@ describe("Feature: what a review writes into the task body", () => {
       // When the reviewer sends it back with a finding
       const result = run(dir, id, "feedback", "fix null handling");
 
-      // Then the runner gets the task back with the finding written into it
+      // Then the worker gets the task back with the finding written into it
       expect(result.to).toBe("WORK");
       const body = bodyOf(activeTaskPath(dir, id));
       expect(body).toContain("# Review findings");
@@ -322,7 +322,7 @@ describe("Feature: what a review writes into the task body", () => {
     // When the manager sends it back with a finding
     const result = run(dir, id, "feedback", "restructure the parser");
 
-    // Then the runner reads it exactly as it reads an agent reviewer's
+    // Then the worker reads it exactly as it reads an agent reviewer's
     expect(result.to).toBe("WORK");
     const body = bodyOf(activeTaskPath(dir, id));
     expect(body).toContain("# Review findings");
@@ -399,7 +399,7 @@ describe("Feature: what a review writes into the task body", () => {
     const accepted =
       "\n# Goal\n\n## Todos\n\n1. x\n\n## Implementation Notes\n\nI did x";
 
-    // When the runner submits the assignment it wrote
+    // When the worker submits the assignment it wrote
     const result = run(dir, id, "submit", accepted);
 
     // Then the task carries the notes into its checks
@@ -870,7 +870,7 @@ describe("Feature: the workspace a task is worked in", () => {
       // Given a task waiting in the work stage
       const { dir, id } = planThrough();
 
-      // When a runner claims it with the workspace it was given
+      // When a worker claims it with the workspace it was given
       claim(dir, id, "pi-anthropic-claude-sonnet-4-5-2", process.pid, {
         branch: "work/000001",
         worktree: "/tmp/task-graph-server/-repo/000001/worktree",
@@ -909,7 +909,7 @@ describe("Feature: the workspace a task is worked in", () => {
   testInTempDirs(
     "a review claim leaves the worker's session where it was",
     () => {
-      // Given a task whose runner recorded a session and then submitted
+      // Given a task whose worker recorded a session and then submitted
       const work =
         "/tmp/task-graph-server/-repo/000001/session/worker/019f.jsonl";
       const { dir, id } = planThrough();
@@ -957,7 +957,7 @@ describe("Feature: the workspace a task is worked in", () => {
     // Given a task waiting in the work stage
     const { dir, id } = planThrough();
 
-    // When a runner claims it before its session exists
+    // When a worker claims it before its session exists
     claim(dir, id, "pi-1", process.pid, {
       branch: "work/000001",
       worktree: "/tmp/wt",

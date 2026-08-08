@@ -18,7 +18,7 @@ import {
   compactionsOf,
   dispatchOnce,
   editTaskFile,
-  journalOf,
+  transitionsOf,
   pathsOf,
   reaches,
   runOnce,
@@ -108,7 +108,7 @@ describe("Feature: the views the console and the manager read", () => {
       ].map((file) => JSON.parse(fs.readFileSync(file, "utf-8")).seq);
 
       expect(new Set(seqs).size).toBe(1);
-      expect(seqs[0]).toBe(journalOf(server).cursor);
+      expect(seqs[0]).toBe(transitionsOf(server).cursor);
 
       server.shutdown();
     },
@@ -388,7 +388,7 @@ describe("Feature: the log of every transition applied", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then every transition is one numbered line, in the order it happened
-      const entries = journalOf(server).read();
+      const entries = transitionsOf(server).read();
       expect(entries.map((e) => e.seq)).toEqual(entries.map((_, i) => i + 1));
 
       // Then each line says where the task came from, went to, and who moved it
@@ -773,7 +773,7 @@ describe("Feature: aborting the command an agent is running", () => {
   );
 
   testInTempDirs(
-    "a written agent_abort command file drives applyCommand and kills the tool call",
+    "a written slot_abort command file drives applyCommand and kills the tool call",
     async () => {
       const fixture = makeFixture();
       const id = readyTask(fixture, "A task to abort via command");
@@ -823,7 +823,7 @@ describe("Feature: aborting the command an agent is running", () => {
   );
 
   testInTempDirs(
-    "a written agent_abort naming an idle slot is logged and dropped",
+    "a written slot_abort naming an idle slot is logged and dropped",
     async () => {
       // Given a slot the scheduler has dispatched nothing to
       const fixture = makeFixture();

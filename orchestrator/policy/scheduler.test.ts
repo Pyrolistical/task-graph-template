@@ -338,7 +338,7 @@ describe("Feature: which task is dispatched next", () => {
   });
 
   test("a slot restricted away from the candidate's role is passed over", () => {
-    // Given a task needing a runner, and a free slot restricted to reviewing
+    // Given a task needing a worker, and a free slot restricted to reviewing
     const free: Slot[] = [
       { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
       slot("pi-anthropic-m-2"),
@@ -353,7 +353,7 @@ describe("Feature: which task is dispatched next", () => {
   });
 
   test("nothing is dispatched when no free slot may take the role", () => {
-    // Given a task needing a runner, and only reviewer slots free
+    // Given a task needing a worker, and only reviewer slots free
     const free: Slot[] = [{ ...slot("pi-openai-m-1"), roles: ["reviewer"] }];
     const tasks = graph(task({ id: "000001" }));
 

@@ -760,7 +760,7 @@ describe("Feature: the tool surface the manager works through", () => {
     60000,
   );
 
-  testInTempDirs("agent_abort refuses a slot that is idle", async () => {
+  testInTempDirs("slot_abort refuses a slot that is idle", async () => {
     // Given a pool whose slots are all sitting idle
     const fixture = makeFixture();
     const client = await connect(fixture);
@@ -782,7 +782,7 @@ describe("Feature: the tool surface the manager works through", () => {
   });
 
   testInTempDirs(
-    "agent_abort names the pool when the slot is unknown",
+    "slot_abort names the pool when the slot is unknown",
     async () => {
       // Given a server whose pool holds one slot
       const fixture = makeFixture();

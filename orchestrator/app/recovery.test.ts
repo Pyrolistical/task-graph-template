@@ -4,7 +4,7 @@ import { Recovery } from "./recovery.ts";
 import { TaskGraph } from "./task-graph.ts";
 import {
   FakeTaskFiles,
-  FakeJournal,
+  FakeTransitions,
   FakePublisher,
   FakeTasks,
   FakeWorkspaces,
@@ -30,7 +30,7 @@ function aRig(tasks: TaskMeta[]) {
     store,
     workspaces,
     new FakeTaskFiles(),
-    new FakeJournal(),
+    new FakeTransitions(),
     publisher,
     paths,
   );

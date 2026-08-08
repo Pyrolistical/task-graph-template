@@ -35,7 +35,7 @@ import { startServer } from "../testing/server-jig.ts";
 import { ISSUES } from "../domain/issues.ts";
 import {
   dispatchOnce,
-  journalOf,
+  transitionsOf,
   pathsOf,
   promptsOf,
   reaches,
@@ -244,7 +244,7 @@ describe("Feature: the design and planning phases", () => {
       );
 
       // Then it went through each phase and its review in order
-      const submits = journalOf(server)
+      const submits = transitionsOf(server)
         .read()
         .filter((e) => e.task_id === id && e.transition === "submit");
       expect(submits.map((e) => `${e.from} -> ${e.to}`)).toEqual([

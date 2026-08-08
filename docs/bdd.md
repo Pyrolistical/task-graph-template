@@ -766,7 +766,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker that is stuck can report itself blocked
 
-- **Given** a runner that cannot get past the thing in its way
+- **Given** a worker that cannot get past the thing in its way
 - **When** it calls the blocked tool
 - **Then** it reads as blocked, carrying what the agent said
 
@@ -804,7 +804,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** the WORK stage of an agent
 - **When** the extension file it names is looked for on disk
-- **Then** it is the runner extension, and it is there to load
+- **Then** it is the worker extension, and it is there to load
 
 #### a work reviewer is loaded with the extension its stage names
 
@@ -838,7 +838,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker's submit tool carries nothing beyond the submit
 
-- **Given** a runner, whose stage produces no findings
+- **Given** a worker, whose stage produces no findings
 - **When** the extension it is spawned with is loaded and its submit read
 - **Then** it offers both result tools, and its submit carries no fields
 
@@ -874,7 +874,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker's result tools end the turn they are called in
 
-- **Given** the result tools a runner is spawned with
+- **Given** the result tools an agent is spawned with
 - **When** each of them is called with arguments its stage accepts
 - **Then** neither leaves the agent a turn to carry on in
 
@@ -898,7 +898,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### an agent that stops on a wall is told who reads it
 
-- **Given** a runner that cannot get past the thing in its way
+- **Given** a worker that cannot get past the thing in its way
 - **When** it reports itself blocked
 - **Then** it reads back that a person has the turn now
 
@@ -1679,7 +1679,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** finished work under review
 - **When** the reviewer sends it back with a finding
-- **Then** the runner gets the task back with the finding written into it
+- **Then** the worker gets the task back with the finding written into it
 
 #### every finding in a review lands in the body
 
@@ -1691,7 +1691,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** a task waiting on the manager
 - **When** the manager sends it back with a finding
-- **Then** the runner reads it exactly as it reads an agent reviewer's
+- **Then** the worker reads it exactly as it reads an agent reviewer's
 
 #### a second round of findings is appended below the first
 
@@ -1720,7 +1720,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a worker's notes become the task's body
 
 - **Given** a task an agent has finished working on
-- **When** the runner submits the assignment it wrote
+- **When** the worker submits the assignment it wrote
 - **Then** the task carries the notes into its checks
 
 #### a task in WORK cannot submit without a body
@@ -1916,7 +1916,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a work claim records the branch, worktree, agent and session
 
 - **Given** a task waiting in the work stage
-- **When** a runner claims it with the workspace it was given
+- **When** a worker claims it with the workspace it was given
 - **Then** everything needed to pick the work back up is on the document
 
 #### only the working session is worth recording
@@ -1927,7 +1927,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a review claim leaves the worker's session where it was
 
-- **Given** a task whose runner recorded a session and then submitted
+- **Given** a task whose worker recorded a session and then submitted
 - **When** a reviewer claims it with a session of its own
 - **Then** the worker's session survives, so the work can still be resumed
 
@@ -1940,7 +1940,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 #### a work claim with no session records none
 
 - **Given** a task waiting in the work stage
-- **When** a runner claims it before its session exists
+- **When** a worker claims it before its session exists
 - **Then** there is no session to resume from, and the field says so
 
 #### a branch with no worktree beside it is refused
@@ -2194,7 +2194,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 ### Feature: releasing a slot when its work ends
 
-#### finishing a worker harvests its worktree and returns the slot to idle
+#### finishing a runner harvests its worktree and returns the slot to idle
 
 - **Given** a slot busy on a task in its own worktree
 - **When** the runner is finished with
@@ -3237,7 +3237,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** a reviewer holding a task in work review
 - **When** it sends findings back
-- **Then** the findings are appended to the body the runner will read
+- **Then** the findings are appended to the body the worker will read
 
 #### findings sent back to an earlier phase leave the body alone
 
@@ -3620,13 +3620,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 - **When** the manager reads the error resource
 - **Then** there is no error on it
 
-#### agent_abort refuses a slot that is idle
+#### slot_abort refuses a slot that is idle
 
 - **Given** a pool whose slots are all sitting idle
 - **When** the manager aborts one of them
 - **Then** it is refused, because there is no command of its own to kill
 
-#### agent_abort names the pool when the slot is unknown
+#### slot_abort names the pool when the slot is unknown
 
 - **Given** a server whose pool holds one slot
 - **When** the manager aborts a slot that does not exist
@@ -4098,7 +4098,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker keeps its worktree and is steered back to the assignment
 
-- **Given** a runner that commits its work and then compacts
+- **Given** a worker that commits its work and then compacts
 - **When** it runs to its submit
 - **Then** its work is kept, and it is only steered back to the assignment
 
@@ -4124,7 +4124,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** work that a reviewer will find a problem with
 - **When** the work is done, checked and reviewed
-- **Then** the finding is written into the task body for the runner to read
+- **Then** the finding is written into the task body for the worker to read
 - **Then** it is also left where the next dispatch will pick it up
 - **Then** the transition is recorded as the server's, not the reviewer's
 
@@ -4133,13 +4133,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 - **Given** work sent back once by a review and then finished
 - **When** the task runs to the manager
 - **Then** the worker's second prompt carried the findings it had to answer
-- **Then** nothing is left queued once the runner has answered them
+- **Then** nothing is left queued once the worker has answered them
 
 #### the worker sent back by a review works in its own session, never the review's
 
 - **Given** work sent back once by a review and then finished
 - **When** the task runs to the manager
-- **Then** the runner was resumed in its own session, twice, never the review's
+- **Then** the worker was resumed in its own session, twice, never the review's
 
 #### the reviewer gets its own session and a worktree with the work on it
 
@@ -4188,19 +4188,19 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a branch with no commit on it comes back for one
 
-- **Given** a runner that submits once without committing, then commits
+- **Given** a worker that submits once without committing, then commits
 - **When** the task runs to the manager
 - **Then** it was nudged once and never held, because the second try passed
 
 #### an uncommitted change comes back with what git status reports
 
-- **Given** a runner that leaves one file uncommitted, then commits it
+- **Given** a worker that leaves one file uncommitted, then commits it
 - **When** the task runs to the manager
 - **Then** it was told which file it had left behind, and committed it
 
 #### an agent that never commits is held, and the slot is released
 
-- **Given** a runner that submits without ever committing anything
+- **Given** a worker that submits without ever committing anything
 - **When** the server nudges it until the attempts run out
 - **Then** the task is held with a reason the manager can act on
 
@@ -4208,19 +4208,19 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a blocked result holds the task with its message as the reason
 
-- **Given** a runner that reports it cannot go on
+- **Given** a worker that reports it cannot go on
 - **When** the server settles its turn
 - **Then** the task is parked with the agent's own words as the reason
 
 #### an agent stuck on one command is asked whether it is blocked, not held
 
-- **Given** a runner that repeats one command and then does the work
+- **Given** a worker that repeats one command and then does the work
 - **When** the task runs to the manager
 - **Then** it was asked about the command it repeated, and never held
 
 #### an agent that keeps looping is held only once the nudges run out
 
-- **Given** a runner that repeats one command every time it is nudged
+- **Given** a worker that repeats one command every time it is nudged
 - **When** the server nudges it until the attempts run out
 - **Then** the task is held, naming the command it was stuck on
 
@@ -4244,13 +4244,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### an edited assignment is restored above the notes, and the redo passes
 
-- **Given** a runner that rewrites the part of its assignment it may not
+- **Given** a worker that rewrites the part of its assignment it may not
 - **When** the task runs to the manager
 - **Then** what it changed was put back and only its own section survives
 
 #### a worker that submits without appending notes is prompted, then held
 
-- **Given** a runner that commits but never writes its notes
+- **Given** a worker that commits but never writes its notes
 - **When** the server nudges it until the attempts run out
 - **Then** the task is held, saying which part of the assignment is missing
 
@@ -4260,7 +4260,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 - **Given** a reviewer that rewrites the assignment it was given
 - **When** the task runs to the manager
-- **Then** the task never went back to the runner over the reviewer's mistake
+- **Then** the task never went back to the worker over the reviewer's mistake
 - **Then** the reviewer was prompted again in place, and its edit was undone
 
 ### Feature: keeping the attempts an agent already made
@@ -4461,13 +4461,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 - **When** the manager aborts using the agent key rather than the slot name
 - **Then** it is refused, because an abort names one running process
 
-#### a written agent_abort command file drives applyCommand and kills the tool call
+#### a written slot_abort command file drives applyCommand and kills the tool call
 
 - **Given** an agent stuck inside a long-running command
 - **When** the console writes an abort for that slot
 - **Then** the command is killed, exactly as the manager's own abort would
 
-#### a written agent_abort naming an idle slot is logged and dropped
+#### a written slot_abort naming an idle slot is logged and dropped
 
 - **Given** a slot the scheduler has dispatched nothing to
 - **When** the console writes an abort for that slot
@@ -5225,13 +5225,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a slot restricted away from the candidate's role is passed over
 
-- **Given** a task needing a runner, and a free slot restricted to reviewing
+- **Given** a task needing a worker, and a free slot restricted to reviewing
 - **When** a slot is picked for it
 - **Then** the unrestricted slot takes it
 
 #### nothing is dispatched when no free slot may take the role
 
-- **Given** a task needing a runner, and only reviewer slots free
+- **Given** a task needing a worker, and only reviewer slots free
 - **When** the dispatch is planned
 - **Then** the task waits rather than going to an agent restricted from it
 
@@ -5292,7 +5292,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker hands in its assignment as the new task body
 
-- **Given** a runner settled after calling submit
+- **Given** a worker settled after calling submit
 - **Given** it appended notes and committed its work
 - **When** the server decides what to do with the settle
 - **Then** the assignment becomes the task body
@@ -5325,14 +5325,14 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker that appended nothing is asked for its notes
 
-- **Given** a runner settled after calling submit
+- **Given** a worker settled after calling submit
 - **Given** the assignment came back exactly as it was dispatched
 - **When** the server decides what to do with the settle
 - **Then** the missing-notes issue is raised against it
 
 #### a worker that rewrote the assignment above its section has it restored
 
-- **Given** a runner settled after calling submit
+- **Given** a worker settled after calling submit
 - **Given** it changed the assignment above the notes it was allowed to append
 - **When** the server decides what to do with the settle
 - **Then** everything above its heading is restored
@@ -5348,7 +5348,7 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### a worker that committed nothing is told its work is uncommitted
 
-- **Given** a runner settled after calling submit with notes appended
+- **Given** a worker settled after calling submit with notes appended
 - **Given** its branch carries no commit of its own
 - **When** the server decides what to do with the settle
 - **Then** the uncommitted issue is raised against it
@@ -5362,13 +5362,13 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### an agent that stopped without a result tool call is nudged for one
 
-- **Given** a runner settled having called no result tool
+- **Given** a worker settled having called no result tool
 - **When** the server decides what to do with the settle
 - **Then** the missing-result issue is raised against it
 
 #### an agent that ran out of context is nudged for a result
 
-- **Given** a runner whose turn ended because it ran out of context
+- **Given** a worker whose turn ended because it ran out of context
 - **When** the server decides what to do with the settle
 - **Then** the missing-result issue is raised against it, whatever it called
 
@@ -5380,30 +5380,30 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 #### an agent caught repeating one command is raised as looping
 
-- **Given** a runner whose turn was cut short for repeating a command
+- **Given** a worker whose turn was cut short for repeating a command
 - **When** the server decides what to do with the settle
 - **Then** the looping issue names the command and the limit it hit
 
 #### a provider error backs off instead of blaming the agent
 
-- **Given** a runner whose turn ended in a provider error
+- **Given** a worker whose turn ended in a provider error
 - **When** the server decides what to do with the settle
 - **Then** the server backs off rather than raising an issue
 
 #### an aborted turn releases the slot without touching the graph
 
-- **Given** a runner whose turn was aborted
+- **Given** a worker whose turn was aborted
 - **When** the server decides what to do with the settle
 - **Then** the agent is abandoned and nothing is submitted
 
 #### a process that died before settling is abandoned
 
-- **Given** a runner whose process is no longer alive
+- **Given** a worker whose process is no longer alive
 - **When** the server decides what to do with the settle
 - **Then** the agent is abandoned
 
 #### a loop is decided before the result the agent managed to call
 
-- **Given** a runner that both looped and called submit
+- **Given** a worker that both looped and called submit
 - **When** the server decides what to do with the settle
 - **Then** the loop is what it hears about

@@ -244,7 +244,7 @@ export class FakeWorkspaces implements Workspaces {
   }
 }
 
-export class FakeJournal implements Transitions {
+export class FakeTransitions implements Transitions {
   readonly entries: TransitionEntry[] = [];
 
   get cursor(): number {

@@ -1146,7 +1146,7 @@ describe("Feature: what a transition carries with it", () => {
       findings: ["the null case is untested"],
     });
 
-    // Then the findings are appended to the body the runner will read
+    // Then the findings are appended to the body the worker will read
     expect(decided).toEqual({
       kind: "move",
       to: "WORK",

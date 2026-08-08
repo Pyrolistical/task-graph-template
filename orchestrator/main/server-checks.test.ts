@@ -17,7 +17,7 @@ import {
 import { Server } from "../app/server.ts";
 import {
   dispatchOnce,
-  journalOf,
+  transitionsOf,
   pathsOf,
   reaches,
   runOnce,
@@ -211,7 +211,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       expect(history).toHaveLength(0);
 
       // Then the check failed exactly once, so the second attempt passed
-      const failures = journalOf(server)
+      const failures = transitionsOf(server)
         .read()
         .filter((e) => e.transition === "fail" && e.to === "WORK");
       expect(failures).toHaveLength(1);
