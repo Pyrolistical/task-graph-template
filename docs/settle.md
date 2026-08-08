@@ -77,7 +77,7 @@ Everything the server can find wrong with a settle — and one thing it can find
 
 | Issue                 | Attempts | Fragment                                                 | Held as                                                     |
 | --------------------- | -------- | -------------------------------------------------------- | ----------------------------------------------------------- |
-| `missing-result`      | 4        | `missing-result-<state>.md`                              | the agent stopped without calling a submit or blocked tool  |
+| `missing-result`      | 8        | `missing-result-<state>.md`                              | the agent stopped without calling a submit or blocked tool  |
 | `missing-todos`       | 4        | `missing-todos.md`                                       | the planner submitted without appending a todo list         |
 | `missing-design`      | 4        | `missing-design.md`                                      | the designer submitted without appending a design section   |
 | `missing-notes`       | 4        | `missing-notes.md`                                       | the worker submitted without appending implementation notes |
@@ -100,6 +100,12 @@ Scoping:
 - each retry costs one turn against a session that already has the whole task in it
 - the alternative — a hold — costs a person
 - escalating to the most expensive resource in the system after a single misplaced brace is the wrong trade
+
+### `missing-result` gets eight
+
+- it is the only issue where the agent has nothing to redo: the work is done and the one thing left is the call that reports it
+- the causes are the ones a nudge is actually good at clearing — prose instead of a call, a turn that ran out of context, an aborted turn — and a compaction between attempts changes the conditions the next one runs under
+- holding here throws away a finished stage over a missing sentence, so the budget is worth twice what a broken rule gets
 
 ### `looping` is the exception
 

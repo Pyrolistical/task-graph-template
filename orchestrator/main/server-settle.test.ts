@@ -808,7 +808,9 @@ describe("Feature: an agent that stops short of finishing", () => {
       // Then no nudge was sent into a turn the agent was still inside
       const sessionDir = server.runtime.sessionDir(id, "worker");
       expect(promptsOverlapping(sessionDir)).toEqual([]);
-      expect(promptsTo(sessionDir)).toHaveLength(5);
+      expect(promptsTo(sessionDir)).toHaveLength(
+      ISSUES["missing-result"].attempts + 1,
+    );
 
       server.shutdown();
     },

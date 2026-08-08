@@ -43,7 +43,7 @@ function appending(missing: IssueName): ClaimState[] {
 
 export const ISSUES: Record<IssueName, Issue> = {
   "missing-result": {
-    attempts: 4,
+    attempts: 8,
     states: ALL_AGENT_STATES,
     fragment: (state) => `missing-result-${state}`,
     held: () => "the agent stopped without calling a submit or blocked tool",

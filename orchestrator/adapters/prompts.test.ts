@@ -234,7 +234,6 @@ describe("Feature: the issues an agent is sent back for", () => {
   testInTempDirs("an agent that broke a rule is nudged four times", () => {
     // Given the issues that mean the agent broke a rule of the pipeline
     const names = [
-      "missing-result",
       "missing-todos",
       "missing-notes",
       "modified-assignment",
@@ -246,7 +245,18 @@ describe("Feature: the issues an agent is sent back for", () => {
     const attempts = names.map((name) => ISSUES[name].attempts);
 
     // Then each is nudged the same four times before the task is held
-    expect(attempts).toEqual([4, 4, 4, 4, 4, 4]);
+    expect(attempts).toEqual([4, 4, 4, 4, 4]);
+  });
+
+  testInTempDirs("a missing result is nudged the longest", () => {
+    // Given the issue raised when an agent settles without a result tool call
+    const missing = ISSUES["missing-result"];
+
+    // When its budget is compared with the issues that mean a rule was broken
+    const budgets = [missing.attempts, ISSUES.uncommitted.attempts];
+
+    // Then it gets twice as many, being the cheapest thing an agent can fix
+    expect(budgets).toEqual([8, 4]);
   });
 
   testInTempDirs("a loop is worth fewer nudges, being dearer to reach", () => {
