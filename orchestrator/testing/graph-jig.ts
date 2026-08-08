@@ -174,14 +174,9 @@ export function toDesignReview(): { dir: string; id: string } {
   return { dir, id };
 }
 
-export function designThrough(): { dir: string; id: string } {
+export function toPlan(): { dir: string; id: string } {
   const { dir, id } = toDesignReview();
   run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
-  return { dir, id };
-}
-
-export function toPlan(): { dir: string; id: string } {
-  const { dir, id } = designThrough();
   return { dir, id };
 }
 
@@ -224,12 +219,6 @@ export function toManagerReview(): { dir: string; id: string } {
   return { dir, id };
 }
 
-export function toHeld(): { dir: string; id: string } {
-  const { dir, id } = toWorking();
-  run(dir, id, "hold", "the API key is missing");
-  return { dir, id };
-}
-
 export function closeTask(dir: string, id: string) {
   run(dir, id, "submit");
   claim(dir, id, "d");
@@ -246,14 +235,6 @@ export function closeTask(dir: string, id: string) {
   claim(dir, id, "r");
   run(dir, id, "submit");
   return run(dir, id, "submit");
-}
-
-export function documentOf(
-  dir: string,
-  id: string,
-  result: TransitionResult,
-): string {
-  return result.to === "CLOSED" ? closedPath(result) : activeTaskPath(dir, id);
 }
 
 export function closedPath(result: TransitionResult): string {

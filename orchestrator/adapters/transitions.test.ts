@@ -733,6 +733,17 @@ describe("Feature: closing a task", () => {
 });
 
 describe("Feature: a transition that is refused writes nothing", () => {
+  testInTempDirs("a transition on a task the directory has never held", () => {
+    // Given a task directory with nothing in it
+    const dir = makeTasksDir();
+
+    // When a transition is applied to an id nothing carries
+    const attempt = () => run(dir, "000999", "submit");
+
+    // Then it is refused, naming the task that was not found
+    expect(attempt).toThrow(/not found/);
+  });
+
   testInTempDirs("holding with a blank reason is refused", () => {
     // Given a task an agent is working on
     const { dir, id } = toWorking();
