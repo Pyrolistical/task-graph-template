@@ -74,7 +74,7 @@ A result tool call that does not fit the state is refused before it runs, by the
 - a settle with no result call at all (prose instead of a call, a truncated context, an aborted turn) is `missing-result`, retried a fixed number of times and then held
 - the whole settle path is in [Settling an agent](settle.md)
 
-## Findings and the prompt queue
+## Findings and the message queue
 
 Findings — from a design, plan, work or manager review — go to one place, `findings.json` in the task's runtime directory:
 
@@ -83,10 +83,10 @@ Findings — from a design, plan, work or manager review — go to one place, `f
 - a rejection overwrites the file, so an agent is only ever answering the latest review
 - the file is cleared when the stage they were sent back to submits
 
-Failing checks go to the prompt queue instead — `queue/<STATE>.md`, plain markdown, nothing structured — and are delivered into the agent's session as one prompt at the next dispatch of that state:
+Failing checks go to the message queue instead — `messages/<STATE>.md`, plain markdown, nothing structured — and are delivered into the agent's session as one prompt at the next dispatch of that state:
 
 - the queue is drained when the state is dispatched, so a task that fails its checks is resumed with the failures already in its session
-- a queued entry is what makes a task resumable at all: findings regenerate the file and start a fresh session, a failed check reopens the one that produced it
+- a queued message is what makes a task resumable at all: findings regenerate the file and start a fresh session, a failed check reopens the one that produced it
 - nothing in the queue or in `findings.json` is ever written to the task document
 
 ## Rotation

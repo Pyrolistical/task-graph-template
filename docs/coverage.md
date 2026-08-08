@@ -60,7 +60,7 @@ dispatch is a pure function wearing a `switch` — moved into `policy/` as
 key → intent, every bullet above becomes a one-`When` table test in a layer that
 needs no fixture. The refactor is what makes the test writable.
 
-### 2. `app/settle-agent.ts:185-217` — `backOff()`
+### 2. `app/settler.ts:185-217` — `backOff()`
 
 `policy/settle.ts` decides `back-off` and that decision is tested. What it does
 is not:

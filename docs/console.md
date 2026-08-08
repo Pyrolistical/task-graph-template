@@ -46,7 +46,7 @@ tool: bash — bun test │ thinking (12s)        │
 
 Each pane joins three sources by slot:
 
-- its row from `agents.json` — name, model, state, activity, session path, context percent
+- its row from `slots.json` — name, model, state, activity, session path, context percent
 - the task row from `tasks.json`, if it holds one — so the pane can show the task's state, not just the agent's
 - the check row from `checks.json` for the same task, if one is running — a check displaces the activity line, because a task in `CHECK` has no agent doing anything
 
@@ -104,7 +104,7 @@ SGR mouse reporting is on, and the console registers click targets as it renders
 | ----------------------------------- | ------------------------------------ |
 | the scheduler switch, queue line    | `{command: "scheduler", enabled}`    |
 | a pane's switch, header line        | `{command: "agent", agent, enabled}` |
-| a pane's `[abort]`, activity line   | `{command: "agent_abort", …}`        |
+| a pane's `[abort]`, activity line   | `{command: "slot_abort", slot}`      |
 | `hide disabled`, the disabled block | handled in the console               |
 | the collapsed column at the right   | handled in the console               |
 

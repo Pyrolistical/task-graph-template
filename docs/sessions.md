@@ -96,4 +96,4 @@ The same applies in reverse:
 - the same session is reopened, the same branch and worktree
 - the queued failures are already in the session as the first prompt
 - the assignment is not regenerated — the worker's file, with its appended notes, is carried forward
-- `worker.checkout.dispatched` is re-based on it, so the append-only check still holds for the round that follows
+- `runner.checkout.dispatched` is re-based on it, so the append-only check still holds for the round that follows

@@ -54,18 +54,18 @@ They are now pure functions with the observations passed in:
 `app/server.ts` is the lifecycle and the console; the work is one module each,
 constructed in dependency order by `main/compose.ts`.
 
-| Module            | What it owns                                                       |
-| ----------------- | ------------------------------------------------------------------ |
-| `task-graph.ts`   | reading the graph, applying transitions, the recently-touched list |
-| `pool.ts`         | the agent slots, their processes, and the work in flight           |
-| `dispatch.ts`     | turning a scheduled candidate into a claimed, prompted agent       |
-| `settle-agent.ts` | what a settled turn does next: restore, raise, back off, submit    |
-| `run-checks.ts`   | running a task's declared checks and passing or failing it         |
-| `land.ts`         | rebasing, re-checking and fast-forwarding a task onto the base     |
-| `recover.ts`      | recloning workspaces, reattaching live pids, reaping dead claims   |
+| Module          | What it owns                                                       |
+| --------------- | ------------------------------------------------------------------ |
+| `task-graph.ts` | reading the graph, applying transitions, the recently-touched list |
+| `pool.ts`       | the slots, their runners, and the work in flight                   |
+| `dispatcher.ts` | turning a scheduled candidate into a claimed, prompted agent       |
+| `settler.ts`    | what a settled turn does next: restore, raise, back off, submit    |
+| `checker.ts`    | running a task's declared checks and passing or failing it         |
+| `lander.ts`     | rebasing, re-checking and fast-forwarding a task onto the base     |
+| `recovery.ts`   | recloning workspaces, reattaching live pids, reaping dead claims   |
 
-- `dispatch` needs `settle-agent`, `settle-agent` needs `pool` and `task-graph`,
-  `land` needs `run-checks`; nothing points back the other way
+- `dispatcher` needs `settler`, `settler` needs `pool` and `task-graph`,
+  `lander` needs `checker`; nothing points back the other way
 - `server.ts` holds them, ticks them in order, and owns nothing else
 
 ## The ports
@@ -79,19 +79,20 @@ prompt through it.
 and hands each port to the constructor of the module that uses it. There is no
 bag of dependencies: a module names what it needs, and gets exactly that.
 
-| Port          | What it is for                                          | Adapter                            |
-| ------------- | ------------------------------------------------------- | ---------------------------------- |
-| `Tasks`       | the graph on disk, under its lock                       | `task-documents` over `task-store` |
-| `Workspaces`  | clones, branches, rebases, and the status a guard reads | `git.ts`                           |
-| `Agents`      | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`           |
-| `Checks`      | running a declared check and reporting how it went      | `check-runner`                     |
-| `Prompts`     | every word an agent reads                               | `prompts.ts`                       |
-| `Inbox`       | the prompt queue and `findings.json`                    | `task-files`                       |
-| `Assignments` | the live `ASSIGNMENT.md` and its rotation               | `task-files`                       |
-| `Journal`     | the transition log and its cursor                       | `transition-log`                   |
-| `Publisher`   | the five views and the server log                       | `runtime`                          |
-| `Console`     | the command channel the TUI writes on                   | `command`                          |
-| `Paths`       | the runtime directory layout                            | `runtime`                          |
+| Port             | What it is for                                          | Adapter                            |
+| ---------------- | ------------------------------------------------------- | ---------------------------------- |
+| `Tasks`          | the graph on disk, under its lock                       | `task-documents` over `task-store` |
+| `Workspaces`     | clones, branches, rebases, and the status a guard reads | `git.ts`                           |
+| `Agents`         | spawning a sandboxed `pi` and talking to it             | `pi-process` + `sandbox`           |
+| `Checks`         | running a declared check and reporting how it went      | `check-runner`                     |
+| `Prompts`        | every word an agent reads                               | `prompts.ts`                       |
+| `Messages`       | the message queue a task carries between dispatches     | `task-files`                       |
+| `Reviews`        | `findings.json` and the review-failure count            | `task-files`                       |
+| `Assignments`    | the live `ASSIGNMENT.md` and its rotation               | `task-files`                       |
+| `Transitions`    | the transition log and its cursor                       | `transition-log`                   |
+| `Publisher`      | the five views and the server log                       | `runtime`                          |
+| `CommandChannel` | the command channel the TUI writes on                   | `command`                          |
+| `Paths`          | the runtime directory layout                            | `runtime`                          |
 
 `Agents` and `Checks` are the two that reach a subprocess. `main/` drives the
 real ones — that is what those suites are for — so a port here buys a seam, not
@@ -100,9 +101,10 @@ is waiting on anything but `git` and `pi` doing real work.
 
 ## What the layers are not
 
-- `Tasks` is one object over the task directory and `Inbox`/`Assignments` are
-  one object over the runtime directory, because each is one place on disk with
-  one convention; splitting them into a file per verb only spread the layout.
+- `Tasks` is one object over the task directory and
+  `Messages`/`Reviews`/`Assignments` are one object over the runtime directory,
+  because each is one place on disk with one convention; splitting them into a
+  file per verb only spread the layout.
 - `Tasks` is deliberately coarse — whole documents, read and written under one
   lock. The task document's whole point is that a person can edit it; a
   repository-per-aggregate abstraction over that would be `fs` with extra steps.

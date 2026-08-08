@@ -41,7 +41,7 @@ Names are derived, not configured:
 
 - `type-provider-model-slot`, slots numbered from 1
 - so that config produces `pi-anthropic-claude-sonnet-4-5-1`, `-2`, `-3` and `pi-llama.cpp-rocm-rocm-1`
-- the name goes into `claimed_by` and `workspace.agent`, so a claim in the graph says exactly which model on which provider is holding the task
+- the name goes into `claimed_by` and `workspace.slot`, so a claim in the graph says exactly which model on which provider is holding the task
 
 Rejected on load, not at spawn time:
 
@@ -110,7 +110,7 @@ The runtime toggle is not written back to `agents.json`:
 
 ## Aborting one tool call
 
-- `agent_abort` targets a single slot by its full `type-provider-model-slot` name — the one case where a slot, not an agent, is the unit
+- `slot_abort` targets a single slot by its full `type-provider-model-slot` name — the one case where a slot, not an agent, is the unit
 - it is refused if the slot has no live process, and refused unless that process is inside a `bash` tool call: `bash` is the only tool that runs long enough to be stuck, and `abort_bash` is the only kill the rpc channel offers that is narrower than the whole turn
 - it calls `abort_bash`, not `abort`. The command dies, its tool result comes back as an error, and the agent goes on with the turn it was in — the session, the claim and the slot are all untouched
 - **the agent is the one that reacts.** A wedged `zig build` becomes a failed tool call in the transcript, which is a thing an agent already knows how to read; ending the turn instead would throw away the context that produced it
@@ -172,4 +172,4 @@ Neither ever exhausts:
 
 - there is no retry limit, because the failure is not the task's fault
 - dropping the assignment would lose a live worktree and a session for a reason that will resolve on its own
-- the slot sits in `WAITING`, `agents.json` shows the reason and the next `retry`, and the manager can see at a glance that its capacity is halved and why
+- the slot sits in `WAITING`, `slots.json` shows the reason and the next `retry`, and the manager can see at a glance that its capacity is halved and why

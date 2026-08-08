@@ -24,7 +24,7 @@ every tick, while the scheduler is running:
         skip free slots whose roles do not include the one this task needs
           (designing needs designer, planning needs planner,
            reviews need reviewer, everything else worker)
-        if it prefers an agent (workspace.agent) and a free slot has the
+        if it prefers a slot (workspace.slot) and a free slot has the
           same type-provider-model, take that one
         else if it is a resume and not at the top of the queue,
           leave it for a tick that has its own model free

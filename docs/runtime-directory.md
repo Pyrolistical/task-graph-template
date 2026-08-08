@@ -12,7 +12,7 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
   server.log              # the server's own log, capped at 100 MB
   transitions.jsonl       # one line per applied transition, last 1000 kept
   inbox.json              # what is waiting on the manager, in priority order
-  agents.json             # every slot, idle ones included
+  slots.json              # every slot, idle ones included
   checks.json             # every running check
   tasks.json              # the last 100 tasks to change state
   queue.json              # what the scheduler would dispatch next, and whether it is
@@ -26,7 +26,7 @@ Everything the server knows lives under `/tmp/task-graph-server/<repo>/`.
     findings.json         # the latest review's findings, until the stage resubmits
     review-failure-count  # consecutive rejections by the review the task is in;
                           # the second one holds it, cleared when a review passes
-    queue/
+    messages/
       WORK.md             # failing checks waiting for the next WORK dispatch
     worktree/             # clone of the repo, branch task/000042
     session/
@@ -88,7 +88,7 @@ Five snapshots, one per question a reader asks.
 }
 ```
 
-### `agents.json`
+### `slots.json`
 
 - the pool, including what is doing nothing
 - answers "can I dispatch anything right now"
@@ -97,13 +97,13 @@ Five snapshots, one per question a reader asks.
 {
   "at": "2026-07-29T02:14:09.113Z",
   "seq": 4417,
-  "agents": [
+  "slots": [
     {
       "name": "pi-anthropic-claude-sonnet-4-5-1",
       "type": "pi",
       "provider": "anthropic",
       "model": "claude-sonnet-4-5",
-      "slot": 1,
+      "index": 1,
       "state": "BUSY",
       "task_id": "000042",
       "role": "worker",
@@ -120,7 +120,7 @@ Five snapshots, one per question a reader asks.
       "type": "pi",
       "provider": "llama.cpp-rocm",
       "model": "rocm",
-      "slot": 1,
+      "index": 1,
       "state": "WAITING",
       "task_id": "000057",
       "role": "reviewer",
@@ -207,10 +207,10 @@ What the dispatcher would hand out next, in the order it would hand it out, plus
     {
       "task_id": "000042",
       "rank": "WORK_STARTED",
-      "claimed": "WORK",
+      "state": "WORK",
       "role": "worker",
       "blocking": 3,
-      "prefer_agent": "pi-anthropic-claude-sonnet-4-5-1",
+      "prefer_slot": "pi-anthropic-claude-sonnet-4-5-1",
       "session": null
     }
   ]
@@ -218,7 +218,7 @@ What the dispatcher would hand out next, in the order it would hand it out, plus
 ```
 
 - a queued task is one waiting on a slot — `WORK_REVIEW`, `WORK`, `PLAN_REVIEW`, `PLAN`, `DESIGN_REVIEW`, `DESIGN`, or a failed task with a session to resume
-- `claimed` is the state the task enters when the slot takes it, `role` the kind of agent that slot has to be
+- `state` is the state the task enters when the slot takes it, `role` the kind of agent that slot has to be
 - the dispatcher reads both straight off the candidate rather than re-deriving them from the state
 - everything else in the graph is waiting on a person, a check or an agent, and is in `inbox.json` or `tasks.json` instead
 

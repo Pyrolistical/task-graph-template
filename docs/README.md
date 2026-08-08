@@ -38,6 +38,7 @@ An MCP server that turns the task graph into a work queue for `pi` agents.
 
 | Document                              | What it covers                                                                             |
 | ------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [The dictionary](dictionary.md)       | every noun the orchestrator uses, once, and how identifiers are spelled                    |
 | [Authority](authority.md)             | who may write what — the server states facts, the manager states opinions                  |
 | [States](states.md)                   | the thirteen states, why the reviews are split, the design and planning phases, held tasks |
 | [The task document](task-document.md) | the graph on disk: frontmatter schema, ids, the lock, cycles, closing                      |
@@ -77,8 +78,9 @@ An MCP server that turns the task graph into a work queue for `pi` agents.
 
 ## Where to start
 
+- [The dictionary](dictionary.md) — what everything is called
 - [Authority](authority.md) — who is allowed to move a task
 - [States](states.md) — where it can move to
 - [ASSIGNMENT.md](assignment.md) — the only thing an agent ever sees
 
-Those three are enough to follow the rest.
+Those four are enough to follow the rest.

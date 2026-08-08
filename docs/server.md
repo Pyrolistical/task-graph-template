@@ -52,7 +52,7 @@ Dispatch is last on purpose: everything before it can free a slot or move a task
 ## DETACHING
 
 - the MCP server dies with the manager; the agents are detached and do not
-- the next manager reads `agents.json`, finds pids that are still alive, and reattaches to their rpc streams instead of orphaning live work
+- the next manager reads `slots.json`, finds pids that are still alive, and reattaches to their rpc streams instead of orphaning live work
 - this is why the [runtime directory](runtime-directory.md) exists at all: everything needed to pick the pool back up is a file, not process memory
 - `shutdown` is the other exit — it aborts every live turn and kills the processes, which is what a test harness or an operator wants and what a manager exiting does not
 
@@ -60,7 +60,7 @@ Dispatch is last on purpose: everything before it can free a slot or move a task
 
 The server watches its own runtime root for a `console-command` file:
 
-- one JSON object, validated against a three-arm discriminated union: `scheduler`, `agent`, `agent_abort`
+- one JSON object, validated against a three-arm discriminated union: `scheduler`, `agent`, `slot_abort`
 - the file is read and deleted in one step, so a command is applied exactly once
 - a writer that finds the file already there does not write — the previous command has not been picked up yet, and queueing switch flips would be worse than dropping one
 - an unparseable or invalid file is dropped silently rather than crashing the server; it is a file anything on the machine can write

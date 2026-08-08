@@ -16,7 +16,7 @@ The graph has one writer process — the server — but two authorities behind i
 | `submit` from `WORK`                            | a `submit` call with notes written, and the branch committed and clean                              |
 | `submit` from `WORK_REVIEW`                     | a `submit` call with empty `findings`                                                               |
 | `pass` from `CHECK`                             | every check exited 0                                                                                |
-| `fail` from `CHECK`                             | at least one check did not; command, code and tail go to the worker's prompt queue                  |
+| `fail` from `CHECK`                             | at least one check did not; command, code and tail go to the worker's message queue                 |
 | `feedback` in `WORK_REVIEW` or `MANAGER_REVIEW` | a `findings` list, copied verbatim into the body under `# Review findings` and into `findings.json` |
 | `feedback` in `DESIGN_REVIEW`                   | a design review finding, copied verbatim into `findings.json` for the designer                      |
 | `feedback` in `PLAN_REVIEW`                     | a plan review finding, copied verbatim into `findings.json` for the planner                         |
@@ -52,6 +52,6 @@ One tool per judgement, named for the judgement.
 
 - an agent's opinion is neither — it sits in `findings` until something with authority reads it
 - the mechanical `feedback`s are the edge the server sits on deliberately: a written finding is copied, never interpreted
-- a failed check does not even get that far — it is a `fail` whose details go to the prompt queue, not to the graph, because nobody has to decide anything about a red build
+- a failed check does not even get that far — it is a `fail` whose details go to the message queue, not to the graph, because nobody has to decide anything about a red build
 - to resolve a held task the manager edits the task directly (the document, or `task_write_body`) and `resume`s
 - there is no todo-adding anywhere; the todo list is the planner's to write

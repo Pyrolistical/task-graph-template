@@ -94,7 +94,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 | `abort_bash`                     | the console's `[abort]`: one command, not a turn |
 | `abort`                          | shutdown, and a detected loop                    |
 | `get_state`                      | the session file path, right after `new_session` |
-| `get_session_stats`              | tokens and context percent for `agents.json`     |
+| `get_session_stats`              | tokens and context percent for `slots.json`      |
 | `get_last_assistant_text`        | the agent's closing words, for the log           |
 
 ## Reading the stream

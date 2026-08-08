@@ -40,7 +40,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 ## The stage table is the source of truth
 
 - `state-machine.ts` declares the eight stages once, and a stage carries everything the pipeline knows about it: state, phase, role, result-tool extension, the section its agent appends, the issue raised when it appends nothing, the guard its worktree is held to, where its findings send the task back to, and whether its `submit` hands the assignment in as the new task body
-- everything else is derived from that one array — `NEXT_STATE`, `AGENT_STATES`, `STAGE_OF`, the scheduler's `RANKS`, the issue table's state lists, and the settle
+- everything else is derived from that one array — `NEXT_STATE`, `CLAIM_STATES`, `STAGE_OF`, the scheduler's `RANKS`, the issue table's state lists, and the settle
 - adding a stage is an entry in the array, not an edit to six lookup tables that have to agree
 - the two stages with a `null` role (`CHECK`, `MANAGER_REVIEW`) fall out of the agent-facing derivations by construction, so nothing claims them and no dispatcher special-cases them
 
@@ -127,9 +127,9 @@ Every task is designed, then planned, before it is worked.
 
 `fail` is how `CHECK` sends work back, and it records nothing in the graph:
 
-| From    | To     | What is delivered                                                  | Who picks it up      |
-| ------- | ------ | ------------------------------------------------------------------ | -------------------- |
-| `CHECK` | `WORK` | every failing command, code and tail, in the worker's prompt queue | the worker's session |
+| From    | To     | What is delivered                                                   | Who picks it up      |
+| ------- | ------ | ------------------------------------------------------------------- | -------------------- |
+| `CHECK` | `WORK` | every failing command, code and tail, in the worker's message queue | the worker's session |
 
 - a result that cannot be read is not a failure and never reaches the graph
 - the agent that wrote it is still holding the claim, so the server says what is wrong in that session and the state does not move

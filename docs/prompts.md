@@ -17,7 +17,7 @@ Every word an agent reads is a file.
 | `prompts/WORK.md`                        | dispatch prompt | every `WORK` agent, as the first thing it is asked                       |
 | `prompts/WORK-with-findings.md`          | dispatch prompt | a `WORK` agent a work or manager review sent back, in place of `WORK.md` |
 | `prompts/WORK_REVIEW.md`                 | dispatch prompt | every `WORK_REVIEW` agent, as the first thing it is asked                |
-| `prompts/check-failed.md`                | queue entry     | a failed check, rendered into the worker's prompt queue                  |
+| `prompts/check-failed.md`                | queued message  | a failed check, rendered into the worker's message queue                 |
 | `prompts/missing-result.md`              | prompt fragment | an agent that settled without calling a result tool                      |
 | `prompts/missing-todos.md`               | prompt fragment | a planner that submitted without appending a `## Todos` section          |
 | `prompts/missing-design.md`              | prompt fragment | a designer that submitted without appending a `## Design` section        |

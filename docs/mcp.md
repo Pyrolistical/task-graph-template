@@ -48,7 +48,7 @@ One stdio server, calling `task.ts` and `state-machine.ts` in process.
 | Resource         | Contents                                                       |
 | ---------------- | -------------------------------------------------------------- |
 | `inbox`          | `inbox.json` — what is waiting on the manager, in order        |
-| `agents`         | `agents.json`                                                  |
+| `slots`          | `slots.json`                                                   |
 | `checks`         | `checks.json`                                                  |
 | `tasks`          | `tasks.json`                                                   |
 | `queue`          | `queue.json` — what the scheduler would dispatch next          |
