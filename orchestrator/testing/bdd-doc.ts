@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { memberOf } from "../domain/lookup.ts";
+import { groupOf } from "../domain/pattern.ts";
 
 const ORCHESTRATOR = path.join(import.meta.dir, "..");
 const REPO_ROOT = path.join(ORCHESTRATOR, "..");
@@ -58,17 +59,17 @@ function marks(
 ): { at: number; name: string }[] {
   return [...source.matchAll(pattern)].map((match) => ({
     at: match.index,
-    name: match[1],
+    name: groupOf(match, 1),
   }));
 }
 
 function stepsIn(source: string): Step[] {
   return [...source.matchAll(STEP)].map((match) => {
-    const keyword = match[1];
+    const keyword = groupOf(match, 1);
     if (!isKeyword(keyword)) {
       throw new Error(`"${keyword}" is not a step keyword`);
     }
-    return { keyword, text: match[2] };
+    return { keyword, text: groupOf(match, 2) };
   });
 }
 
@@ -85,10 +86,11 @@ export function readFile(filePath: string): File {
   for (const [index, test] of tests.entries()) {
     const ends = tests[index + 1]?.at ?? source.length;
     const owner = describes.findLastIndex((one) => one.at < test.at);
-    if (owner === -1) {
+    const suite = suites[owner];
+    if (suite === undefined) {
       continue;
     }
-    suites[owner].cases.push({
+    suite.cases.push({
       name: test.name,
       steps: stepsIn(source.slice(test.at, ends)),
     });

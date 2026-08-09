@@ -153,9 +153,10 @@ export function drop(spans: Line, width: number): Line {
     const count = fit(chars, width - used);
     const head = charsWidth(chars.slice(0, count));
     let rest = chars.slice(count);
+    const split = rest[0];
     let room = "";
-    if (used + head < width && rest.length > 0) {
-      room = " ".repeat(used + head + charWidth(rest[0]) - width);
+    if (used + head < width && split !== undefined) {
+      room = " ".repeat(used + head + charWidth(split) - width);
       rest = rest.slice(1);
     }
     out.push({ text: room + rest.join(""), sgr: span.sgr });

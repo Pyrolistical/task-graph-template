@@ -1,3 +1,5 @@
+import { groupOf } from "./pattern.ts";
+
 export type FragmentValue =
   string | number | Record<string, string | number | boolean>[];
 
@@ -21,10 +23,9 @@ function substitute(line: string, vars: Record<string, unknown>): string {
 
 export function render(fragment: string, vars: FragmentVars): string {
   const out: string[] = [];
-  const lines = fragment.split("\n");
+  const lines = fragment.split("\n")[Symbol.iterator]();
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const line of lines) {
     const open = SECTION_OPEN.exec(line);
 
     if (open === null) {
@@ -32,16 +33,16 @@ export function render(fragment: string, vars: FragmentVars): string {
       continue;
     }
 
-    const name = open[2];
+    const name = groupOf(open, 2);
     const body: string[] = [];
     let closed = false;
 
-    for (i++; i < lines.length; i++) {
-      const inner = lines[i];
+    for (const inner of lines) {
       const close = SECTION_CLOSE.exec(inner);
       if (close !== null) {
-        if (close[1] !== name) {
-          throw new Error(`Fragment closes "${close[1]}" inside "${name}"`);
+        const closing = groupOf(close, 1);
+        if (closing !== name) {
+          throw new Error(`Fragment closes "${closing}" inside "${name}"`);
         }
         closed = true;
         break;

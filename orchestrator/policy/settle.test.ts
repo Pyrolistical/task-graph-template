@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type Settlement, decideSettle } from "./settle.ts";
 import { type ClaimState, isReviewState } from "../domain/state-machine.ts";
 import { LOOP_LIMIT } from "../domain/protocol.ts";
+import { at } from "../testing/present.ts";
 
 function anAgent(state: ClaimState): Settlement {
   return {
@@ -171,7 +172,7 @@ describe("Feature: settling an agent that finished its turn", () => {
     expect(intents[0]).toEqual({ kind: "restore", section: null });
 
     // Then the modified-assignment issue is raised against it
-    expect(intents[1].kind).toBe("raise");
+    expect(at(intents, 1).kind).toBe("raise");
   });
 
   test("a worker that committed nothing is told its work is uncommitted", () => {

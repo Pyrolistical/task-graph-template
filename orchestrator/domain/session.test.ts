@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Entry, appendEntries, recordEntries } from "./session.ts";
+import { at } from "../testing/present.ts";
 
 describe("Feature: reading a session record", () => {
   test("an assistant turn becomes one entry per thought, message and tool call", () => {
@@ -29,7 +30,7 @@ describe("Feature: reading a session record", () => {
     ]);
 
     // Then every entry carries the moment the turn was written
-    expect(entries[0].timestampMs).toBe(1000);
+    expect(at(entries, 0).timestampMs).toBe(1000);
 
     // Then the tokens the turn cost come back with it, for the rate meter
     expect(usage).toEqual({ input: 10, output: 2, cacheRead: 100 });
@@ -140,7 +141,7 @@ describe("Feature: reading a session record", () => {
     const { entries } = recordEntries(record);
 
     // Then the entry still draws, with the directory marked unknown
-    expect(entries[0].text).toBe("cwd ?");
+    expect(at(entries, 0).text).toBe("cwd ?");
   });
 
   test("changing model is announced as the provider and the model", () => {
@@ -230,7 +231,7 @@ describe("Feature: reading a session record", () => {
     const { entries } = recordEntries(record);
 
     // Then the row shows the path rather than the whole argument object
-    expect(entries[0].text).toBe("src/main.ts");
+    expect(at(entries, 0).text).toBe("src/main.ts");
   });
 
   test("a tool call with no argument worth reading shows all of them", () => {
@@ -249,7 +250,7 @@ describe("Feature: reading a session record", () => {
     const { entries } = recordEntries(record);
 
     // Then the row falls back to the arguments as they were written
-    expect(entries[0].text).toBe('{"findings":[]}');
+    expect(at(entries, 0).text).toBe('{"findings":[]}');
   });
 
   test("a tool call whose arguments are not an object still draws a row", () => {

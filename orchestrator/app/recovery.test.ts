@@ -15,6 +15,7 @@ import {
   fakePaths,
 } from "../testing/ports.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
+import { at } from "../testing/present.ts";
 
 const DEAD_PID = 9001;
 const LIVE_PID = 9002;
@@ -123,7 +124,7 @@ describe("Feature: reaping claims whose process is gone", () => {
 
     // Then the claim is released and the slot goes back to idle
     expect(store.released).toEqual(["000042"]);
-    expect(pool.rows()[0].state).toBe("IDLE");
+    expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 
   test("the work a reaped agent committed is harvested onto its branch", () => {
@@ -155,7 +156,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     const { recover, pool, publisher, log } = aRig([]);
     publisher.rows = [
       {
-        ...pool.rows()[0],
+        ...at(pool.rows(), 0),
         state: "BUSY",
         task_id: "000042",
         role: "worker",
@@ -169,7 +170,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     recover.reattach();
 
     // Then the slot is taken as busy on that task rather than dispatched again
-    const row = pool.rows()[0];
+    const row = at(pool.rows(), 0);
     expect(row.state).toBe("BUSY");
     expect(row.task_id).toBe("000042");
     expect(log).toEqual([
@@ -182,7 +183,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     const { recover, pool, publisher } = aRig([]);
     publisher.rows = [
       {
-        ...pool.rows()[0],
+        ...at(pool.rows(), 0),
         state: "BUSY",
         task_id: "000042",
         role: "worker",
@@ -194,7 +195,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     recover.reattach();
 
     // Then the slot reads idle, so the scheduler may use it again
-    expect(pool.rows()[0].state).toBe("IDLE");
+    expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 
   test("no view on disk leaves every slot idle", () => {

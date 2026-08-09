@@ -31,6 +31,7 @@ import {
   workspaceOf,
   sessionOf,
 } from "../testing/server-jig.ts";
+import { at } from "../testing/present.ts";
 
 describe("Feature: running a task's checks", () => {
   testInTempDirs(
@@ -310,8 +311,8 @@ describe("Feature: sending a task back to the agent that did it", () => {
       // Then the session is reopened where the document says it lies
       expect(stateOf(server, id)).toBe("WORK");
       const view = readView(runtimeOf(fixture));
-      expect(view.slots[0].state).toBe("BUSY");
-      expect(view.slots[0].session).toBe(legacy);
+      expect(at(view.slots, 0).state).toBe("BUSY");
+      expect(at(view.slots, 0).session).toBe(legacy);
       expect(workspaceOf(server, id).session).toBe(legacy);
 
       server.shutdown();

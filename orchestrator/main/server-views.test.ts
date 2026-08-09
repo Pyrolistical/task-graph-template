@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { present } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -46,9 +46,9 @@ describe("Feature: the views the console and the manager read", () => {
       // Then every slot is a row, so the console shows the whole pool
       const view = readView(runtimeOf(fixture));
       expect(view.slots).toHaveLength(2);
-      expect(view.slots[0].state).toBe("IDLE");
-      expect(view.slots[0].task_id).toBeNull();
-      expect(view.slots[1].name).toBe("pi-fake-fake-2");
+      expect(at(view.slots, 0).state).toBe("IDLE");
+      expect(at(view.slots, 0).task_id).toBeNull();
+      expect(at(view.slots, 1).name).toBe("pi-fake-fake-2");
 
       server.shutdown();
     },
@@ -180,9 +180,9 @@ describe("Feature: the queue view", () => {
       const view = readView(runtimeOf(fixture));
       expect(view.scheduling).toBe(false);
       expect(view.queue).toHaveLength(1);
-      expect(view.queue[0].task_id).toBe(first);
-      expect(view.queue[0].rank).toBe("WORK_FRESH");
-      expect(view.queue[0].blocking).toBe(1);
+      expect(at(view.queue, 0).task_id).toBe(first);
+      expect(at(view.queue, 0).rank).toBe("WORK_FRESH");
+      expect(at(view.queue, 0).blocking).toBe(1);
 
       // Then the switch in the view follows the scheduler it draws
       server.setSchedulerEnabled(true);
@@ -440,7 +440,7 @@ describe("Feature: commands the console writes for the server", () => {
         agent: "pi-fake-fake",
         enabled: false,
       });
-      await applied(() => !server.slotRows()[0].enabled);
+      await applied(() => !at(server.slotRows(), 0).enabled);
 
       writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
       await applied(() => !server.schedulerEnabled);
@@ -496,7 +496,7 @@ describe("Feature: commands the console writes for the server", () => {
       expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
         "no agent named",
       );
-      expect(server.slotRows()[0].enabled).toBe(true);
+      expect(at(server.slotRows(), 0).enabled).toBe(true);
 
       server.shutdown();
     },
@@ -530,8 +530,8 @@ describe("Feature: turning an agent off and on", () => {
 
       // Then nothing is dispatched, and the console says why
       expect(stateOf(server, id)).toBe("WORK");
-      expect(server.slotRows()[0].state).toBe("DISABLED");
-      expect(server.slotRows()[0].enabled).toBe(false);
+      expect(at(server.slotRows(), 0).state).toBe("DISABLED");
+      expect(at(server.slotRows(), 0).enabled).toBe(false);
 
       server.shutdown();
     },
@@ -562,7 +562,7 @@ describe("Feature: turning an agent off and on", () => {
         .slotRows()
         .filter((row) => row.agent === "pi-other-other");
       expect(untouched).toHaveLength(1);
-      expect(untouched[0].state).toBe("IDLE");
+      expect(at(untouched, 0).state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -633,15 +633,16 @@ describe("Feature: turning an agent off and on", () => {
       const disabled = server.setAgentEnabled("pi-fake-fake", false);
 
       // Then the slot keeps its task, showing as running under a disabled agent
-      expect(disabled[0].enabled).toBe(false);
-      expect(disabled[0].state).not.toBe("DISABLED");
-      expect(disabled[0].task_id).toBe(id);
+      const row = at(disabled, 0);
+      expect(row.enabled).toBe(false);
+      expect(row.state).not.toBe("DISABLED");
+      expect(row.task_id).toBe(id);
 
       // Then it finishes the work before the slot is taken out of the pool
       await server.drain();
       await settle(server);
-      expect(server.slotRows()[0].state).toBe("DISABLED");
-      expect(server.slotRows()[0].task_id).toBeNull();
+      expect(at(server.slotRows(), 0).state).toBe("DISABLED");
+      expect(at(server.slotRows(), 0).task_id).toBeNull();
       expect(stateOf(server, id)).toBe("WORK_REVIEW");
 
       server.shutdown();
@@ -709,7 +710,7 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await server.tick();
-      const row = server.slotRows()[0];
+      const row = at(server.slotRows(), 0);
       expect(row.state).toBe("BUSY");
       expect(row.activity.kind).toBe("tool-call");
 
@@ -938,8 +939,8 @@ describe("Feature: a manager that exits while its agents run on", () => {
 
       // Then the slot is reattached rather than dispatched to again
       const view = readView(runtimeOf(fixture));
-      expect(view.slots[0].state).toBe("BUSY");
-      expect(view.slots[0].pid).toBe(alive.pid);
+      expect(at(view.slots, 0).state).toBe("BUSY");
+      expect(at(view.slots, 0).pid).toBe(alive.pid);
       expect(stateOf(second, id)).toBe("WORK");
 
       alive.kill();

@@ -326,8 +326,7 @@ export class PaneLines {
     }
 
     const settled = Math.max(0, entries.length - 1);
-    for (let index = this.folded; index < settled; index++) {
-      const entry = entries[index];
+    for (const entry of entries.slice(this.folded, settled)) {
       if (entry.label !== "usage") {
         this.lines.push(...entryLines(entry, width));
       }
@@ -556,12 +555,16 @@ export function screen(
   const off = cells.flatMap((cell, index) =>
     cell.pane.slot.enabled ? [] : [index],
   );
+  const leftmost = off[0];
+  const rightmost = off[off.length - 1];
   const hide =
-    off.length === 0 || off.length === cells.length
+    leftmost === undefined ||
+    rightmost === undefined ||
+    off.length === cells.length
       ? null
       : hideRegion(
-          off[0] * (width + 1),
-          off[off.length - 1] * (width + 1) + width,
+          leftmost * (width + 1),
+          rightmost * (width + 1) + width,
           rows,
         );
   if (hide !== null) {

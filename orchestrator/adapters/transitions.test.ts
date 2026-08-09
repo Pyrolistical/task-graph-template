@@ -42,6 +42,7 @@ import {
   unclaim,
   writeTask,
 } from "../testing/graph-jig.ts";
+import { at } from "../testing/present.ts";
 
 function apply(
   dir: string,
@@ -70,8 +71,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a task with a dependency waits instead of starting", () => {
     // Given a new task edited to depend on another
     const { dir, ids } = newTasks(2);
-    const main = ids[0];
-    const dep = ids[1];
+    const main = at(ids, 0);
+    const dep = at(ids, 1);
     addDeps(dir, main, dep);
 
     // When the task is submitted
@@ -85,8 +86,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a blocked task submitted again stays where it is", () => {
     // Given a task already blocked behind a dependency
     const { dir, ids } = newTasks(2);
-    const main = ids[0];
-    const dep = ids[1];
+    const main = at(ids, 0);
+    const dep = at(ids, 1);
     addDeps(dir, main, dep);
     run(dir, main, "submit");
 
@@ -103,9 +104,9 @@ describe("Feature: a task that waits on other tasks", () => {
     () => {
       // Given a task blocked behind two dependencies, one since edited out
       const { dir, ids } = newTasks(3);
-      const main = ids[0];
-      const first = ids[1];
-      const second = ids[2];
+      const main = at(ids, 0);
+      const first = at(ids, 1);
+      const second = at(ids, 2);
       addDeps(dir, main, first, second);
       run(dir, main, "submit");
       editTask(dir, main, (meta) => {
@@ -818,8 +819,8 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the clock moves even when the task does not", async () => {
     // Given a blocked task, and when it last entered that state
     const { dir, ids } = newTasks(2);
-    const main = ids[0];
-    const dep = ids[1];
+    const main = at(ids, 0);
+    const dep = at(ids, 1);
     addDeps(dir, main, dep);
     run(dir, main, "submit");
     const before = enteredAt(dir, main);
@@ -835,8 +836,8 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the clock moves when the task moves", async () => {
     // Given a blocked task whose dependency has since been edited out
     const { dir, ids } = newTasks(2);
-    const main = ids[0];
-    const dep = ids[1];
+    const main = at(ids, 0);
+    const dep = at(ids, 1);
     addDeps(dir, main, dep);
     run(dir, main, "submit");
     const before = enteredAt(dir, main);

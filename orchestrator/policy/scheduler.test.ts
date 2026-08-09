@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { present } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 import { type Slot, agentOf } from "../domain/agents.ts";
 import { blockingCounts } from "../domain/graph.ts";
 import { inbox } from "./inbox.ts";
@@ -61,11 +61,11 @@ describe("Feature: which task is dispatched next", () => {
     };
   }
 
-  const slot = (name: string) => ({
+  const slot = (name: string): Slot => ({
     name,
     agent: agentOf(name),
     type: "pi",
-    provider: name.split("-")[1],
+    provider: at(name.split("-"), 1),
     model: "m",
     index: 1,
     enabled: true,
@@ -149,8 +149,8 @@ describe("Feature: which task is dispatched next", () => {
     const queue = queueOf(tasks, new Set());
 
     // Then the one unblocking the most work is dispatched first
-    expect(queue[0].task_id).toBe("000002");
-    expect(queue[0].blocking).toBe(2);
+    expect(at(queue, 0).task_id).toBe("000002");
+    expect(at(queue, 0).blocking).toBe(2);
   });
 
   test("two tasks blocking the same amount are ordered by their id", () => {
@@ -200,10 +200,13 @@ describe("Feature: which task is dispatched next", () => {
   test("a resume goes back to a free slot of the model that holds the session", () => {
     // Given a task to resume, whose session belongs to one of two free agents
     const free = [slot("pi-openai-m-1"), slot("pi-anthropic-m-2")];
-    const candidate = queueOf(
-      graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
-      new Set(["000001"]),
-    )[0];
+    const candidate = at(
+      queueOf(
+        graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
+        new Set(["000001"]),
+      ),
+      0,
+    );
 
     // When a slot is picked for it
     const picked = pickSlot(free, candidate, true, unmeasured);
@@ -215,7 +218,7 @@ describe("Feature: which task is dispatched next", () => {
   test("a task with no session of its own goes to the fastest agent measured", () => {
     // Given a fresh task and two free agents, one measured faster than the other
     const free = [slot("pi-anthropic-m-1"), slot("pi-openai-m-1")];
-    const candidate = queueOf(graph(task({ id: "000001" })), new Set())[0];
+    const candidate = at(queueOf(graph(task({ id: "000001" })), new Set()), 0);
     const rate = rates({ "pi-anthropic-m": 12, "pi-openai-m": 30 });
 
     // When a slot is picked for it
@@ -228,7 +231,7 @@ describe("Feature: which task is dispatched next", () => {
   test("an agent nobody has measured yet is tried before a measured one", () => {
     // Given a fresh task, one measured agent and one that has never run
     const free = [slot("pi-anthropic-m-1"), slot("pi-openai-m-1")];
-    const candidate = queueOf(graph(task({ id: "000001" })), new Set())[0];
+    const candidate = at(queueOf(graph(task({ id: "000001" })), new Set()), 0);
 
     // When a slot is picked for it
     const picked = pickSlot(
@@ -245,7 +248,7 @@ describe("Feature: which task is dispatched next", () => {
   test("agents measured the same keep the order the pool file gave them", () => {
     // Given a fresh task and two agents measured at the same rate
     const free = [slot("pi-anthropic-m-1"), slot("pi-openai-m-1")];
-    const candidate = queueOf(graph(task({ id: "000001" })), new Set())[0];
+    const candidate = at(queueOf(graph(task({ id: "000001" })), new Set()), 0);
     const rate = rates({ "pi-anthropic-m": 20, "pi-openai-m": 20 });
 
     // When a slot is picked for it
@@ -258,10 +261,13 @@ describe("Feature: which task is dispatched next", () => {
   test("keeping the session outweighs going to a much faster agent", () => {
     // Given a task to resume whose own model is measured far slower than the other
     const free = [slot("pi-openai-m-1"), slot("pi-anthropic-m-2")];
-    const candidate = queueOf(
-      graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
-      new Set(["000001"]),
-    )[0];
+    const candidate = at(
+      queueOf(
+        graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
+        new Set(["000001"]),
+      ),
+      0,
+    );
     const rate = rates({ "pi-anthropic-m": 3, "pi-openai-m": 90 });
 
     // When a slot is picked for it
@@ -274,10 +280,13 @@ describe("Feature: which task is dispatched next", () => {
   test("a task whose own agent is busy falls back to the fastest free one", () => {
     // Given a started task whose model has no free slot at all
     const free = [slot("pi-openai-m-1"), slot("pi-mistral-m-1")];
-    const candidate = queueOf(
-      graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
-      new Set(),
-    )[0];
+    const candidate = at(
+      queueOf(
+        graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
+        new Set(),
+      ),
+      0,
+    );
     const rate = rates({ "pi-openai-m": 10, "pi-mistral-m": 50 });
 
     // When a slot is picked for it
@@ -290,10 +299,13 @@ describe("Feature: which task is dispatched next", () => {
   test("only the head of the queue gives up its session for any free slot", () => {
     // Given a task to resume, and no free slot of the model holding its session
     const free = [slot("pi-openai-m-1")];
-    const candidate = queueOf(
-      graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
-      new Set(["000001"]),
-    )[0];
+    const candidate = at(
+      queueOf(
+        graph(task({ id: "000001", workspace: workspace("pi-anthropic-m-1") })),
+        new Set(["000001"]),
+      ),
+      0,
+    );
 
     // When a slot is picked for it, once at the head of the queue and once below
     const picked = [
@@ -314,7 +326,7 @@ describe("Feature: which task is dispatched next", () => {
 
     // Then only the task at the head of the queue is dispatched
     expect(dispatches).toHaveLength(1);
-    expect(dispatches[0].candidate.task_id).toBe("000001");
+    expect(at(dispatches, 0).candidate.task_id).toBe("000001");
   });
 
   test("a candidate carries the role the state it sits in is run by", () => {
@@ -344,7 +356,7 @@ describe("Feature: which task is dispatched next", () => {
       { ...slot("pi-openai-m-1"), roles: ["reviewer"] },
       slot("pi-anthropic-m-2"),
     ];
-    const candidate = queueOf(graph(task({ id: "000001" })), new Set())[0];
+    const candidate = at(queueOf(graph(task({ id: "000001" })), new Set()), 0);
 
     // When a slot is picked for it
     const picked = pickSlot(free, candidate, true, unmeasured);
@@ -387,8 +399,8 @@ describe("Feature: which task is dispatched next", () => {
     const queue = queueOf(tasks, new Set(["000002"]));
 
     // Then the resume leads the queue, as any resume does
-    expect(queue[0].task_id).toBe("000002");
-    expect(queue[0].rank).toBe("resume");
+    expect(at(queue, 0).task_id).toBe("000002");
+    expect(at(queue, 0).rank).toBe("resume");
   });
 });
 
@@ -473,7 +485,7 @@ describe("Feature: what is waiting on the manager", () => {
 
     // Then the one unblocking other work is what the manager is shown first
     expect(rows.map((row) => row.task_id)).toEqual(["000002", "000001"]);
-    expect(rows[0].blocking).toBe(1);
+    expect(at(rows, 0).blocking).toBe(1);
   });
 
   test("a held row carries the reason the manager has to answer", () => {
@@ -491,8 +503,8 @@ describe("Feature: what is waiting on the manager", () => {
     const rows = inboxOf(tasks);
 
     // Then the row says what it is waiting on and since when
-    expect(rows[0].held_reason).toBe("the staging database is down");
-    expect(rows[0].waiting_since).toBe("2026-07-29T01:00:00Z");
+    expect(at(rows, 0).held_reason).toBe("the staging database is down");
+    expect(at(rows, 0).waiting_since).toBe("2026-07-29T01:00:00Z");
   });
 
   test("a row names the branch to look at, not the worktree it was built in", () => {
@@ -514,7 +526,7 @@ describe("Feature: what is waiting on the manager", () => {
     const rows = inboxOf(tasks);
 
     // Then the manager is pointed at the branch, which is what outlives the run
-    expect(rows[0].branch).toBe("work/000001");
+    expect(at(rows, 0).branch).toBe("work/000001");
     expect(rows[0]).not.toHaveProperty("worktree");
   });
 });

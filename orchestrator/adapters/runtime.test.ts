@@ -24,6 +24,7 @@ import { STATUS_SHOWN_LINES, statusOf } from "../domain/guard.ts";
 import type { TaskState } from "../domain/state-machine.ts";
 import { commitIn, tempRepo } from "../testing/orchestrator-jig.ts";
 import { deadPid } from "../testing/graph-jig.ts";
+import { at } from "../testing/present.ts";
 
 beforeAll(() => {
   setSystemTime(new Date("2026-01-01").getTime());
@@ -503,8 +504,8 @@ describe("Feature: the log of every transition applied", () => {
     // Then only the last ten are kept, still numbered from where they happened
     const kept = log.read();
     expect(kept).toHaveLength(10);
-    expect(kept[0].seq).toBe(16);
-    expect(kept[9].seq).toBe(25);
+    expect(at(kept, 0).seq).toBe(16);
+    expect(at(kept, 9).seq).toBe(25);
 
     // Then a server reopening the log carries on from the same number
     expect(log.cursor).toBe(25);

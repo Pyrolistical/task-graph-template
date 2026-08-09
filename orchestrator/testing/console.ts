@@ -1,4 +1,9 @@
-import { type SlotRow, idleRow, parseAgents } from "../domain/agents.ts";
+import {
+  type Slot,
+  type SlotRow,
+  idleRow,
+  parseAgents,
+} from "../domain/agents.ts";
 import type { TaskRow } from "../domain/graph.ts";
 import type { Entry } from "../domain/session.ts";
 import type { Line } from "../domain/text.ts";
@@ -9,8 +14,9 @@ import {
   panes,
 } from "../policy/console.ts";
 import type { Candidate } from "../policy/scheduler.ts";
+import { present } from "./present.ts";
 
-export const SLOTS = parseAgents({
+const POOL = parseAgents({
   agents: [
     {
       type: "pi",
@@ -20,6 +26,11 @@ export const SLOTS = parseAgents({
     },
   ],
 });
+
+export const SLOTS: [Slot, Slot] = [
+  present(POOL[0], "a first fixture slot"),
+  present(POOL[1], "a second fixture slot"),
+];
 
 export function busyRow(
   overrides: Partial<SlotRow> = {},
@@ -96,7 +107,7 @@ export function layoutOf(overrides: Partial<Layout> = {}): Layout {
 }
 
 export function paneOf(view: Partial<ConsoleView> = {}): Pane {
-  return panes(viewOf(view))[0];
+  return present(panes(viewOf(view))[0], "a pane for the view");
 }
 
 export function entryOf(text: string, label = "text"): Entry {

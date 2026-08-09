@@ -32,6 +32,7 @@ import {
 } from "../testing/server-jig.ts";
 import type { Server } from "../app/server.ts";
 import { boot, build } from "../../mcp.ts";
+import { at } from "../testing/present.ts";
 
 const openClients: Client[] = [];
 const openServers: Server[] = [];
@@ -78,7 +79,8 @@ async function connect(fixture: Fixture) {
 const TextBlocks = z.array(z.looseObject({ text: z.string() }));
 
 function textOf(result: unknown): string {
-  return z.looseObject({ content: TextBlocks }).parse(result).content[0].text;
+  return at(z.looseObject({ content: TextBlocks }).parse(result).content, 0)
+    .text;
 }
 
 async function resourceOf<T>(
@@ -89,7 +91,7 @@ async function resourceOf<T>(
   const read = await client.readResource({ uri });
   return parse(
     schema,
-    JSON.parse(TextBlocks.parse(read.contents)[0].text),
+    JSON.parse(at(TextBlocks.parse(read.contents), 0).text),
     "resource",
     uri,
   );
@@ -550,7 +552,7 @@ describe("Feature: the tool surface the manager works through", () => {
       const workspace = await client.readResource({
         uri: "orchestrator://workspace_path",
       });
-      expect(TextBlocks.parse(workspace.contents)[0].text).toContain(
+      expect(at(TextBlocks.parse(workspace.contents), 0).text).toContain(
         "task-graph-server",
       );
 
@@ -795,12 +797,12 @@ describe("Feature: the tool surface the manager works through", () => {
     // When the manager aborts one of them
     const result = await client.callTool({
       name: "slot_abort",
-      arguments: { slot: slots[0].name },
+      arguments: { slot: at(slots, 0).name },
     });
 
     // Then it is refused, because there is no command of its own to kill
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain(`${slots[0].name} is not running`);
+    expect(textOf(result)).toContain(`${at(slots, 0).name} is not running`);
 
     await client.close();
   });

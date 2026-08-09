@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { groupOf } from "./domain/pattern.ts";
 
 const ROOT = import.meta.dir;
 
@@ -30,6 +31,12 @@ function suites(): string[] {
   return found;
 }
 
+function stepsOf(comments: RegExpExecArray[], keyword: string): string[] {
+  return comments
+    .filter((comment) => groupOf(comment, 1) === keyword)
+    .map((comment) => groupOf(comment, 2));
+}
+
 function cases(file: string): Case[] {
   const source = fs.readFileSync(path.join(ROOT, file), "utf-8");
   const blocks = source.split(/^ {2}(?:test|testInTempDirs)\(\s*/m).slice(1);
@@ -40,9 +47,9 @@ function cases(file: string): Case[] {
     return {
       file,
       name,
-      given: comments.filter((c) => c[1] === "Given").map((c) => c[2]),
-      when: comments.filter((c) => c[1] === "When").map((c) => c[2]),
-      then: comments.filter((c) => c[1] === "Then").map((c) => c[2]),
+      given: stepsOf(comments, "Given"),
+      when: stepsOf(comments, "When"),
+      then: stepsOf(comments, "Then"),
     };
   });
 }

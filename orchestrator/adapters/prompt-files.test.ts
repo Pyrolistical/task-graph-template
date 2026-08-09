@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { present } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -52,7 +52,7 @@ function toolOf(tools: Map<string, Tool>, name: string): Tool {
 }
 
 function textOf(result: ToolResult): string {
-  return result.content[0].text;
+  return at(result.content, 0).text;
 }
 
 async function submitOf(state: ClaimState) {

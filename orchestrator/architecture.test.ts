@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { groupOf } from "./domain/pattern.ts";
 import { memberOf } from "./domain/lookup.ts";
+import { at } from "./testing/present.ts";
 
 const ROOT = import.meta.dir;
 
@@ -74,13 +76,13 @@ function suitesIn(layers: Layer[]): string[] {
 
 function importsOf(module: Module): string[] {
   return [...module.source.matchAll(/from "(\.[^"]*\.ts)"/g)].map((match) => {
-    const target = path.join(path.dirname(module.path), match[1]);
+    const target = path.join(path.dirname(module.path), groupOf(match, 1));
     return path.normalize(target);
   });
 }
 
 function layerOf(relative: string): Layer | null {
-  const head = relative.split(path.sep)[0];
+  const head = at(relative.split(path.sep), 0);
   return isLayer(head) ? head : null;
 }
 

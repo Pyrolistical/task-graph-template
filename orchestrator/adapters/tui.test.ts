@@ -20,6 +20,7 @@ import {
   layoutOf,
   taskRowOf,
 } from "../testing/console.ts";
+import { at } from "../testing/present.ts";
 
 function write(filePath: string, records: unknown[]): void {
   fs.appendFileSync(
@@ -313,10 +314,10 @@ describe("Feature: reading the views the server publishes", () => {
     const view = readView(runtime);
 
     // Then it has the agents, the tasks, the checks, the queue and the switch
-    expect(view.slots[0].name).toBe(SLOTS[0].name);
-    expect(view.tasks[0].id).toBe("000123");
+    expect(at(view.slots, 0).name).toBe(SLOTS[0].name);
+    expect(at(view.tasks, 0).id).toBe("000123");
     expect(view.checks).toEqual([]);
-    expect(view.queue[0].task_id).toBe("000123");
+    expect(at(view.queue, 0).task_id).toBe("000123");
     expect(view.scheduling).toBe(true);
   });
 

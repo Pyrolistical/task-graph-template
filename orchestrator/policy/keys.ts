@@ -1,4 +1,5 @@
 import type { Command } from "../domain/command.ts";
+import { groupOf } from "../domain/pattern.ts";
 import type { Hit, Local, Region } from "./console.ts";
 
 export function keys(chunk: string): string[] {
@@ -10,13 +11,9 @@ export function keys(chunk: string): string[] {
     const sequence =
       rest.match(/^\x1b\[<\d+;\d+;\d+[mM]/) ??
       rest.match(/^\x1b\[[0-9;]*[A-Za-z~]/);
-    if (sequence === null) {
-      found.push(rest[0]);
-      at += 1;
-      continue;
-    }
-    found.push(sequence[0]);
-    at += sequence[0].length;
+    const key = sequence === null ? rest.slice(0, 1) : sequence[0];
+    found.push(key);
+    at += key.length;
   }
 
   return found;
@@ -35,9 +32,9 @@ export function mouse(key: string): Mouse | null {
     return null;
   }
   return {
-    button: parseInt(match[1], 10),
-    column: parseInt(match[2], 10) - 1,
-    row: parseInt(match[3], 10) - 1,
+    button: parseInt(groupOf(match, 1), 10),
+    column: parseInt(groupOf(match, 2), 10) - 1,
+    row: parseInt(groupOf(match, 3), 10) - 1,
     pressed: match[4] === "M",
   };
 }

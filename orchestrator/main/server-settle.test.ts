@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { present } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -598,7 +598,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         5,
       );
-      expect(server.slotRows()[0].state).toBe("IDLE");
+      expect(at(server.slotRows(), 0).state).toBe("IDLE");
 
       server.shutdown();
     },

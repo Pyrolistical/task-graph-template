@@ -12,10 +12,10 @@ export function tokensPerSecond(
   nowMs: number,
 ): number | null {
   const first = samples[0];
-  if (first === undefined) {
+  const last = samples[samples.length - 1];
+  if (first === undefined || last === undefined) {
     return null;
   }
-  const last = samples[samples.length - 1];
   let durationMs = last.timestampMs - first.timestampMs;
   if (durationMs <= 0) {
     durationMs = nowMs - first.timestampMs;

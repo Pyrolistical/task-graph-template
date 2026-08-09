@@ -40,11 +40,15 @@ export function branchExists(repo: string, branch: string): boolean {
   );
 }
 
-export function identity(repo: string): string[] {
-  return ["user.name", "user.email"].flatMap((key) => {
+export function identity(repo: string): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (const key of ["user.name", "user.email"]) {
     const result = git(repo, ["config", "--get", key]);
-    return result.code === 0 ? [key, result.stdout.trim()] : [];
-  });
+    if (result.code === 0) {
+      pairs.push([key, result.stdout.trim()]);
+    }
+  }
+  return pairs;
 }
 
 export function createWorkspace(
@@ -64,9 +68,8 @@ export function createWorkspace(
     worktree,
   ]);
 
-  const inherited = identity(repo);
-  for (let at = 0; at < inherited.length; at += 2) {
-    gitOrThrow(worktree, ["config", inherited[at], inherited[at + 1]]);
+  for (const [key, value] of identity(repo)) {
+    gitOrThrow(worktree, ["config", key, value]);
   }
 
   if (!existing) {

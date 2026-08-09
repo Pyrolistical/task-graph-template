@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { present } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 import fs from "node:fs";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import { aSlot } from "../testing/ports.ts";
@@ -46,7 +46,7 @@ describe("Feature: reading back the slots the last server published", () => {
 
     // Then it gets the rows it needs to reattach to what was running
     expect(rows).toHaveLength(1);
-    expect(present(rows, "the slots view")[0].name).toBe("pi-fake-fake-1");
+    expect(at(present(rows, "the slots view"), 0).name).toBe("pi-fake-fake-1");
   });
 
   testInTempDirs(

@@ -9,6 +9,7 @@ import {
 } from "../testing/ports.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
+import { at } from "../testing/present.ts";
 
 function aPool(slots: Slot[] = [aSlot()], alive = true) {
   const workspaces = new FakeWorkspaces();
@@ -39,7 +40,7 @@ describe("Feature: the pool of agent slots", () => {
     const { pool } = aPool([aSlot({ enabled: false })]);
 
     // When the pool is asked for its rows
-    const row = pool.rows()[0];
+    const row = at(pool.rows(), 0);
 
     // Then the slot reads as disabled rather than idle
     expect(row.state).toBe("DISABLED");
@@ -218,7 +219,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     expect(harvested).toEqual(["/tmp/000042/worktree"]);
 
     // Then the slot reads idle again, holding nothing
-    expect(pool.rows()[0].state).toBe("IDLE");
+    expect(at(pool.rows(), 0).state).toBe("IDLE");
     expect(pool.runner("pi-fake-fake-1").taskId).toBeNull();
   });
 
@@ -239,7 +240,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     ]);
 
     // Then the slot is released rather than left holding a broken run
-    expect(pool.rows()[0].state).toBe("IDLE");
+    expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 
   test("a pool with nothing tracked has no work in flight", () => {
