@@ -22,8 +22,8 @@ import {
 } from "../testing/console.ts";
 import { at } from "../testing/present.ts";
 
-function write(filePath: string, records: unknown[]): void {
-  fs.appendFileSync(
+async function write(filePath: string, records: unknown[]): Promise<void> {
+  await fs.promises.appendFile(
     filePath,
     records.map((record) => `${JSON.stringify(record)}\n`).join(""),
     "utf-8",
@@ -43,33 +43,36 @@ function assistant(text: string): unknown {
 }
 
 describe("Feature: tailing the session an agent is writing", () => {
-  testInTempDirs("only what was appended since the last read is parsed", () => {
-    // Given a session file with one turn in it, already read once
-    const file = path.join(tempDir("console-"), "session.jsonl");
-    write(file, [assistant("first")]);
-    const tail: SessionTail = new SessionTail(file);
-    expect(tail.read().map((entry) => entry.text)).toEqual(["first"]);
+  testInTempDirs(
+    "only what was appended since the last read is parsed",
+    async () => {
+      // Given a session file with one turn in it, already read once
+      const file = path.join(await tempDir("console-"), "session.jsonl");
+      await write(file, [assistant("first")]);
+      const tail: SessionTail = new SessionTail(file);
+      expect(tail.read().map((entry) => entry.text)).toEqual(["first"]);
 
-    // Given another turn appended to the file
-    write(file, [assistant("second")]);
+      // Given another turn appended to the file
+      await write(file, [assistant("second")]);
 
-    // When the file is read again
-    const entries = tail.read();
+      // When the file is read again
+      const entries = tail.read();
 
-    // Then the new turn joins the old ones rather than replacing them
-    expect(entries.map((entry) => entry.text)).toEqual(["first", "second"]);
+      // Then the new turn joins the old ones rather than replacing them
+      expect(entries.map((entry) => entry.text)).toEqual(["first", "second"]);
 
-    // Then each turn leaves one usage sample behind for the rate meter
-    expect(tail.samples).toEqual([
-      { timestampMs: 0, tokens: 2 },
-      { timestampMs: 0, tokens: 2 },
-    ]);
-  });
+      // Then each turn leaves one usage sample behind for the rate meter
+      expect(tail.samples).toEqual([
+        { timestampMs: 0, tokens: 2 },
+        { timestampMs: 0, tokens: 2 },
+      ]);
+    },
+  );
 
-  testInTempDirs("only the last ten usage samples are kept", () => {
+  testInTempDirs("only the last ten usage samples are kept", async () => {
     // Given a session with twelve turns written to it
-    const file = path.join(tempDir("console-"), "session.jsonl");
-    write(
+    const file = path.join(await tempDir("console-"), "session.jsonl");
+    await write(
       file,
       Array.from({ length: 12 }, (_, index) => assistant(`m${index}`)),
     );
@@ -85,35 +88,38 @@ describe("Feature: tailing the session an agent is writing", () => {
     expect(tail.samples).toHaveLength(10);
   });
 
-  testInTempDirs("a session rewritten from the start is read afresh", () => {
-    // Given a session that has been read, then truncated and written over
-    const file = path.join(tempDir("console-"), "session.jsonl");
-    write(file, [assistant("first"), assistant("second")]);
-    const tail: SessionTail = new SessionTail(file);
-    expect(tail.read()).toHaveLength(2);
-    fs.writeFileSync(file, "", "utf-8");
-    write(file, [assistant("fresh")]);
+  testInTempDirs(
+    "a session rewritten from the start is read afresh",
+    async () => {
+      // Given a session that has been read, then truncated and written over
+      const file = path.join(await tempDir("console-"), "session.jsonl");
+      await write(file, [assistant("first"), assistant("second")]);
+      const tail: SessionTail = new SessionTail(file);
+      expect(tail.read()).toHaveLength(2);
+      await fs.promises.writeFile(file, "", "utf-8");
+      await write(file, [assistant("fresh")]);
 
-    // When the file is read again
-    const entries = tail.read();
+      // When the file is read again
+      const entries = tail.read();
 
-    // Then the old turns are dropped and only the new session is shown
-    expect(entries.map((entry) => entry.text)).toEqual(["fresh"]);
-    expect(tail.samples).toEqual([{ timestampMs: 0, tokens: 2 }]);
-  });
+      // Then the old turns are dropped and only the new session is shown
+      expect(entries.map((entry) => entry.text)).toEqual(["fresh"]);
+      expect(tail.samples).toEqual([{ timestampMs: 0, tokens: 2 }]);
+    },
+  );
 
   testInTempDirs(
     "a half written line is held until its newline arrives",
-    () => {
+    async () => {
       // Given a session file caught mid-write, with no newline yet
-      const file = path.join(tempDir("console-"), "session.jsonl");
+      const file = path.join(await tempDir("console-"), "session.jsonl");
       const record = JSON.stringify(assistant("split"));
-      fs.writeFileSync(file, record.slice(0, 12), "utf-8");
+      await fs.promises.writeFile(file, record.slice(0, 12), "utf-8");
       const tail: SessionTail = new SessionTail(file);
       expect(tail.read()).toEqual([]);
 
       // Given the rest of the line, and its newline, written
-      fs.appendFileSync(file, `${record.slice(12)}\n`, "utf-8");
+      await fs.promises.appendFile(file, `${record.slice(12)}\n`, "utf-8");
 
       // When the file is read
       const entries = tail.read();
@@ -123,32 +129,38 @@ describe("Feature: tailing the session an agent is writing", () => {
     },
   );
 
-  testInTempDirs("a session file that is not there yet reads as empty", () => {
-    // Given a session path the agent has not written to yet
-    const file = path.join(tempDir("console-"), "nothing.jsonl");
+  testInTempDirs(
+    "a session file that is not there yet reads as empty",
+    async () => {
+      // Given a session path the agent has not written to yet
+      const file = path.join(await tempDir("console-"), "nothing.jsonl");
 
-    // When the file is read
-    const tail: SessionTail = new SessionTail(file);
+      // When the file is read
+      const tail: SessionTail = new SessionTail(file);
 
-    // Then it reads as an empty transcript rather than failing the frame
-    expect(tail.read()).toEqual([]);
-  });
+      // Then it reads as an empty transcript rather than failing the frame
+      expect(tail.read()).toEqual([]);
+    },
+  );
 });
 
 describe("Feature: the sessions the console is following", () => {
-  testInTempDirs("a session has no rate until its file has been read", () => {
-    // Given a session file the console has never read
-    const file = path.join(tempDir("console-"), "session.jsonl");
-    write(file, [assistant("hi")]);
-    const sessions: Sessions = new Sessions();
-    expect(sessions.rate(file, 5000)).toBeNull();
+  testInTempDirs(
+    "a session has no rate until its file has been read",
+    async () => {
+      // Given a session file the console has never read
+      const file = path.join(await tempDir("console-"), "session.jsonl");
+      await write(file, [assistant("hi")]);
+      const sessions: Sessions = new Sessions();
+      expect(sessions.rate(file, 5000)).toBeNull();
 
-    // When the console reads the session
-    sessions.entries(file);
+      // When the console reads the session
+      sessions.entries(file);
 
-    // Then the rate is measured from the samples that read left behind
-    expect(sessions.rate(file, 5000)).toBe(0.4);
-  });
+      // Then the rate is measured from the samples that read left behind
+      expect(sessions.rate(file, 5000)).toBe(0.4);
+    },
+  );
 
   testInTempDirs("a slot with no session at all reads as empty", () => {
     // Given an idle slot, which names no session
@@ -162,10 +174,10 @@ describe("Feature: the sessions the console is following", () => {
     expect(sessions.rate(null, 5000)).toBeNull();
   });
 
-  testInTempDirs("a session no slot names any more is forgotten", () => {
+  testInTempDirs("a session no slot names any more is forgotten", async () => {
     // Given a session the console has read and measured
-    const file = path.join(tempDir("console-"), "session.jsonl");
-    write(file, [assistant("hi")]);
+    const file = path.join(await tempDir("console-"), "session.jsonl");
+    await write(file, [assistant("hi")]);
     const sessions: Sessions = new Sessions();
     sessions.entries(file);
 
@@ -182,61 +194,70 @@ describe("Feature: the command channel between console and server", () => {
     return new Runtime(path.join(root, "repo"), root);
   }
 
-  testInTempDirs("a command the console wrote is taken exactly once", () => {
-    // Given a console that has written a command for the server
-    const runtime = runtimeIn(tempDir("console-"));
-    expect(writeCommand(runtime, { command: "scheduler", enabled: true })).toBe(
-      true,
-    );
+  testInTempDirs(
+    "a command the console wrote is taken exactly once",
+    async () => {
+      // Given a console that has written a command for the server
+      const runtime = runtimeIn(await tempDir("console-"));
+      expect(
+        writeCommand(runtime, { command: "scheduler", enabled: true }),
+      ).toBe(true);
 
-    // When the server takes the command twice
-    const taken = [takeCommand(runtime), takeCommand(runtime)];
+      // When the server takes the command twice
+      const taken = [takeCommand(runtime), takeCommand(runtime)];
 
-    // Then it arrives once, and is gone the second time
-    expect(taken).toEqual([{ command: "scheduler", enabled: true }, null]);
-  });
+      // Then it arrives once, and is gone the second time
+      expect(taken).toEqual([{ command: "scheduler", enabled: true }, null]);
+    },
+  );
 
-  testInTempDirs("a command nobody has taken yet is not written over", () => {
-    // Given a command already waiting for the server to take it
-    const runtime = runtimeIn(tempDir("console-"));
-    writeCommand(runtime, { command: "scheduler", enabled: true });
+  testInTempDirs(
+    "a command nobody has taken yet is not written over",
+    async () => {
+      // Given a command already waiting for the server to take it
+      const runtime = runtimeIn(await tempDir("console-"));
+      writeCommand(runtime, { command: "scheduler", enabled: true });
 
-    // When the console tries to write a second command
-    const written = writeCommand(runtime, {
-      command: "agent",
-      agent: "pi-fake-fake",
-      enabled: false,
-    });
+      // When the console tries to write a second command
+      const written = writeCommand(runtime, {
+        command: "agent",
+        agent: "pi-fake-fake",
+        enabled: false,
+      });
 
-    // Then it is refused, and the waiting command survives
-    expect(written).toBe(false);
-    expect(takeCommand(runtime)).toEqual({
-      command: "scheduler",
-      enabled: true,
-    });
-  });
+      // Then it is refused, and the waiting command survives
+      expect(written).toBe(false);
+      expect(takeCommand(runtime)).toEqual({
+        command: "scheduler",
+        enabled: true,
+      });
+    },
+  );
 
   testInTempDirs(
     "a command that is not one the server knows is dropped",
-    () => {
+    async () => {
       // Given a command file naming something the server cannot do
-      const runtime = runtimeIn(tempDir("console-"));
-      fs.writeFileSync(runtime.consoleCommand, `{ "command": "explode" }`);
+      const runtime = runtimeIn(await tempDir("console-"));
+      await fs.promises.writeFile(
+        runtime.consoleCommand,
+        `{ "command": "explode" }`,
+      );
 
       // When the server takes it
       const taken = takeCommand(runtime);
 
       // Then nothing is applied, and the file is cleared rather than retried
       expect(taken).toBeNull();
-      expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
+      expect(await fs.promises.exists(runtime.consoleCommand)).toBe(false);
     },
   );
 
   testInTempDirs(
     "an abort command survives the round trip to the server",
-    () => {
+    async () => {
       // Given a console that has clicked the abort button on a slot
-      const runtime = runtimeIn(tempDir("console-"));
+      const runtime = runtimeIn(await tempDir("console-"));
       writeCommand(runtime, {
         command: "slot_abort",
         slot: "pi-fake-fake-1",
@@ -253,24 +274,27 @@ describe("Feature: the command channel between console and server", () => {
     },
   );
 
-  testInTempDirs("an abort command naming no slot is dropped", () => {
+  testInTempDirs("an abort command naming no slot is dropped", async () => {
     // Given a command file asking for an abort without saying of what
-    const runtime = runtimeIn(tempDir("console-"));
-    fs.writeFileSync(runtime.consoleCommand, `{ "command": "slot_abort" }`);
+    const runtime = runtimeIn(await tempDir("console-"));
+    await fs.promises.writeFile(
+      runtime.consoleCommand,
+      `{ "command": "slot_abort" }`,
+    );
 
     // When the server takes it
     const taken = takeCommand(runtime);
 
     // Then nothing is applied, and the file is cleared rather than retried
     expect(taken).toBeNull();
-    expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
+    expect(await fs.promises.exists(runtime.consoleCommand)).toBe(false);
   });
 
   testInTempDirs(
     "a watching server is handed the command as it is written",
     async () => {
       // Given a server watching its runtime directory for commands
-      const runtime = runtimeIn(tempDir("console-"));
+      const runtime = runtimeIn(await tempDir("console-"));
       const taken: Command[] = [];
       const watcher = watchCommands(runtime, (command) => {
         taken.push(command);
@@ -283,7 +307,7 @@ describe("Feature: the command channel between console and server", () => {
       await eventually(() => taken.length > 0, "handed the command over", 100);
       watcher.close();
       expect(taken).toEqual([{ command: "scheduler", enabled: true }]);
-      expect(fs.existsSync(runtime.consoleCommand)).toBe(false);
+      expect(await fs.promises.exists(runtime.consoleCommand)).toBe(false);
     },
   );
 });
@@ -306,51 +330,60 @@ describe("Feature: reading the views the server publishes", () => {
     return runtime;
   }
 
-  testInTempDirs("the four views the console draws are read together", () => {
-    // Given a runtime directory the server has published its views into
-    const runtime = seed(tempDir("console-"));
+  testInTempDirs(
+    "the four views the console draws are read together",
+    async () => {
+      // Given a runtime directory the server has published its views into
+      const runtime = seed(await tempDir("console-"));
 
-    // When the console reads them
-    const view = readView(runtime);
+      // When the console reads them
+      const view = readView(runtime);
 
-    // Then it has the agents, the tasks, the checks, the queue and the switch
-    expect(at(view.slots, 0).name).toBe(SLOTS[0].name);
-    expect(at(view.tasks, 0).id).toBe("000123");
-    expect(view.checks).toEqual([]);
-    expect(at(view.queue, 0).task_id).toBe("000123");
-    expect(view.scheduling).toBe(true);
-  });
+      // Then it has the agents, the tasks, the checks, the queue and the switch
+      expect(at(view.slots, 0).name).toBe(SLOTS[0].name);
+      expect(at(view.tasks, 0).id).toBe("000123");
+      expect(view.checks).toEqual([]);
+      expect(at(view.queue, 0).task_id).toBe("000123");
+      expect(view.scheduling).toBe(true);
+    },
+  );
 
-  testInTempDirs("a queue view without the scheduler flag is refused", () => {
-    // Given a queue view written without the flag the switch is drawn from
-    const runtime = seed(tempDir("console-"));
-    writeAtomic(runtime.queueView, viewJson(1, "queue", []));
+  testInTempDirs(
+    "a queue view without the scheduler flag is refused",
+    async () => {
+      // Given a queue view written without the flag the switch is drawn from
+      const runtime = seed(await tempDir("console-"));
+      writeAtomic(runtime.queueView, viewJson(1, "queue", []));
 
-    // When the console reads the views
-    const attempt = () => readView(runtime);
+      // When the console reads the views
+      const attempt = () => readView(runtime);
 
-    // Then it says what is missing rather than drawing a switch it cannot trust
-    expect(attempt).toThrow(/Invalid queue view in .*queue\.json/);
-    expect(attempt).toThrow(/scheduling: /);
-  });
+      // Then it says what is missing rather than drawing a switch it cannot trust
+      expect(attempt).toThrow(/Invalid queue view in .*queue\.json/);
+      expect(attempt).toThrow(/scheduling: /);
+    },
+  );
 
-  testInTempDirs("a runtime directory with no views at all is refused", () => {
-    // Given a runtime directory no server has ever written to
-    const runtime: Runtime = new Runtime(
-      path.join(tempDir("console-"), "repo"),
-      tempDir("console-"),
-    );
+  testInTempDirs(
+    "a runtime directory with no views at all is refused",
+    async () => {
+      // Given a runtime directory no server has ever written to
+      const runtime: Runtime = new Runtime(
+        path.join(await tempDir("console-"), "repo"),
+        await tempDir("console-"),
+      );
 
-    // When the console reads the views
-    const attempt = () => readView(runtime);
+      // When the console reads the views
+      const attempt = () => readView(runtime);
 
-    // Then it says there is no server here, rather than drawing an empty screen
-    expect(attempt).toThrow(/no server state/);
-  });
+      // Then it says there is no server here, rather than drawing an empty screen
+      expect(attempt).toThrow(/no server state/);
+    },
+  );
 
-  testInTempDirs("a view written without its rows is refused", () => {
+  testInTempDirs("a view written without its rows is refused", async () => {
     // Given a tasks view whose rows are missing
-    const runtime = seed(tempDir("console-"));
+    const runtime = seed(await tempDir("console-"));
     writeAtomic(runtime.tasksView, `${JSON.stringify({ at: "now" })}\n`);
 
     // When the console reads the views
@@ -361,64 +394,70 @@ describe("Feature: reading the views the server publishes", () => {
     expect(attempt).toThrow(/tasks: .*expected array/);
   });
 
-  testInTempDirs("a console with no views to read draws the failure", () => {
-    // Given a runtime directory no server has ever written to
-    const runtime: Runtime = new Runtime(
-      path.join(tempDir("console-"), "repo"),
-      tempDir("console-"),
-    );
+  testInTempDirs(
+    "a console with no views to read draws the failure",
+    async () => {
+      // Given a runtime directory no server has ever written to
+      const runtime: Runtime = new Runtime(
+        path.join(await tempDir("console-"), "repo"),
+        await tempDir("console-"),
+      );
 
-    // When a frame is drawn from it
-    const { lines } = frameOrError(runtime, new Sessions(), layoutOf());
+      // When a frame is drawn from it
+      const { lines } = frameOrError(runtime, new Sessions(), layoutOf());
 
-    // Then the screen says the console cannot draw, and why
-    expect(lines.join("\n")).toContain("the console cannot draw");
-    expect(lines.join("\n")).toContain("no server state");
-  });
+      // Then the screen says the console cannot draw, and why
+      expect(lines.join("\n")).toContain("the console cannot draw");
+      expect(lines.join("\n")).toContain("no server state");
+    },
+  );
 
-  testInTempDirs("a frame joins the views to the sessions they name", () => {
-    // Given published views naming a session file the agent has written to
-    const root = tempDir("console-");
-    const runtime: Runtime = new Runtime(path.join(root, "repo"), root);
-    const session = path.join(root, "session.jsonl");
-    write(session, [assistant("hi")]);
-    writeAtomic(
-      runtime.slotsView,
-      viewJson(1, "slots", [busyRow({ session })], {
-        agents_file: AGENTS_FILE,
-      }),
-    );
-    writeAtomic(runtime.tasksView, viewJson(1, "tasks", [taskRowOf()]));
-    writeAtomic(runtime.checksView, viewJson(1, "checks", []));
-    writeAtomic(
-      runtime.queueView,
-      viewJson(1, "queue", [candidateOf({ task_id: "000456" })], {
-        scheduling: true,
-      }),
-    );
+  testInTempDirs(
+    "a frame joins the views to the sessions they name",
+    async () => {
+      // Given published views naming a session file the agent has written to
+      const root = await tempDir("console-");
+      const runtime: Runtime = new Runtime(path.join(root, "repo"), root);
+      const session = path.join(root, "session.jsonl");
+      await write(session, [assistant("hi")]);
+      writeAtomic(
+        runtime.slotsView,
+        viewJson(1, "slots", [busyRow({ session })], {
+          agents_file: AGENTS_FILE,
+        }),
+      );
+      writeAtomic(runtime.tasksView, viewJson(1, "tasks", [taskRowOf()]));
+      writeAtomic(runtime.checksView, viewJson(1, "checks", []));
+      writeAtomic(
+        runtime.queueView,
+        viewJson(1, "queue", [candidateOf({ task_id: "000456" })], {
+          scheduling: true,
+        }),
+      );
 
-    // When a frame is drawn from them
-    const { lines, hits } = frame(runtime, new Sessions(), layoutOf());
+      // When a frame is drawn from them
+      const { lines, hits } = frame(runtime, new Sessions(), layoutOf());
 
-    // Then the pane carries the task, the queue line and the agent's transcript
-    const text = lines.join("\n");
-    expect(text).toContain("task 000123");
-    expect(text).toContain("hi");
-    expect(lines[0]).toContain("000456");
+      // Then the pane carries the task, the queue line and the agent's transcript
+      const text = lines.join("\n");
+      expect(text).toContain("task 000123");
+      expect(text).toContain("hi");
+      expect(lines[0]).toContain("000456");
 
-    // Then every control the frame drew is a target the console can click
-    expect(hits.map((hit) => hit.command.command)).toEqual([
-      "scheduler",
-      "agent",
-      "slot_abort",
-    ]);
-  });
+      // Then every control the frame drew is a target the console can click
+      expect(hits.map((hit) => hit.command.command)).toEqual([
+        "scheduler",
+        "agent",
+        "slot_abort",
+      ]);
+    },
+  );
 
   testInTempDirs(
     "a pool of nothing but disabled agents is never hidden",
-    () => {
+    async () => {
       // Given views where every agent in the pool has been turned off
-      const runtime = seed(tempDir("console-"));
+      const runtime = seed(await tempDir("console-"));
       writeAtomic(
         runtime.slotsView,
         viewJson(

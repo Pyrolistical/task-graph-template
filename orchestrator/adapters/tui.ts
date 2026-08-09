@@ -259,7 +259,7 @@ export function frameOrError(
   }
 }
 
-export async function main(repo: string): Promise<void> {
+export function main(repo: string): void {
   const runtime: Runtime = new Runtime(repo);
   if (!fs.existsSync(runtime.slotsView)) {
     throw new Error(`console: no server state at ${runtime.root}`);

@@ -55,8 +55,8 @@ describe("Feature: where a project's task graph is found", () => {
   testInTempDirs(
     "with no tasks dir the server resolves ~/task-graph/<key> and seeds the graph",
     async () => {
-      const fixture = makeFixture();
-      const root = tempDir("task-graph-root-");
+      const fixture = await makeFixture();
+      const root = await tempDir("task-graph-root-");
 
       await withTasksRoot(root, async () => {
         // Given a project that has never had a task graph
@@ -75,9 +75,15 @@ describe("Feature: where a project's task graph is found", () => {
         expect(server.config.promptDirs.overrides).toBe(
           path.join(tasksDir, "prompts"),
         );
-        expect(fs.existsSync(path.join(tasksDir, "agents.json"))).toBe(true);
-        expect(fs.existsSync(path.join(tasksDir, "template.md"))).toBe(false);
-        expect(fs.readFileSync(nextTaskIdPath(tasksDir), "utf-8")).toBe("1\n");
+        expect(
+          await fs.promises.exists(path.join(tasksDir, "agents.json")),
+        ).toBe(true);
+        expect(
+          await fs.promises.exists(path.join(tasksDir, "template.md")),
+        ).toBe(false);
+        expect(
+          await fs.promises.readFile(nextTaskIdPath(tasksDir), "utf-8"),
+        ).toBe("1\n");
 
         server.shutdown();
       });
@@ -89,7 +95,7 @@ describe("Feature: where a project's task graph is found", () => {
     "with no base named the server lands work on the branch the repo is on",
     async () => {
       // Given a project checked out on a branch of its own naming
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       git.gitOrThrow(fixture.repo, ["checkout", "-q", "-b", "trunk"]);
 
       // When a server is started against it without being told a base
@@ -116,10 +122,12 @@ describe("Feature: a task that goes all the way through", () => {
   testInTempDirs(
     "work, checks, agent review and manager review close the task",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Add a greeting", ["test -f hello.txt"]);
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Add a greeting", [
+        "test -f hello.txt",
+      ]);
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -142,10 +150,16 @@ describe("Feature: a task that goes all the way through", () => {
       // Then the task closes and nothing of its workspace is left behind
       expect(merged.to).toBe("CLOSED");
       expect(server.tasks().has(id)).toBe(false);
-      expect(fs.existsSync(closedTaskPath(fixture.tasksDir, id))).toBe(true);
-      expect(fs.existsSync(path.join(fixture.repo, "hello.txt"))).toBe(true);
+      expect(
+        await fs.promises.exists(closedTaskPath(fixture.tasksDir, id)),
+      ).toBe(true);
+      expect(
+        await fs.promises.exists(path.join(fixture.repo, "hello.txt")),
+      ).toBe(true);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).worktree(id))).toBe(
+        false,
+      );
 
       server.shutdown();
     },
@@ -157,10 +171,10 @@ describe("Feature: measuring how fast an agent writes", () => {
   testInTempDirs(
     "the output tokens of every message land in the pool's rate table",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Add a greeting", ["true"]);
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Add a greeting", ["true"]);
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -194,12 +208,12 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a plan is written, reviewed and accepted before the work starts",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting", [
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting", [
         "test -f hello.txt",
       ]);
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -229,7 +243,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then the design and the plan are both in the task body
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -237,13 +251,13 @@ describe("Feature: the design and planning phases", () => {
       expect(body).toContain("## Todos");
       expect(body).toContain("1. write hello.txt");
       expect(body).toContain("2. run the check");
-      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(true);
-      expect(fs.existsSync(pathsOf(server).sessionDir(id, "designer"))).toBe(
-        true,
-      );
-      expect(fs.existsSync(pathsOf(server).sessionDir(id, "planner"))).toBe(
-        true,
-      );
+      expect(await fs.promises.exists(pathsOf(server).worktree(id))).toBe(true);
+      expect(
+        await fs.promises.exists(pathsOf(server).sessionDir(id, "designer")),
+      ).toBe(true);
+      expect(
+        await fs.promises.exists(pathsOf(server).sessionDir(id, "planner")),
+      ).toBe(true);
 
       // Then it went through each phase and its review in order
       const submits = transitionsOf(server)
@@ -265,10 +279,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "design review findings go back to the designer, verbatim, until the design passes",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [
             { design: "structure A", submit: true },
@@ -291,12 +305,12 @@ describe("Feature: the design and planning phases", () => {
 
       // Then the designer was told what the reviewer found, in its own words
       const designer = pathsOf(server).sessionDir(id, "designer");
-      expect(promptsTo(designer).join("\n")).toContain(
+      expect((await promptsTo(designer)).join("\n")).toContain(
         "the design misses the farewell",
       );
 
       // Then only the design that was accepted is what the task carries
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -312,10 +326,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "design review findings reach the designer without touching the task body",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [
             { design: "structure A", submit: true },
@@ -336,30 +350,34 @@ describe("Feature: the design and planning phases", () => {
       await settleTo(server, id, "PLAN_REVIEW");
 
       // Then the designer read the findings in its next prompt
-      expect(promptsTo(pathsOf(server).sessionDir(id, "designer"))[1]).toBe(
+      expect(
+        (await promptsTo(pathsOf(server).sessionDir(id, "designer")))[1],
+      ).toBe(
         promptsOf(server).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
       );
 
       // Then the findings are nowhere in the task body or the assignment
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("structure B");
       expect(body).not.toContain("the design misses the farewell");
 
-      const assignment = fs.readFileSync(
+      const assignment = await fs.promises.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
       expect(assignment).not.toContain("the design misses the farewell");
 
-      expect(fs.existsSync(pathsOf(server).messageFile(id, "DESIGN"))).toBe(
+      expect(
+        await fs.promises.exists(pathsOf(server).messageFile(id, "DESIGN")),
+      ).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).findings(id))).toBe(
         false,
       );
-      expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
 
       server.shutdown();
       await server.drain();
@@ -370,10 +388,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a designer that compacts after a rejection is steered with the findings again",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [
             { design: "structure A", submit: true },
@@ -394,7 +412,9 @@ describe("Feature: the design and planning phases", () => {
       await settleTo(server, id, "PLAN");
 
       // Then the steer it was given still carried the findings to answer
-      expect(steersTo(pathsOf(server).sessionDir(id, "designer"))).toEqual([
+      expect(
+        await steersTo(pathsOf(server).sessionDir(id, "designer")),
+      ).toEqual([
         promptsOf(server).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
@@ -409,10 +429,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a designer that keeps submitting an empty design is held",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ submit: true }],
         },
@@ -431,7 +451,7 @@ describe("Feature: the design and planning phases", () => {
       );
       expect(task.state).toBe("HELD_DESIGN");
       expect(
-        promptsTo(pathsOf(server).sessionDir(id, "designer")),
+        await promptsTo(pathsOf(server).sessionDir(id, "designer")),
       ).toHaveLength(ISSUES["missing-design"].attempts + 1);
 
       server.shutdown();
@@ -442,10 +462,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a design reviewer that writes to the worktree is sent back",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [
@@ -465,7 +485,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then it was sent back to clean up before its review was accepted
       expect(
-        promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+        await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
       ).toHaveLength(3);
 
       server.shutdown();
@@ -477,10 +497,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "plan review findings go back to the planner, verbatim, until the plan passes",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -503,12 +523,12 @@ describe("Feature: the design and planning phases", () => {
 
       // Then the planner was told what the reviewer found, in its own words
       const planner = pathsOf(server).sessionDir(id, "planner");
-      expect(promptsTo(planner).join("\n")).toContain(
+      expect((await promptsTo(planner)).join("\n")).toContain(
         "no todo covers the check",
       );
 
       // Then only the plan that was accepted is what the task carries
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -524,10 +544,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "an empty plan is asked for again, and a persistent one is held",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -546,9 +566,9 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was asked once for the plan and never held
-      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
-        2,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+      ).toHaveLength(2);
 
       server.shutdown();
       await server.drain();
@@ -559,10 +579,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a planner that keeps submitting an empty plan is held",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -582,9 +602,9 @@ describe("Feature: the design and planning phases", () => {
         "the planner submitted without appending a todo list",
       );
       expect(task.state).toBe("HELD_PLAN");
-      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
-        ISSUES["missing-todos"].attempts + 1,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+      ).toHaveLength(ISSUES["missing-todos"].attempts + 1);
 
       server.shutdown();
     },
@@ -594,10 +614,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a planner that writes to the worktree is sent back, then held",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -620,9 +640,9 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "WORK");
 
       // Then it was sent back to clean up before its plan was accepted
-      expect(promptsTo(pathsOf(server).sessionDir(id, "planner"))).toHaveLength(
-        2,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+      ).toHaveLength(2);
 
       server.shutdown();
       await server.drain();
@@ -633,10 +653,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a planner that commits to the branch is sent back, then held",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -671,10 +691,10 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a plan reviewer that writes to the worktree is sent back",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
 
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -694,7 +714,7 @@ describe("Feature: the design and planning phases", () => {
 
       // Then it was sent back to clean up before its review was accepted
       expect(
-        promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+        await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
       ).toHaveLength(3);
 
       server.shutdown();
@@ -706,9 +726,9 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a blocked designer holds the task, and resume sends it back to DESIGN",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ blocked: "the acceptance criteria are empty" }],
         },
@@ -735,9 +755,9 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a blocked planner holds the task, and resume sends it back to PLAN",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -766,9 +786,9 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a blocked plan reviewer holds the task, and resume sends it back to PLAN",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [{ submit: true }],
@@ -798,9 +818,9 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "the manager resolves a held task by writing the body and resuming",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: { WORK: [{ blocked: "the criteria are unclear" }] },
       });
 
@@ -826,11 +846,11 @@ describe("Feature: the design and planning phases", () => {
     "design and planning rank below work, reviews above their fresh states",
     async () => {
       // Given one task in each of the four states the scheduler ranks
-      const fixture = makeFixture();
-      readyTask(fixture, "Ready for work");
-      const reviewing = unplannedTask(fixture, "Plan awaiting review");
-      const planFresh = unplannedTask(fixture, "Ready to be planned");
-      unplannedTask(fixture, "Not yet designed");
+      const fixture = await makeFixture();
+      await readyTask(fixture, "Ready for work");
+      const reviewing = await unplannedTask(fixture, "Plan awaiting review");
+      const planFresh = await unplannedTask(fixture, "Ready to be planned");
+      await unplannedTask(fixture, "Not yet designed");
 
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(false);
@@ -872,8 +892,8 @@ describe("Feature: the design and planning phases", () => {
   testInTempDirs(
     "a task still queued in PLAN can be held and aborted",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "The wrong shape");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "The wrong shape");
 
       // Given a task queued for design that nothing has started
       const server = await serverFor(fixture);
@@ -903,11 +923,11 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "the prompts and templates come from the orchestrator's own directory, not the driven repo",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      fs.rmSync(fixture.orchestratorDir, { recursive: true });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await fs.promises.rm(fixture.orchestratorDir, { recursive: true });
 
-      setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a driven project with no orchestrator directory of its own
       const server = await startServer({
@@ -929,7 +949,9 @@ describe("Feature: handing a task to an agent", () => {
       expect(server.config.promptDirs.orchestrator).toBe(
         path.join(import.meta.dir, "..", "prompts"),
       );
-      expect(fs.existsSync(pathsOf(server).assignment(id))).toBe(true);
+      expect(await fs.promises.exists(pathsOf(server).assignment(id))).toBe(
+        true,
+      );
 
       server.shutdown();
     },
@@ -939,16 +961,16 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "the driven repo's own orchestrator/ overrides the prompts and templates it names",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setBody(fixture, id, "\n# The body of this task\n");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setBody(fixture, id, "\n# The body of this task\n");
 
-      writeOverride(
+      await writeOverride(
         fixture,
         "prompts/WORK.md",
         "You are this project's implementer.\n",
       );
-      setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a project that carries its own copy of the work prompt
       const server = await serverFor(fixture);
@@ -961,10 +983,10 @@ describe("Feature: handing a task to an agent", () => {
 
       // Then the agent read the project's words, over the task's own body
       const sessionDir = pathsOf(server).sessionDir(id, "worker");
-      expect(promptsTo(sessionDir)[0]).toBe(
+      expect((await promptsTo(sessionDir))[0]).toBe(
         "You are this project's implementer.\n",
       );
-      const assignment = fs.readFileSync(
+      const assignment = await fs.promises.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
@@ -979,15 +1001,22 @@ describe("Feature: handing a task to an agent", () => {
     "startup logs the absolute path of every cached prompt and template",
     async () => {
       // Given a project that overrides one of the prompts
-      const fixture = makeFixture();
-      readyTask(fixture, "Do a thing");
-      writeOverride(fixture, "prompts/WORK.md", "Start on ../ASSIGNMENT.md.\n");
+      const fixture = await makeFixture();
+      await readyTask(fixture, "Do a thing");
+      await writeOverride(
+        fixture,
+        "prompts/WORK.md",
+        "Start on ../ASSIGNMENT.md.\n",
+      );
 
       // When the server starts against it
       const server = await serverFor(fixture);
 
       // Then the override is named in the log, and the file it replaced is not
-      const log = fs.readFileSync(pathsOf(server).serverLog, "utf-8");
+      const log = await fs.promises.readFile(
+        pathsOf(server).serverLog,
+        "utf-8",
+      );
       expect(log).toContain(
         `cached ${path.join(fixture.overridesDir, "prompts", "WORK.md")}`,
       );
@@ -1003,16 +1032,16 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "an override of one file leaves every other prompt as the orchestrator ships it",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
 
-      writeOverride(
+      await writeOverride(
         fixture,
         "prompts/DESIGN.md",
         "Start on ../ASSIGNMENT.md.\n",
       );
 
-      setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a project that overrides the design prompt but not the work one
       const server = await serverFor(fixture);
@@ -1025,8 +1054,8 @@ describe("Feature: handing a task to an agent", () => {
 
       // Then the agent read the orchestrator's own work prompt, untouched
       const sessionDir = pathsOf(server).sessionDir(id, "worker");
-      expect(promptsTo(sessionDir)[0]).toBe(
-        fs.readFileSync(
+      expect((await promptsTo(sessionDir))[0]).toBe(
+        await fs.promises.readFile(
           path.join(fixture.orchestratorDir, "prompts", "WORK.md"),
           "utf-8",
         ),
@@ -1040,11 +1069,11 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "a dispatched task gets a worktree, a branch and an ASSIGNMENT.md beside it",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["true"]);
-      setBody(fixture, id, "\n# The body of this task\n");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["true"]);
+      await setBody(fixture, id, "\n# The body of this task\n");
 
-      setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a task with a goal written into its body
       const server = await serverFor(fixture);
@@ -1058,12 +1087,12 @@ describe("Feature: handing a task to an agent", () => {
       // Then it has a worktree, a branch, and its assignment beside the worktree
       const worktree = pathsOf(server).worktree(id);
       const assignment = pathsOf(server).assignment(id);
-      expect(fs.existsSync(worktree)).toBe(true);
-      expect(fs.existsSync(assignment)).toBe(true);
+      expect(await fs.promises.exists(worktree)).toBe(true);
+      expect(await fs.promises.exists(assignment)).toBe(true);
       expect(assignment.startsWith(worktree)).toBe(false);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(true);
 
-      const body = fs.readFileSync(assignment, "utf-8");
+      const body = await fs.promises.readFile(assignment, "utf-8");
       expect(body).toContain("# The body of this task");
 
       server.shutdown();
@@ -1074,11 +1103,11 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "the assignment is handed over with the empty section the agent is to write",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Do a thing");
-      setBody(fixture, id, "\n# The body of this task\n");
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Do a thing");
+      await setBody(fixture, id, "\n# The body of this task\n");
 
-      setPlan(fixture, { [id]: { DESIGN: [{ submit: true }] } });
+      await setPlan(fixture, { [id]: { DESIGN: [{ submit: true }] } });
 
       // Given a task about to be dispatched into the design stage
       const server = await serverFor(fixture);
@@ -1090,9 +1119,9 @@ describe("Feature: handing a task to an agent", () => {
       await settle(server, 1);
 
       // Then the assignment is the body plus the empty heading to fill in
-      expect(fs.readFileSync(pathsOf(server).assignment(id), "utf-8")).toBe(
-        "\n\n# The body of this task\n\n## Design\n",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).assignment(id), "utf-8"),
+      ).toBe("\n\n# The body of this task\n\n## Design\n");
 
       server.shutdown();
     },
@@ -1102,9 +1131,9 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "the claim records the agent, its pid and the session it opened",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -1135,7 +1164,7 @@ describe("Feature: handing a task to an agent", () => {
       expect(workspace.slot).toBe("pi-fake-fake-1");
       expect(workspace.branch).toBe(branchName(id));
       expect(workspace.worktree).toBe(pathsOf(server).worktree(id));
-      expect(fs.existsSync(sessionOf(server, id))).toBe(true);
+      expect(await fs.promises.exists(sessionOf(server, id))).toBe(true);
 
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
@@ -1151,9 +1180,12 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "a workspace claimed under an older branch prefix keeps the branch it recorded",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task from before the prefix changed");
-      setPlan(fixture, { [id]: { WORK_REVIEW: [{ submit: true }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(
+        fixture,
+        "A task from before the prefix changed",
+      );
+      await setPlan(fixture, { [id]: { WORK_REVIEW: [{ submit: true }] } });
 
       // Given work committed on a branch named by an older version of the server
       const server = await serverFor(fixture);
@@ -1161,7 +1193,7 @@ describe("Feature: handing a task to an agent", () => {
       const worktree = pathsOf(server).worktree(id);
       pathsOf(server).prepare(id);
       git.createWorkspace(fixture.repo, legacy, worktree, "master");
-      fs.writeFileSync(path.join(worktree, "a.txt"), "a\n");
+      await fs.promises.writeFile(path.join(worktree, "a.txt"), "a\n");
       git.gitOrThrow(worktree, ["add", "-A"]);
       git.gitOrThrow(worktree, ["commit", "-q", "-m", "work from before"]);
       git.harvest(fixture.repo, worktree, legacy);
@@ -1189,7 +1221,9 @@ describe("Feature: handing a task to an agent", () => {
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
 
       expect((await server.submit(id)).to).toBe("CLOSED");
-      expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
+      expect(await fs.promises.exists(path.join(fixture.repo, "a.txt"))).toBe(
+        true,
+      );
       expect(git.branchExists(fixture.repo, legacy)).toBe(false);
 
       server.shutdown();
@@ -1200,9 +1234,9 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "two ticks in flight at once dispatch a task to one slot, not two",
     async () => {
-      const fixture = makeFixture(2);
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture(2);
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [{ busy_ms: 200, submit: true, notes: "did the work" }],
         },
@@ -1223,9 +1257,9 @@ describe("Feature: handing a task to an agent", () => {
       ).toHaveLength(1);
 
       await server.drain();
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).not.toContain(
-        "dispatch of",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).not.toContain("dispatch of");
 
       server.shutdown();
     },
@@ -1235,9 +1269,9 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "nothing is dispatched while the scheduler is stopped",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
 
       // Given a queued task and a server whose scheduler is stopped
       const server = await serverFor(fixture);
@@ -1257,9 +1291,9 @@ describe("Feature: handing a task to an agent", () => {
   testInTempDirs(
     "a paused scheduler still settles work already in flight",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -1295,9 +1329,9 @@ describe("Feature: landing work on the base branch", () => {
   testInTempDirs(
     "a branch that no longer rebases is an error back to the manager",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -1315,8 +1349,11 @@ describe("Feature: landing work on the base branch", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      fs.writeFileSync(path.join(fixture.repo, "shared.txt"), "from master\n");
-      commitGraph(fixture, "conflicting change on master");
+      await fs.promises.writeFile(
+        path.join(fixture.repo, "shared.txt"),
+        "from master\n",
+      );
+      await commitGraph(fixture, "conflicting change on master");
 
       // When the manager merges it
       const merging = server.submit(id);
@@ -1333,9 +1370,9 @@ describe("Feature: landing work on the base branch", () => {
   testInTempDirs(
     "a check that fails after the rebase is an error back to the manager",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["test -f wanted.txt"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["test -f wanted.txt"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -1353,7 +1390,9 @@ describe("Feature: landing work on the base branch", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      fs.rmSync(path.join(pathsOf(server).worktree(id), "wanted.txt"));
+      await fs.promises.rm(
+        path.join(pathsOf(server).worktree(id), "wanted.txt"),
+      );
       git.gitOrThrow(pathsOf(server).worktree(id), [
         "commit",
         "-qam",
@@ -1375,11 +1414,11 @@ describe("Feature: landing work on the base branch", () => {
   testInTempDirs(
     "the repo the work came from is read-only to everything the server spawns",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", [
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", [
         `echo x > ${path.join(fixture.repo, "poke")}`,
       ]);
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -1398,12 +1437,14 @@ describe("Feature: landing work on the base branch", () => {
       await dispatchOnce(server);
 
       // Then the write is refused, and the project is untouched
-      const queued = fs.readFileSync(
+      const queued = await fs.promises.readFile(
         pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");
-      expect(fs.existsSync(path.join(fixture.repo, "poke"))).toBe(false);
+      expect(await fs.promises.exists(path.join(fixture.repo, "poke"))).toBe(
+        false,
+      );
 
       expect(
         git.gitOrThrow(pathsOf(server).worktree(id), [

@@ -37,9 +37,11 @@ describe("Feature: running a task's checks", () => {
   testInTempDirs(
     "a failing check records the failure and sends the work back",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["echo boom >&2; exit 3"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", [
+        "echo boom >&2; exit 3",
+      ]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -60,7 +62,7 @@ describe("Feature: running a task's checks", () => {
       // Then the task goes back to work with the failure queued for the agent
       const task = taskOf(server, id);
       expect(task.state).toBe("WORK");
-      const queued = fs.readFileSync(
+      const queued = await fs.promises.readFile(
         pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
@@ -75,9 +77,13 @@ describe("Feature: running a task's checks", () => {
   testInTempDirs(
     "every failing check is recorded, not only the first",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["exit 1", "true", "exit 2"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", [
+        "exit 1",
+        "true",
+        "exit 2",
+      ]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -96,7 +102,7 @@ describe("Feature: running a task's checks", () => {
       await dispatchOnce(server);
 
       // Then the agent is told about both failures, not only the first
-      const queued = fs.readFileSync(
+      const queued = await fs.promises.readFile(
         pathsOf(server).messageFile(id, "WORK"),
         "utf-8",
       );
@@ -111,9 +117,9 @@ describe("Feature: running a task's checks", () => {
   testInTempDirs(
     "a passing check moves the task to the agent review",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["true", "test -d ."]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["true", "test -d ."]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -143,9 +149,11 @@ describe("Feature: running a task's checks", () => {
   testInTempDirs(
     "the whole output of a check is written where a person can read it",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["echo written-to-the-log"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", [
+        "echo written-to-the-log",
+      ]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -164,11 +172,13 @@ describe("Feature: running a task's checks", () => {
       server.setSchedulerEnabled(true);
 
       // When the work is done and the check runs against it
-      await until(server, () => fs.existsSync(pathsOf(server).checkLog(id, 0)));
+      await until(server, () =>
+        fs.promises.exists(pathsOf(server).checkLog(id, 0)),
+      );
 
       // Then the output is on disk in the task's own directory
       expect(
-        fs.readFileSync(pathsOf(server).checkLog(id, 0), "utf-8"),
+        await fs.promises.readFile(pathsOf(server).checkLog(id, 0), "utf-8"),
       ).toContain("written-to-the-log");
 
       server.shutdown();
@@ -181,9 +191,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
   testInTempDirs(
     "the same session is reopened, the assignment is untouched and the result is cleared",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -212,7 +222,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the assignment was never rotated, because the session was resumed
-      const history = fs.readdirSync(pathsOf(server).history(id));
+      const history = await fs.promises.readdir(pathsOf(server).history(id));
       expect(history).toHaveLength(0);
 
       // Then the check failed exactly once, so the second attempt passed
@@ -229,9 +239,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
   testInTempDirs(
     "the resume prompt carries every failing command into the session",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -257,7 +267,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await runOnce(server);
 
       // Then its second prompt names the command that failed and how it failed
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("`test -f fixed.txt` (exit 1)");
 
@@ -269,9 +279,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
   testInTempDirs(
     "a session opened under an older role directory is reopened where it lies",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -294,12 +304,12 @@ describe("Feature: sending a task back to the agent that did it", () => {
         "work",
       );
       const legacy = path.join(legacyDir, path.basename(opened));
-      fs.mkdirSync(legacyDir, { recursive: true });
-      fs.renameSync(opened, legacy);
+      await fs.promises.mkdir(legacyDir, { recursive: true });
+      await fs.promises.rename(opened, legacy);
       const taskFile = activeTaskPath(fixture.tasksDir, id);
-      fs.writeFileSync(
+      await fs.promises.writeFile(
         taskFile,
-        fs.readFileSync(taskFile, "utf-8").replace(opened, legacy),
+        (await fs.promises.readFile(taskFile, "utf-8")).replace(opened, legacy),
       );
 
       // Given a server with its scheduler enabled
@@ -325,9 +335,9 @@ describe("Feature: landing or abandoning finished work", () => {
   testInTempDirs(
     "merged tears the worktree and the branch down",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -351,9 +361,13 @@ describe("Feature: landing or abandoning finished work", () => {
 
       // Then the task closes, the work is on the base, and nothing is left over
       expect(result.to).toBe("CLOSED");
-      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).worktree(id))).toBe(
+        false,
+      );
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
+      expect(await fs.promises.exists(path.join(fixture.repo, "a.txt"))).toBe(
+        true,
+      );
     },
     30000,
   );
@@ -363,9 +377,9 @@ describe("Feature: landing or abandoning finished work", () => {
     server: Server;
     id: string;
   }> {
-    const fixture = makeFixture();
-    const id = readyTask(fixture, "A task");
-    setPlan(fixture, {
+    const fixture = await makeFixture();
+    const id = await readyTask(fixture, "A task");
+    await setPlan(fixture, {
       [id]: {
         WORK: [
           {
@@ -397,9 +411,13 @@ describe("Feature: landing or abandoning finished work", () => {
 
       // Then it closes, and the work it did is thrown away with the branch
       expect(result.to).toBe("CLOSED");
-      expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(false);
+      expect(await fs.promises.exists(path.join(fixture.repo, "a.txt"))).toBe(
+        false,
+      );
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(fs.existsSync(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).worktree(id))).toBe(
+        false,
+      );
     },
     30000,
   );
@@ -408,8 +426,8 @@ describe("Feature: landing or abandoning finished work", () => {
     "abort takes a task still queued in WORK, via HELD_WORK",
     async () => {
       // Given a task held before any agent ever started it
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task nobody should start");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task nobody should start");
       const server = await serverFor(fixture);
       server.transition(id, "hold", { reason: "abandoning" }, "manager");
 
@@ -426,8 +444,8 @@ describe("Feature: landing or abandoning finished work", () => {
   testInTempDirs(
     "abort refuses a task an agent is already working on",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task in flight");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task in flight");
       takeClaim(fixture.tasksDir, id, {
         slotName: "pi-fake-fake-1",
         pid: process.pid,
@@ -471,9 +489,9 @@ describe("Feature: landing or abandoning finished work", () => {
   testInTempDirs(
     "closing a task deletes its runtime directory",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -491,23 +509,27 @@ describe("Feature: landing or abandoning finished work", () => {
       server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
-      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(true);
+      expect(await fs.promises.exists(pathsOf(server).taskRoot(id))).toBe(true);
 
       // When the manager merges it
       await server.submit(id);
 
       // Then the runtime directory it worked in is removed with it
       expect(stateOf(server, id)).toBe("CLOSED");
-      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).taskRoot(id))).toBe(
+        false,
+      );
 
       for (let i = 0; i < 101; i++) {
-        const other = readyTask(fixture, `filler ${i}`);
+        const other = await readyTask(fixture, `filler ${i}`);
         server.claim(other, { slotName: "filler", pid: process.pid });
       }
       await server.writeViews();
 
       // Then it stays gone once it falls off the end of the recent list
-      expect(fs.existsSync(pathsOf(server).taskRoot(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).taskRoot(id))).toBe(
+        false,
+      );
       const view = readView(runtimeOf(fixture));
       expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },

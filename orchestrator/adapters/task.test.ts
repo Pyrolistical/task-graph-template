@@ -211,9 +211,9 @@ describe("Feature: splitting a task document", () => {
 
   testInTempDirs(
     "the shipped template carries every field the schema has",
-    () => {
+    async () => {
       // Given the template a new task is copied from
-      const template = fs.readFileSync(TEMPLATE_PATH, "utf-8");
+      const template = await fs.promises.readFile(TEMPLATE_PATH, "utf-8");
 
       // When its frontmatter is read
       const { raw } = parseDocument(template);
@@ -226,9 +226,11 @@ describe("Feature: splitting a task document", () => {
 
   testInTempDirs(
     "the shipped template leaves only the id and title to fill in",
-    () => {
+    async () => {
       // Given the template a new task is copied from
-      const { raw } = parseDocument(fs.readFileSync(TEMPLATE_PATH, "utf-8"));
+      const { raw } = parseDocument(
+        await fs.promises.readFile(TEMPLATE_PATH, "utf-8"),
+      );
 
       // When it is parsed as though it were a task
       const issues = issuesOf(raw);
@@ -594,16 +596,18 @@ describe("Feature: finding a dependency that can never be satisfied", () => {
 describe("Feature: creating a task", () => {
   testInTempDirs(
     "a new task is written with a quoted id and a fresh state",
-    () => {
+    async () => {
       // Given an empty task directory
-      const dir = makeTasksDir();
+      const dir = await makeTasksDir();
 
       // When a task is created in it
       const { id, filePath } = createTask(dir, ORCHESTRATOR_DIR, "First task");
 
       // Then it is the first id, quoted on disk and read back as a string
       expect(id).toBe("000001");
-      expect(fs.readFileSync(filePath, "utf-8")).toContain('id: "000001"');
+      expect(await fs.promises.readFile(filePath, "utf-8")).toContain(
+        'id: "000001"',
+      );
 
       // Then it starts as new, with the moment it entered that state
       const { meta } = readTaskFile(filePath);
@@ -615,9 +619,9 @@ describe("Feature: creating a task", () => {
 
   testInTempDirs(
     "a title carrying replacement patterns is stored verbatim",
-    () => {
+    async () => {
       // Given an empty task directory
-      const dir = makeTasksDir();
+      const dir = await makeTasksDir();
 
       // Given the title Fix $& and $` and $' handling, whose patterns a replacement would expand
       const title = "Fix $& and $` and $' handling";
@@ -632,25 +636,28 @@ describe("Feature: creating a task", () => {
     },
   );
 
-  testInTempDirs("a title carrying YAML punctuation is stored verbatim", () => {
+  testInTempDirs(
+    "a title carrying YAML punctuation is stored verbatim",
+    async () => {
+      // Given an empty task directory
+      const dir = await makeTasksDir();
+
+      // Given the title Add: colon, #hash and a "quote", whose punctuation YAML gives meaning to
+      const title = 'Add: colon, #hash and a "quote"';
+
+      // When a task is created with it
+      const created = createTask(dir, ORCHESTRATOR_DIR, title);
+
+      // Then it comes back exactly as it was typed
+      expect(readTaskFile(created.filePath).meta.title).toBe(
+        'Add: colon, #hash and a "quote"',
+      );
+    },
+  );
+
+  testInTempDirs("a task with an empty title is refused", async () => {
     // Given an empty task directory
-    const dir = makeTasksDir();
-
-    // Given the title Add: colon, #hash and a "quote", whose punctuation YAML gives meaning to
-    const title = 'Add: colon, #hash and a "quote"';
-
-    // When a task is created with it
-    const created = createTask(dir, ORCHESTRATOR_DIR, title);
-
-    // Then it comes back exactly as it was typed
-    expect(readTaskFile(created.filePath).meta.title).toBe(
-      'Add: colon, #hash and a "quote"',
-    );
-  });
-
-  testInTempDirs("a task with an empty title is refused", () => {
-    // Given an empty task directory
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
 
     // Given a title with no characters in it at all
     const title = "";
@@ -662,9 +669,9 @@ describe("Feature: creating a task", () => {
     expect(attempt).toThrow(/title is required/);
   });
 
-  testInTempDirs("a task titled with only spaces is refused", () => {
+  testInTempDirs("a task titled with only spaces is refused", async () => {
     // Given an empty task directory
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
 
     // Given a title of three spaces, with nothing in it a person could read
     const title = "   ";
@@ -676,21 +683,23 @@ describe("Feature: creating a task", () => {
     expect(attempt).toThrow(/title is required/);
   });
 
-  testInTempDirs("the first task created takes the id 000001", () => {
+  testInTempDirs("the first task created takes the id 000001", async () => {
     // Given an empty task directory
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
 
     // When the first task is created
     const first = createTask(dir, ORCHESTRATOR_DIR, "a");
 
     // Then it takes the id 000001, and the counter reads two for the next one
     expect(first.id).toBe("000001");
-    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("2");
+    expect(
+      (await fs.promises.readFile(nextTaskIdPath(dir), "utf-8")).trim(),
+    ).toBe("2");
   });
 
-  testInTempDirs("the second task created takes the id 000002", () => {
+  testInTempDirs("the second task created takes the id 000002", async () => {
     // Given a task directory holding the first task
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
     createTask(dir, ORCHESTRATOR_DIR, "a");
 
     // When the second task is created
@@ -698,12 +707,14 @@ describe("Feature: creating a task", () => {
 
     // Then it takes the id 000002, and the counter reads three for the next one
     expect(second.id).toBe("000002");
-    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("3");
+    expect(
+      (await fs.promises.readFile(nextTaskIdPath(dir), "utf-8")).trim(),
+    ).toBe("3");
   });
 
-  testInTempDirs("the third task created takes the id 000003", () => {
+  testInTempDirs("the third task created takes the id 000003", async () => {
     // Given a task directory holding the first two tasks
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
     createTask(dir, ORCHESTRATOR_DIR, "a");
     createTask(dir, ORCHESTRATOR_DIR, "b");
 
@@ -712,44 +723,50 @@ describe("Feature: creating a task", () => {
 
     // Then it takes the id 000003, and the counter reads four for the next one
     expect(third.id).toBe("000003");
-    expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe("4");
+    expect(
+      (await fs.promises.readFile(nextTaskIdPath(dir), "utf-8")).trim(),
+    ).toBe("4");
   });
 
-  testInTempDirs("a new task's body is the template's, unchanged", () => {
+  testInTempDirs("a new task's body is the template's, unchanged", async () => {
     // Given an empty task directory
-    const dir = makeTasksDir();
+    const dir = await makeTasksDir();
 
     // When a task is created
     const { filePath } = createTask(dir, ORCHESTRATOR_DIR, "t");
 
     // Then its body is what the template carries, for a person to fill in
-    expect(parseDocument(fs.readFileSync(filePath, "utf-8")).body).toBe(
-      parseDocument(fs.readFileSync(TEMPLATE_PATH, "utf-8")).body,
+    expect(
+      parseDocument(await fs.promises.readFile(filePath, "utf-8")).body,
+    ).toBe(
+      parseDocument(await fs.promises.readFile(TEMPLATE_PATH, "utf-8")).body,
     );
   });
 
   testInTempDirs(
     "a project's own template is used over the shipped one",
-    () => {
+    async () => {
       // Given a task directory carrying its own template
-      const dir = makeTasksDir();
-      fs.writeFileSync(
+      const dir = await makeTasksDir();
+      await fs.promises.writeFile(
         path.join(dir, "template.md"),
-        `${fs.readFileSync(TEMPLATE_PATH, "utf-8")}\n## Rollout\n`,
+        `${await fs.promises.readFile(TEMPLATE_PATH, "utf-8")}\n## Rollout\n`,
       );
 
       // When a task is created
       const { filePath } = createTask(dir, ORCHESTRATOR_DIR, "t");
 
       // Then the project's sections are what a new task starts with
-      expect(fs.readFileSync(filePath, "utf-8")).toContain("## Rollout");
+      expect(await fs.promises.readFile(filePath, "utf-8")).toContain(
+        "## Rollout",
+      );
     },
   );
 
-  testInTempDirs("a counter someone has corrupted fails loudly", () => {
+  testInTempDirs("a counter someone has corrupted fails loudly", async () => {
     // Given a task directory whose counter is not a number
-    const dir = makeTasksDir();
-    fs.writeFileSync(nextTaskIdPath(dir), "not-a-number\n");
+    const dir = await makeTasksDir();
+    await fs.promises.writeFile(nextTaskIdPath(dir), "not-a-number\n");
 
     // When a task is created
     const attempt = () => createTask(dir, ORCHESTRATOR_DIR, "t");
@@ -760,11 +777,11 @@ describe("Feature: creating a task", () => {
 
   testInTempDirs(
     "a task file that already exists is never written over",
-    () => {
+    async () => {
       // Given a task directory whose counter has been wound back over a task
-      const dir = makeTasksDir();
+      const dir = await makeTasksDir();
       createTask(dir, ORCHESTRATOR_DIR, "first");
-      fs.writeFileSync(nextTaskIdPath(dir), "1\n");
+      await fs.promises.writeFile(nextTaskIdPath(dir), "1\n");
 
       // When a task is created at the id that is already taken
       const attempt = () => createTask(dir, ORCHESTRATOR_DIR, "collision");
@@ -781,7 +798,7 @@ describe("Feature: creating a task", () => {
     "tasks created at the same moment take distinct ids and none is lost",
     async () => {
       // Given eight processes creating a task in the same directory at once
-      const dir = makeTasksDir();
+      const dir = await makeTasksDir();
       const count = 8;
       const procs = Array.from({ length: count }, (_, i) =>
         Bun.spawn([
@@ -797,8 +814,7 @@ describe("Feature: creating a task", () => {
 
       // Then all of them succeeded, and each took its own id
       expect(codes.every((code) => code === 0)).toBe(true);
-      const files = fs
-        .readdirSync(dir)
+      const files = (await fs.promises.readdir(dir))
         .filter((file) => /^\d{6}\.md$/.test(file))
         .sort();
       expect(files.length).toBe(count);
@@ -806,17 +822,21 @@ describe("Feature: creating a task", () => {
       expect(files.at(-1)).toBe(`${String(count).padStart(6, "0")}.md`);
 
       // Then the counter is left where the next create expects it
-      expect(fs.readFileSync(nextTaskIdPath(dir), "utf-8").trim()).toBe(
-        String(count + 1),
-      );
+      expect(
+        (await fs.promises.readFile(nextTaskIdPath(dir), "utf-8")).trim(),
+      ).toBe(String(count + 1));
 
       // Then every task that was asked for is on disk, none written over
-      const titles = files.map(
-        (file) =>
+      const titles = [];
+      for (const file of files) {
+        titles.push(
           parseTaskMeta(
-            parseDocument(fs.readFileSync(path.join(dir, file), "utf-8")).raw,
+            parseDocument(
+              await fs.promises.readFile(path.join(dir, file), "utf-8"),
+            ).raw,
           ).title,
-      );
+        );
+      }
       expect(new Set(titles).size).toBe(count);
     },
     20000,
@@ -824,56 +844,64 @@ describe("Feature: creating a task", () => {
 });
 
 describe("Feature: rewriting the body of a task", () => {
-  testInTempDirs("the body is replaced and the fields are left alone", () => {
-    // Given a task an agent is working on
-    const { dir, id } = toWorking();
-    const before = metaOf(dir, id);
+  testInTempDirs(
+    "the body is replaced and the fields are left alone",
+    async () => {
+      // Given a task an agent is working on
+      const { dir, id } = await toWorking();
+      const before = metaOf(dir, id);
 
-    // When its body is rewritten
-    writeTaskBody(dir, id, "# Goal\n\nA rewritten goal.");
+      // When its body is rewritten
+      writeTaskBody(dir, id, "# Goal\n\nA rewritten goal.");
 
-    // Then the new body is on disk and none of the fields moved
-    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(
-      "\n\n# Goal\n\nA rewritten goal.\n",
-    );
-    expect(metaOf(dir, id)).toEqual(before);
-  });
+      // Then the new body is on disk and none of the fields moved
+      expect(await bodyOf(path.join(dir, `${id}.md`))).toBe(
+        "\n\n# Goal\n\nA rewritten goal.\n",
+      );
+      expect(metaOf(dir, id)).toEqual(before);
+    },
+  );
 
   testInTempDirs(
     "a body is normalized to the spacing every document has",
-    () => {
+    async () => {
       // Given a body with stray blank lines above and below it
-      const { dir, id } = newTask();
+      const { dir, id } = await newTask();
 
       // When that body is written to the task
       writeTaskBody(dir, id, "\n\n\n# Goal\n\n\n");
 
       // Then it is stored with one blank line above and one newline below
-      expect(bodyOf(path.join(dir, `${id}.md`))).toBe("\n\n# Goal\n");
+      expect(await bodyOf(path.join(dir, `${id}.md`))).toBe("\n\n# Goal\n");
     },
   );
 
   testInTempDirs(
     "an empty body is refused and the document is untouched",
-    () => {
+    async () => {
       // Given a task and a body that is only whitespace
-      const { dir, id } = newTask();
-      const before = fs.readFileSync(path.join(dir, `${id}.md`), "utf-8");
+      const { dir, id } = await newTask();
+      const before = await fs.promises.readFile(
+        path.join(dir, `${id}.md`),
+        "utf-8",
+      );
 
       // When that body is written
       const attempt = () => writeTaskBody(dir, id, "   \n ");
 
       // Then it is refused, and the document is left exactly as it was
       expect(attempt).toThrow(/body is required/);
-      expect(fs.readFileSync(path.join(dir, `${id}.md`), "utf-8")).toBe(before);
+      expect(
+        await fs.promises.readFile(path.join(dir, `${id}.md`), "utf-8"),
+      ).toBe(before);
     },
   );
 
   testInTempDirs(
     "a body written to a task that does not exist is refused",
-    () => {
+    async () => {
       // Given an empty task directory
-      const dir = makeTasksDir();
+      const dir = await makeTasksDir();
 
       // When a body is written to an id nothing carries
       const attempt = () => writeTaskBody(dir, "000999", "# Goal");
@@ -883,16 +911,16 @@ describe("Feature: rewriting the body of a task", () => {
     },
   );
 
-  testInTempDirs("a body written before a transition survives it", () => {
+  testInTempDirs("a body written before a transition survives it", async () => {
     // Given a task whose body the manager has just rewritten
-    const { dir, id } = toWorking();
+    const { dir, id } = await toWorking();
     writeTaskBody(dir, id, "# Goal\n\nprose the manager wrote");
 
     // When the task is held straight afterwards
     run(dir, id, "hold", "waiting on the manager");
 
     // Then both the prose and the hold are on disk, because both took the lock
-    expect(bodyOf(path.join(dir, `${id}.md`))).toBe(
+    expect(await bodyOf(path.join(dir, `${id}.md`))).toBe(
       "\n\n# Goal\n\nprose the manager wrote\n",
     );
     expect(metaOf(dir, id).held_reason).toBe("waiting on the manager");

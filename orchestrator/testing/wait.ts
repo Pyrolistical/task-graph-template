@@ -1,12 +1,12 @@
 export async function eventually(
-  done: () => boolean,
+  done: () => boolean | Promise<boolean>,
   what: string,
   tries = 200,
 ): Promise<void> {
-  for (let waited = 0; waited < tries && !done(); waited++) {
+  for (let waited = 0; waited < tries && !(await done()); waited++) {
     await Bun.sleep(10);
   }
-  if (!done()) {
+  if (!(await done())) {
     throw new Error(`never ${what} in ${tries} tries`);
   }
 }

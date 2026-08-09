@@ -37,9 +37,9 @@ describe("Feature: picking a project back up at startup", () => {
   testInTempDirs(
     "a worktree lost to a cleared /tmp is recreated from its branch",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, { [id]: { WORK: [{ notes: "working" }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "working" }] } });
 
       // Given a task whose worktree was cloned and then removed from disk
       const first = await serverFor(fixture);
@@ -48,15 +48,15 @@ describe("Feature: picking a project back up at startup", () => {
       await first.drain();
       first.shutdown();
       const worktree = pathsOf(first).worktree(id);
-      expect(fs.existsSync(worktree)).toBe(true);
-      fs.rmSync(worktree, { recursive: true, force: true });
+      expect(await fs.promises.exists(worktree)).toBe(true);
+      await fs.promises.rm(worktree, { recursive: true, force: true });
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then the worktree is cloned again from the branch that survived
-      expect(fs.existsSync(worktree)).toBe(true);
-      expect(fs.existsSync(path.join(worktree, ".git"))).toBe(true);
+      expect(await fs.promises.exists(worktree)).toBe(true);
+      expect(await fs.promises.exists(path.join(worktree, ".git"))).toBe(true);
 
       second.shutdown();
     },
@@ -66,7 +66,7 @@ describe("Feature: picking a project back up at startup", () => {
   testInTempDirs(
     "a second server against a live one refuses to start",
     async () => {
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
 
       // Given a server already running against a project
       const first = await serverFor(fixture);
@@ -87,8 +87,8 @@ describe("Feature: picking a project back up at startup", () => {
   testInTempDirs(
     "a second server continues the transition log rather than restarting it",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
 
       // Given a server that has applied a transition and then exited
       const first = await serverFor(fixture);
@@ -111,8 +111,8 @@ describe("Feature: picking a project back up at startup", () => {
     "a directory that is not a git repository is refused at startup",
     async () => {
       // Given a project directory that is not under version control
-      const fixture = makeFixture();
-      fs.rmSync(path.join(fixture.repo, ".git"), {
+      const fixture = await makeFixture();
+      await fs.promises.rm(path.join(fixture.repo, ".git"), {
         recursive: true,
         force: true,
       });
@@ -131,8 +131,8 @@ describe("Feature: reaping a claim whose agent is gone", () => {
   testInTempDirs(
     "a claim whose process is gone is cleared",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
 
       const dead = Bun.spawn(["true"]);
       await dead.exited;
@@ -164,9 +164,9 @@ describe("Feature: reaping a claim whose agent is gone", () => {
   testInTempDirs(
     "an agent that dies mid-task frees its slot and releases the task",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task the agent dies on");
-      setPlan(fixture, { [id]: { WORK: [{ die: true }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task the agent dies on");
+      await setPlan(fixture, { [id]: { WORK: [{ die: true }] } });
 
       // Given a task dispatched to an agent that will exit without settling
       const server = await serverFor(fixture);
@@ -193,9 +193,9 @@ describe("Feature: reaping a claim whose agent is gone", () => {
   testInTempDirs(
     "a slot whose process died no longer shields the task from the reaper",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task the agent dies on");
-      setPlan(fixture, { [id]: { WORK: [{ die: true }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task the agent dies on");
+      await setPlan(fixture, { [id]: { WORK: [{ die: true }] } });
 
       // Given a task dispatched to an agent that will exit without settling
       const server = await serverFor(fixture);
@@ -217,9 +217,9 @@ describe("Feature: reaping a claim whose agent is gone", () => {
   testInTempDirs(
     "a check running for a merge is left alone by the reaper",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task being merged", ["true"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task being merged", ["true"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -238,7 +238,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       server.setSchedulerEnabled(false);
 
       // Given a merge whose re-run checks are still going
-      editTaskFile(fixture, id, (meta) => {
+      await editTaskFile(fixture, id, (meta) => {
         meta.checks.push("sleep 2");
       });
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
@@ -260,8 +260,8 @@ describe("Feature: reaping a claim whose agent is gone", () => {
   testInTempDirs(
     "a live claim is left alone",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       takeClaim(fixture.tasksDir, id, {
         slotName: "pi-fake-fake-1",
         pid: process.pid,
@@ -291,9 +291,9 @@ describe("Feature: an abort that races a dispatch", () => {
   testInTempDirs(
     "a task aborted while its agent is spawning is closed and never claimed",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task the manager throws away");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task the manager throws away");
+      await setPlan(fixture, {
         [id]: { WORK: [{ new_session_delay_ms: 500, submit: true }] },
       });
 
@@ -322,9 +322,9 @@ describe("Feature: an abort that races a dispatch", () => {
   testInTempDirs(
     "the slot a lost dispatch was using is released, not stranded",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task the manager throws away");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task the manager throws away");
+      await setPlan(fixture, {
         [id]: { WORK: [{ new_session_delay_ms: 500, submit: true }] },
       });
 
@@ -344,9 +344,9 @@ describe("Feature: an abort that races a dispatch", () => {
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
       expect(
-        fs
-          .readFileSync(pathsOf(server).serverLog, "utf-8")
-          .includes(`dispatch of ${id} to pi-fake-fake-1 failed`),
+        (
+          await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
+        ).includes(`dispatch of ${id} to pi-fake-fake-1 failed`),
       ).toBe(true);
 
       server.shutdown();
@@ -357,9 +357,9 @@ describe("Feature: an abort that races a dispatch", () => {
   testInTempDirs(
     "a dispatch that wins the race claims the task as normal",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task nobody aborts");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task nobody aborts");
+      await setPlan(fixture, {
         [id]: { WORK: [{ new_session_delay_ms: 200, submit: true }] },
       });
 
@@ -383,23 +383,24 @@ describe("Feature: an abort that races a dispatch", () => {
 });
 
 describe("Feature: a task document that does not parse", () => {
-  function corrupt(fixture: Fixture, id: string): void {
+  async function corrupt(fixture: Fixture, id: string): Promise<void> {
     const filePath = activeTaskPath(fixture.tasksDir, id);
-    fs.writeFileSync(
+    await fs.promises.writeFile(
       filePath,
-      fs
-        .readFileSync(filePath, "utf-8")
-        .replace(/^depends_on: .*$/m, "depends_on: null"),
+      (await fs.promises.readFile(filePath, "utf-8")).replace(
+        /^depends_on: .*$/m,
+        "depends_on: null",
+      ),
     );
   }
 
   testInTempDirs(
     "one unreadable task does not stop the others being dispatched",
     async () => {
-      const fixture = makeFixture();
-      const broken = readyTask(fixture, "A task with bad frontmatter");
-      const fine = readyTask(fixture, "A task that is fine", ["true"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const broken = await readyTask(fixture, "A task with bad frontmatter");
+      const fine = await readyTask(fixture, "A task that is fine", ["true"]);
+      await setPlan(fixture, {
         [fine]: {
           WORK: [
             {
@@ -411,7 +412,7 @@ describe("Feature: a task document that does not parse", () => {
           WORK_REVIEW: [{ submit: true }],
         },
       });
-      corrupt(fixture, broken);
+      await corrupt(fixture, broken);
 
       // Given a graph with one unreadable task and one good one
       const server = await serverFor(fixture);
@@ -430,9 +431,9 @@ describe("Feature: a task document that does not parse", () => {
   testInTempDirs(
     "one unreadable task does not stop the reaper",
     async () => {
-      const fixture = makeFixture();
-      const broken = readyTask(fixture, "A task with bad frontmatter");
-      const claimed = readyTask(fixture, "A task whose agent is gone");
+      const fixture = await makeFixture();
+      const broken = await readyTask(fixture, "A task with bad frontmatter");
+      const claimed = await readyTask(fixture, "A task whose agent is gone");
 
       const dead = Bun.spawn(["true"]);
       await dead.exited;
@@ -443,7 +444,7 @@ describe("Feature: a task document that does not parse", () => {
         branch: branchName(claimed),
         worktree: "/tmp/gone",
       });
-      corrupt(fixture, broken);
+      await corrupt(fixture, broken);
 
       // Given a graph with one unreadable task and one dead claim
       const server = await serverFor(fixture);
@@ -463,18 +464,17 @@ describe("Feature: a task document that does not parse", () => {
   testInTempDirs(
     "the file is logged once when it breaks and once when it is repaired",
     async () => {
-      const fixture = makeFixture();
-      const broken = readyTask(fixture, "A task with bad frontmatter");
-      const good = fs.readFileSync(
+      const fixture = await makeFixture();
+      const broken = await readyTask(fixture, "A task with bad frontmatter");
+      const good = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, broken),
         "utf-8",
       );
-      corrupt(fixture, broken);
+      await corrupt(fixture, broken);
 
       const server = await serverFor(fixture);
-      const logLines = () =>
-        fs
-          .readFileSync(pathsOf(server).serverLog, "utf-8")
+      const logLines = async () =>
+        (await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"))
           .split("\n")
           .filter((line) => line.includes(`${broken}.md`));
 
@@ -483,18 +483,21 @@ describe("Feature: a task document that does not parse", () => {
         await server.tick();
       }
       expect(
-        logLines().filter((line) => line.includes("ignoring")),
+        (await logLines()).filter((line) => line.includes("ignoring")),
       ).toHaveLength(1);
 
       // Given the document is repaired
-      fs.writeFileSync(activeTaskPath(fixture.tasksDir, broken), good);
+      await fs.promises.writeFile(
+        activeTaskPath(fixture.tasksDir, broken),
+        good,
+      );
 
       // When the server ticks five times more
       for (let i = 0; i < 5; i++) await server.tick();
 
       // Then the repair is logged once, and the task is back in the graph
       expect(
-        logLines().filter((line) => line.includes("parses again")),
+        (await logLines()).filter((line) => line.includes("parses again")),
       ).toHaveLength(1);
       expect(server.tasks().has(broken)).toBe(true);
 
@@ -508,9 +511,9 @@ describe("Feature: an agent that compacts mid-turn", () => {
   testInTempDirs(
     "a designer's scribbles are thrown away and the dispatch is steered back",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [
             {
@@ -532,15 +535,17 @@ describe("Feature: an agent that compacts mid-turn", () => {
 
       // Then the worktree is reset and the agent steered back to its assignment
       expect(
-        fs.existsSync(path.join(pathsOf(server).worktree(id), "stray.txt")),
+        await fs.promises.exists(
+          path.join(pathsOf(server).worktree(id), "stray.txt"),
+        ),
       ).toBe(false);
       expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
-      expect(steersTo(pathsOf(server).sessionDir(id, "designer"))).toEqual([
-        promptsOf(server).fragment("DESIGN"),
-      ]);
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "compacted: worktree reset, steered back to the assignment",
-      );
+      expect(
+        await steersTo(pathsOf(server).sessionDir(id, "designer")),
+      ).toEqual([promptsOf(server).fragment("DESIGN")]);
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("compacted: worktree reset, steered back to the assignment");
 
       server.shutdown();
     },
@@ -550,9 +555,9 @@ describe("Feature: an agent that compacts mid-turn", () => {
   testInTempDirs(
     "a worker keeps its worktree and is steered back to the assignment",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -574,12 +579,17 @@ describe("Feature: an agent that compacts mid-turn", () => {
 
       // Then its work is kept, and it is only steered back to the assignment
       expect(
-        fs.existsSync(path.join(pathsOf(server).worktree(id), "a.txt")),
+        await fs.promises.exists(
+          path.join(pathsOf(server).worktree(id), "a.txt"),
+        ),
       ).toBe(true);
-      expect(steersTo(pathsOf(server).sessionDir(id, "worker"))).toEqual([
+      expect(await steersTo(pathsOf(server).sessionDir(id, "worker"))).toEqual([
         promptsOf(server).fragment("WORK"),
       ]);
-      const log = fs.readFileSync(pathsOf(server).serverLog, "utf-8");
+      const log = await fs.promises.readFile(
+        pathsOf(server).serverLog,
+        "utf-8",
+      );
       expect(log).toContain("compacted: steered back to the assignment");
       expect(log).not.toContain("worktree reset");
 
@@ -591,9 +601,9 @@ describe("Feature: an agent that compacts mid-turn", () => {
   testInTempDirs(
     "a reviewer that compacts right after submitting keeps its result",
     async () => {
-      const fixture = makeFixture();
-      const id = unplannedTask(fixture, "Add a greeting");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await unplannedTask(fixture, "Add a greeting");
+      await setPlan(fixture, {
         [id]: {
           DESIGN: [{ design: "the design", submit: true }],
           DESIGN_REVIEW: [
@@ -609,10 +619,12 @@ describe("Feature: an agent that compacts mid-turn", () => {
       await settleTo(server, id, "PLAN");
 
       // Then it is left alone to settle, rather than steered off its result
-      expect(steersTo(pathsOf(server).sessionDir(id, "reviewer"))).toEqual([]);
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "compacted after its result: left alone to settle",
-      );
+      expect(
+        await steersTo(pathsOf(server).sessionDir(id, "reviewer")),
+      ).toEqual([]);
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("compacted after its result: left alone to settle");
 
       server.shutdown();
     },
@@ -624,14 +636,14 @@ describe("Feature: a dependency that can never be satisfied", () => {
   testInTempDirs(
     "a task that can never unblock is logged once, not every tick",
     async () => {
-      const fixture = makeFixture();
-      const first = readyTask(fixture, "The first half");
-      const second = readyTask(fixture, "The second half");
+      const fixture = await makeFixture();
+      const first = await readyTask(fixture, "The first half");
+      const second = await readyTask(fixture, "The second half");
 
-      editTaskFile(fixture, first, (meta) => {
+      await editTaskFile(fixture, first, (meta) => {
         meta.depends_on = [second];
       });
-      editTaskFile(fixture, second, (meta) => {
+      await editTaskFile(fixture, second, (meta) => {
         meta.depends_on = [first];
       });
 
@@ -642,8 +654,9 @@ describe("Feature: a dependency that can never be satisfied", () => {
       for (let i = 0; i < 5; i++) await server.tick();
 
       // Then each is reported once, rather than on every tick forever
-      const cycles = fs
-        .readFileSync(pathsOf(server).serverLog, "utf-8")
+      const cycles = (
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
+      )
         .split("\n")
         .filter((line) => line.includes("depends on itself"));
 

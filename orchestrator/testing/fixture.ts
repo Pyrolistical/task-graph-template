@@ -365,27 +365,26 @@ for await (const chunk of Bun.stdin.stream()) {
 }
 `;
 
-function messagesIn(sessionDir: string, name: string): string[] {
+async function messagesIn(sessionDir: string, name: string): Promise<string[]> {
   const filePath = path.join(sessionDir, name);
-  if (!fs.existsSync(filePath)) {
+  if (!(await fs.promises.exists(filePath))) {
     return [];
   }
-  return fs
-    .readFileSync(filePath, "utf-8")
+  return (await fs.promises.readFile(filePath, "utf-8"))
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => z.string().parse(JSON.parse(line)));
 }
 
-export function promptsTo(sessionDir: string): string[] {
+export function promptsTo(sessionDir: string): Promise<string[]> {
   return messagesIn(sessionDir, "prompts.jsonl");
 }
 
-export function promptsOverlapping(sessionDir: string): string[] {
+export function promptsOverlapping(sessionDir: string): Promise<string[]> {
   return messagesIn(sessionDir, "overlaps.jsonl");
 }
 
-export function steersTo(sessionDir: string): string[] {
+export function steersTo(sessionDir: string): Promise<string[]> {
   return messagesIn(sessionDir, "steers.jsonl");
 }
 
@@ -400,26 +399,26 @@ export interface Fixture {
   planPath: string;
 }
 
-export function makeFixture(slots = 1): Fixture {
-  const repo = tempDir("orchestrator-repo-");
+export async function makeFixture(slots = 1): Promise<Fixture> {
+  const repo = await tempDir("orchestrator-repo-");
   const tasksDir = path.join(repo, "tasks");
-  const orchestratorDir = tempDir("orchestrator-src-");
+  const orchestratorDir = await tempDir("orchestrator-src-");
   const overridesDir = path.join(repo, "orchestrator");
 
-  fs.mkdirSync(tasksDir);
-  fs.writeFileSync(nextTaskIdPath(tasksDir), "1\n");
+  await fs.promises.mkdir(tasksDir);
+  await fs.promises.writeFile(nextTaskIdPath(tasksDir), "1\n");
 
-  fs.cpSync(
+  await fs.promises.cp(
     path.join(REPO_ROOT, "orchestrator", "prompts"),
     path.join(orchestratorDir, "prompts"),
     { recursive: true },
   );
-  fs.copyFileSync(
+  await fs.promises.copyFile(
     path.join(REPO_ROOT, "orchestrator", "template.md"),
     path.join(orchestratorDir, "template.md"),
   );
   const agentsPath = path.join(repo, "agents.json");
-  fs.writeFileSync(
+  await fs.promises.writeFile(
     agentsPath,
     JSON.stringify({
       agents: [{ type: "pi", provider: "fake", model: "fake", slots }],
@@ -427,10 +426,10 @@ export function makeFixture(slots = 1): Fixture {
   );
 
   const piCommand = path.join(repo, "fake-pi.ts");
-  fs.writeFileSync(piCommand, FAKE_PI, { mode: 0o755 });
+  await fs.promises.writeFile(piCommand, FAKE_PI, { mode: 0o755 });
 
   const planPath = path.join(repo, "plan.json");
-  fs.writeFileSync(planPath, "{}");
+  await fs.promises.writeFile(planPath, "{}");
   process.env.FAKE_PI_PLAN = planPath;
 
   gitOrThrow(repo, ["init", "-q", "-b", "master"]);
@@ -445,24 +444,24 @@ export function makeFixture(slots = 1): Fixture {
     orchestratorDir,
     overridesDir,
     agentsPath,
-    serverRoot: tempDir("orchestrator-root-"),
+    serverRoot: await tempDir("orchestrator-root-"),
     piCommand,
     planPath,
   };
 }
 
-export function writeOverride(
+export async function writeOverride(
   fixture: Fixture,
   name: string,
   contents: string,
-): void {
+): Promise<void> {
   const file = path.join(fixture.overridesDir, name);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, contents, "utf-8");
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(file, contents, "utf-8");
 }
 
-export function setPlan(fixture: Fixture, plan: Plan): void {
-  fs.writeFileSync(fixture.planPath, JSON.stringify(plan));
+export async function setPlan(fixture: Fixture, plan: Plan): Promise<void> {
+  await fs.promises.writeFile(fixture.planPath, JSON.stringify(plan));
   process.env.FAKE_PI_PLAN = fixture.planPath;
 }
 

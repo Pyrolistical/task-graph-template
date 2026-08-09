@@ -61,10 +61,10 @@ function spreadAcrossTurns(stream: PiStream, command: string, turns = 3): void {
   }
 }
 
-function deadProcess(): PiProcess {
-  const dir = tempDir("orchestrator-");
+async function deadProcess(): Promise<PiProcess> {
+  const dir = await tempDir("orchestrator-");
   const command = path.join(dir, "exits.ts");
-  fs.writeFileSync(command, "process.exit(0);\n");
+  await fs.promises.writeFile(command, "process.exit(0);\n");
 
   return new PiProcess(
     {
@@ -309,7 +309,7 @@ describe("Feature: matching a reply to what was asked", () => {
     "a request made after the child died settles instead of hanging",
     async () => {
       // Given a pi process whose command exits immediately
-      const process = deadProcess();
+      const process = await deadProcess();
       await process.stream.settled();
 
       // When something is asked of it
@@ -331,7 +331,7 @@ describe("Feature: matching a reply to what was asked", () => {
     "a process whose stdout closed is not alive, exit code or not",
     async () => {
       // Given a pi process whose command exits immediately
-      const process = deadProcess();
+      const process = await deadProcess();
 
       // When its stream settles for the last time
       await process.stream.settled();
@@ -342,36 +342,39 @@ describe("Feature: matching a reply to what was asked", () => {
     10000,
   );
 
-  testInTempDirs("an abort is recorded before the write that may fail", () => {
-    // Given a pi process whose command has already exited
-    const dir = tempDir("orchestrator-");
-    const script = path.join(dir, "exits.ts");
-    fs.writeFileSync(script, "process.exit(0);\n");
-    const proc = new PiProcess(
-      {
-        provider: "fake",
-        model: "fake",
-        sessionDir: path.join(dir, "session"),
-        name: "test",
-        cwd: dir,
-        extension: path.join(dir, "result-tools-worker.ts"),
-      },
-      script,
-      ["bun"],
-    );
-    expect(proc.aborting).toBe(false);
+  testInTempDirs(
+    "an abort is recorded before the write that may fail",
+    async () => {
+      // Given a pi process whose command has already exited
+      const dir = await tempDir("orchestrator-");
+      const script = path.join(dir, "exits.ts");
+      await fs.promises.writeFile(script, "process.exit(0);\n");
+      const proc = new PiProcess(
+        {
+          provider: "fake",
+          model: "fake",
+          sessionDir: path.join(dir, "session"),
+          name: "test",
+          cwd: dir,
+          extension: path.join(dir, "result-tools-worker.ts"),
+        },
+        script,
+        ["bun"],
+      );
+      expect(proc.aborting).toBe(false);
 
-    // When it is aborted, and the write to the dead process fails
-    try {
-      proc.abort();
-    } catch {
-      // the write may fail because the process is already dead
-    }
+      // When it is aborted, and the write to the dead process fails
+      try {
+        proc.abort();
+      } catch {
+        // the write may fail because the process is already dead
+      }
 
-    // Then the abort is still recorded, so the settle is read as an abort
-    expect(proc.aborting).toBe(true);
-    proc.kill();
-  });
+      // Then the abort is still recorded, so the settle is read as an abort
+      expect(proc.aborting).toBe(true);
+      proc.kill();
+    },
+  );
 });
 
 describe("Feature: what an agent is doing right now", () => {
@@ -686,7 +689,7 @@ describe("Feature: how an agent is spawned", () => {
     },
   );
 
-  testInTempDirs("a designer is prompted with words of its own", () => {
+  testInTempDirs("a designer is prompted with words of its own", async () => {
     // Given the DESIGN state an agent is dispatched into
     const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
@@ -694,23 +697,26 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("DESIGN");
 
     // Then it is the shipped design prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/DESIGN.md"));
+    expect(text).toBe(await shippedFile("prompts/DESIGN.md"));
     expect(text.trim()).not.toBe("");
   });
 
-  testInTempDirs("a design reviewer is prompted with words of its own", () => {
-    // Given the DESIGN_REVIEW state an agent is dispatched into
-    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
+  testInTempDirs(
+    "a design reviewer is prompted with words of its own",
+    async () => {
+      // Given the DESIGN_REVIEW state an agent is dispatched into
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
-    // When the fragment it is prompted with is read
-    const text = prompts.fragment("DESIGN_REVIEW");
+      // When the fragment it is prompted with is read
+      const text = prompts.fragment("DESIGN_REVIEW");
 
-    // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/DESIGN_REVIEW.md"));
-    expect(text.trim()).not.toBe("");
-  });
+      // Then it is the shipped review prompt, and it says something
+      expect(text).toBe(await shippedFile("prompts/DESIGN_REVIEW.md"));
+      expect(text.trim()).not.toBe("");
+    },
+  );
 
-  testInTempDirs("a planner is prompted with words of its own", () => {
+  testInTempDirs("a planner is prompted with words of its own", async () => {
     // Given the PLAN state an agent is dispatched into
     const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
@@ -718,23 +724,26 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("PLAN");
 
     // Then it is the shipped plan prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/PLAN.md"));
+    expect(text).toBe(await shippedFile("prompts/PLAN.md"));
     expect(text.trim()).not.toBe("");
   });
 
-  testInTempDirs("a plan reviewer is prompted with words of its own", () => {
-    // Given the PLAN_REVIEW state an agent is dispatched into
-    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
+  testInTempDirs(
+    "a plan reviewer is prompted with words of its own",
+    async () => {
+      // Given the PLAN_REVIEW state an agent is dispatched into
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
-    // When the fragment it is prompted with is read
-    const text = prompts.fragment("PLAN_REVIEW");
+      // When the fragment it is prompted with is read
+      const text = prompts.fragment("PLAN_REVIEW");
 
-    // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/PLAN_REVIEW.md"));
-    expect(text.trim()).not.toBe("");
-  });
+      // Then it is the shipped review prompt, and it says something
+      expect(text).toBe(await shippedFile("prompts/PLAN_REVIEW.md"));
+      expect(text.trim()).not.toBe("");
+    },
+  );
 
-  testInTempDirs("a worker is prompted with words of its own", () => {
+  testInTempDirs("a worker is prompted with words of its own", async () => {
     // Given the WORK state an agent is dispatched into
     const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
@@ -742,19 +751,22 @@ describe("Feature: how an agent is spawned", () => {
     const text = prompts.fragment("WORK");
 
     // Then it is the shipped work prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/WORK.md"));
+    expect(text).toBe(await shippedFile("prompts/WORK.md"));
     expect(text.trim()).not.toBe("");
   });
 
-  testInTempDirs("a work reviewer is prompted with words of its own", () => {
-    // Given the WORK_REVIEW state an agent is dispatched into
-    const prompts = new PromptFiles(ORCHESTRATOR_DIR);
+  testInTempDirs(
+    "a work reviewer is prompted with words of its own",
+    async () => {
+      // Given the WORK_REVIEW state an agent is dispatched into
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
-    // When the fragment it is prompted with is read
-    const text = prompts.fragment("WORK_REVIEW");
+      // When the fragment it is prompted with is read
+      const text = prompts.fragment("WORK_REVIEW");
 
-    // Then it is the shipped review prompt, and it says something
-    expect(text).toBe(shippedFile("prompts/WORK_REVIEW.md"));
-    expect(text.trim()).not.toBe("");
-  });
+      // Then it is the shipped review prompt, and it says something
+      expect(text).toBe(await shippedFile("prompts/WORK_REVIEW.md"));
+      expect(text.trim()).not.toBe("");
+    },
+  );
 });

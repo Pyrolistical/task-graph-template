@@ -7,17 +7,20 @@ import { idleRow } from "../domain/agents.ts";
 import { Runtime, writeAtomic } from "./runtime.ts";
 import { ViewFiles } from "./view-files.ts";
 
-function viewsFor(): { runtime: Runtime; publisher: ViewFiles } {
-  const runtime = new Runtime("/home/model/project", tempDir("orchestrator-"));
+async function viewsFor(): Promise<{ runtime: Runtime; publisher: ViewFiles }> {
+  const runtime = new Runtime(
+    "/home/model/project",
+    await tempDir("orchestrator-"),
+  );
   return { runtime, publisher: new ViewFiles(runtime) };
 }
 
 describe("Feature: reading back the slots the last server published", () => {
   testInTempDirs(
     "a runtime directory with no view yet has no last slots",
-    () => {
+    async () => {
       // Given a runtime directory that no server has published into
-      const { publisher } = viewsFor();
+      const { publisher } = await viewsFor();
 
       // When the last slots are read
       const rows = publisher.lastSlots();
@@ -27,33 +30,38 @@ describe("Feature: reading back the slots the last server published", () => {
     },
   );
 
-  testInTempDirs("the slots come back as the last publish wrote them", () => {
-    // Given a server that published a view of its pool
-    const { publisher } = viewsFor();
-    publisher.publish({
-      seq: 1,
-      agentsFile: "/tasks/agents.json",
-      slots: [idleRow(aSlot())],
-      checks: [],
-      tasks: [],
-      inbox: [],
-      queue: [],
-      scheduling: false,
-    });
+  testInTempDirs(
+    "the slots come back as the last publish wrote them",
+    async () => {
+      // Given a server that published a view of its pool
+      const { publisher } = await viewsFor();
+      publisher.publish({
+        seq: 1,
+        agentsFile: "/tasks/agents.json",
+        slots: [idleRow(aSlot())],
+        checks: [],
+        tasks: [],
+        inbox: [],
+        queue: [],
+        scheduling: false,
+      });
 
-    // When the next server reads the slots back
-    const rows = publisher.lastSlots();
+      // When the next server reads the slots back
+      const rows = publisher.lastSlots();
 
-    // Then it gets the rows it needs to reattach to what was running
-    expect(rows).toHaveLength(1);
-    expect(at(present(rows, "the slots view"), 0).name).toBe("pi-fake-fake-1");
-  });
+      // Then it gets the rows it needs to reattach to what was running
+      expect(rows).toHaveLength(1);
+      expect(at(present(rows, "the slots view"), 0).name).toBe(
+        "pi-fake-fake-1",
+      );
+    },
+  );
 
   testInTempDirs(
     "a view file that is not readable JSON stops the server",
-    () => {
+    async () => {
       // Given a slots view that was left truncated on disk
-      const { runtime, publisher } = viewsFor();
+      const { runtime, publisher } = await viewsFor();
       writeAtomic(runtime.slotsView, '{"slots": [{"name"');
 
       // When the next server tries to read it back
@@ -62,9 +70,9 @@ describe("Feature: reading back the slots the last server published", () => {
     },
   );
 
-  testInTempDirs("a view file carrying no slots stops the server", () => {
+  testInTempDirs("a view file carrying no slots stops the server", async () => {
     // Given a slots view that parses but holds no slots at all
-    const { runtime, publisher } = viewsFor();
+    const { runtime, publisher } = await viewsFor();
     writeAtomic(runtime.slotsView, '{"seq": 1}');
 
     // When the next server tries to read it back
@@ -74,6 +82,6 @@ describe("Feature: reading back the slots the last server published", () => {
     );
 
     // Then the file really was there, so this is not the first-start path
-    expect(fs.existsSync(runtime.slotsView)).toBe(true);
+    expect(await fs.promises.exists(runtime.slotsView)).toBe(true);
   });
 });

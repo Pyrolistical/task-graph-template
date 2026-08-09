@@ -171,8 +171,8 @@ async function trial(
     String(trialNumber),
   );
   const worktree = path.join(sessionDir, "worktree");
-  fs.mkdirSync(worktree, { recursive: true });
-  fs.writeFileSync(
+  await fs.promises.mkdir(worktree, { recursive: true });
+  await fs.promises.writeFile(
     path.join(sessionDir, "ASSIGNMENT.md"),
     `\n\n${scenario.prompt}\n`,
   );

@@ -32,12 +32,12 @@ export function findingsSubmit(what: string) {
     promptSnippet: "End the review by calling submit",
     promptGuidelines: [FINDING_GUIDELINE, TERMINAL_GUIDELINE],
     parameters: FindingsParams,
-    async execute(_toolCallId, params) {
-      return {
+    execute(_toolCallId, params) {
+      return Promise.resolve({
         content: [{ type: "text", text: verdict(params.findings.length) }],
         details: { findings: params.findings },
         terminate: true,
-      };
+      });
     },
   });
 }
@@ -53,12 +53,12 @@ export function plainSubmit(finish: string, noun: string) {
       TERMINAL_GUIDELINE,
     ],
     parameters: NoParams,
-    async execute(_toolCallId, _params) {
-      return {
+    execute(_toolCallId, _params) {
+      return Promise.resolve({
         content: [{ type: "text", text: "Submitted." }],
         details: {},
         terminate: true,
-      };
+      });
     },
   });
 }
@@ -83,11 +83,11 @@ export const blocked = defineTool({
     },
     CLOSED,
   ),
-  async execute(_toolCallId, params) {
-    return {
+  execute(_toolCallId, params) {
+    return Promise.resolve({
       content: [{ type: "text", text: "Stopped: awaiting a person." }],
       details: { message: params.message },
       terminate: true,
-    };
+    });
   },
 });

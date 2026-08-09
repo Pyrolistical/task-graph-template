@@ -11,7 +11,7 @@ describe("Feature: running a task's declared checks", () => {
     "a check that fails comes back with its code and both its streams",
     async () => {
       // Given a check that writes to stdout and stderr and then fails
-      const dir = tempDir("orchestrator-");
+      const dir = await tempDir("orchestrator-");
       const log = path.join(dir, "check-0.log");
       const runner = new CheckRunner();
 
@@ -32,7 +32,7 @@ describe("Feature: running a task's declared checks", () => {
       expect(result.tail).toContain("bad");
 
       // Then the whole output is on disk, for a person to read afterwards
-      expect(fs.readFileSync(log, "utf-8")).toContain("hello");
+      expect(await fs.promises.readFile(log, "utf-8")).toContain("hello");
     },
   );
 
@@ -40,7 +40,7 @@ describe("Feature: running a task's declared checks", () => {
     "a check appears in the view while it runs and leaves it when it ends",
     async () => {
       // Given a check that takes long enough to be seen running
-      const dir = tempDir("orchestrator-");
+      const dir = await tempDir("orchestrator-");
       const runner = new CheckRunner();
 
       // When the check is started

@@ -67,12 +67,12 @@ async function submitOf(state: ClaimState) {
   };
 }
 
-function overrides(files: Record<string, string>): string {
-  const dir = tempDir("orchestrator-overrides-");
+async function overrides(files: Record<string, string>): Promise<string> {
+  const dir = await tempDir("orchestrator-overrides-");
   for (const [name, contents] of Object.entries(files)) {
     const file = path.join(dir, name);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, contents, "utf-8");
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    await fs.promises.writeFile(file, contents, "utf-8");
   }
   return dir;
 }
@@ -80,7 +80,7 @@ function overrides(files: Record<string, string>): string {
 describe("Feature: overriding the words an agent reads", () => {
   testInTempDirs(
     "a project with no overrides reads every prompt as shipped",
-    () => {
+    async () => {
       // Given a prompt store pointed at the orchestrator and nowhere else
       const prompts = new PromptFiles(ORCHESTRATOR_DIR);
 
@@ -88,13 +88,15 @@ describe("Feature: overriding the words an agent reads", () => {
       const fragment = prompts.fragment("WORK");
 
       // Then it is the orchestrator's own copy of it
-      expect(fragment).toBe(shippedFile("prompts/WORK.md"));
+      expect(fragment).toBe(await shippedFile("prompts/WORK.md"));
     },
   );
 
-  testInTempDirs("a project's own copy of a prompt wins", () => {
+  testInTempDirs("a project's own copy of a prompt wins", async () => {
     // Given a project that carries its own WORK prompt
-    const dir = overrides({ "prompts/WORK.md": "you are an implementer\n" });
+    const dir = await overrides({
+      "prompts/WORK.md": "you are an implementer\n",
+    });
 
     // When the fragment is asked for
     const fragment = new PromptFiles(ORCHESTRATOR_DIR, dir).fragment("WORK");
@@ -103,35 +105,38 @@ describe("Feature: overriding the words an agent reads", () => {
     expect(fragment).toBe("you are an implementer\n");
   });
 
-  testInTempDirs("overriding one prompt leaves every other one alone", () => {
-    // Given a project that overrides only the WORK prompt
-    const dir = overrides({ "prompts/WORK.md": "do it\n" });
-    const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
+  testInTempDirs(
+    "overriding one prompt leaves every other one alone",
+    async () => {
+      // Given a project that overrides only the WORK prompt
+      const dir = await overrides({ "prompts/WORK.md": "do it\n" });
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
 
-    // When the other prompts are asked for
-    const others = [
-      prompts.fragment("WORK_REVIEW"),
-      prompts.issue("looping", "WORK", {
-        command: "bun test",
-        limit: LOOP_LIMIT,
-      }),
-    ];
+      // When the other prompts are asked for
+      const others = [
+        prompts.fragment("WORK_REVIEW"),
+        prompts.issue("looping", "WORK", {
+          command: "bun test",
+          limit: LOOP_LIMIT,
+        }),
+      ];
 
-    // Then each still comes from the orchestrator, rendered as it always was
-    expect(others).toEqual([
-      shippedFile("prompts/WORK_REVIEW.md"),
-      render(shippedFile("prompts/looping.md"), {
-        command: "bun test",
-        limit: LOOP_LIMIT,
-      }),
-    ]);
-  });
+      // Then each still comes from the orchestrator, rendered as it always was
+      expect(others).toEqual([
+        await shippedFile("prompts/WORK_REVIEW.md"),
+        render(await shippedFile("prompts/looping.md"), {
+          command: "bun test",
+          limit: LOOP_LIMIT,
+        }),
+      ]);
+    },
+  );
 
   testInTempDirs(
     "an override is given the variables the shipped one is",
-    () => {
+    async () => {
       // Given a project override that uses the variables of the file it replaces
-      const dir = overrides({
+      const dir = await overrides({
         "prompts/check-failed.md":
           "{{#failures}}\nbroke {{command}}\n{{/failures}}\n",
       });
@@ -151,24 +156,27 @@ describe("Feature: overriding the words an agent reads", () => {
 
   testInTempDirs(
     "a prompt edited under a running server is not picked up",
-    () => {
+    async () => {
       // Given a prompt store that has already cached an override
-      const dir = overrides({ "prompts/WORK.md": "one\n" });
+      const dir = await overrides({ "prompts/WORK.md": "one\n" });
       const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
 
       // When the file on disk is edited
-      fs.writeFileSync(path.join(dir, "prompts", "WORK.md"), "two\n");
+      await fs.promises.writeFile(
+        path.join(dir, "prompts", "WORK.md"),
+        "two\n",
+      );
 
       // Then agents keep reading the cached copy, so a half-saved edit cannot leak
       expect(prompts.fragment("WORK")).toBe("one\n");
     },
   );
 
-  testInTempDirs("reloading picks up an edited override", () => {
+  testInTempDirs("reloading picks up an edited override", async () => {
     // Given a prompt store whose cached override has since been edited
-    const dir = overrides({ "prompts/WORK.md": "one\n" });
+    const dir = await overrides({ "prompts/WORK.md": "one\n" });
     const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
-    fs.writeFileSync(path.join(dir, "prompts", "WORK.md"), "two\n");
+    await fs.promises.writeFile(path.join(dir, "prompts", "WORK.md"), "two\n");
 
     // When the store is reloaded
     const cached = prompts.reload();
@@ -178,35 +186,43 @@ describe("Feature: overriding the words an agent reads", () => {
     expect(prompts.fragment("WORK")).toBe("two\n");
   });
 
-  testInTempDirs("reloading after a deleted override falls back again", () => {
-    // Given a prompt store whose override has since been deleted
-    const dir = overrides({ "prompts/WORK.md": "one\n" });
-    const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
-    fs.rmSync(path.join(dir, "prompts", "WORK.md"));
+  testInTempDirs(
+    "reloading after a deleted override falls back again",
+    async () => {
+      // Given a prompt store whose override has since been deleted
+      const dir = await overrides({ "prompts/WORK.md": "one\n" });
+      const prompts = new PromptFiles(ORCHESTRATOR_DIR, dir);
+      await fs.promises.rm(path.join(dir, "prompts", "WORK.md"));
 
-    // When the store is reloaded
-    const cached = prompts.reload();
+      // When the store is reloaded
+      const cached = prompts.reload();
 
-    // Then the orchestrator's own copy is back in use, and no longer named
-    expect(cached).not.toContain(path.join(dir, "prompts", "WORK.md"));
-    expect(prompts.fragment("WORK")).toBe(shippedFile("prompts/WORK.md"));
-  });
+      // Then the orchestrator's own copy is back in use, and no longer named
+      expect(cached).not.toContain(path.join(dir, "prompts", "WORK.md"));
+      expect(prompts.fragment("WORK")).toBe(
+        await shippedFile("prompts/WORK.md"),
+      );
+    },
+  );
 
-  testInTempDirs("a prompt in neither directory names both of them", () => {
-    // Given a project with no overrides at all
-    const dir = overrides({});
+  testInTempDirs(
+    "a prompt in neither directory names both of them",
+    async () => {
+      // Given a project with no overrides at all
+      const dir = await overrides({});
 
-    // When a prompt that exists nowhere is asked for
-    const attempt = () =>
-      new PromptFiles(ORCHESTRATOR_DIR, dir).fragment("nope");
+      // When a prompt that exists nowhere is asked for
+      const attempt = () =>
+        new PromptFiles(ORCHESTRATOR_DIR, dir).fragment("nope");
 
-    // Then both places it looked are named, so the typo is easy to find
-    expect(attempt).toThrow(
-      new RegExp(
-        `no prompts/nope.md in ${path.join(dir, "prompts")} or ${path.join(ORCHESTRATOR_DIR, "prompts")}`,
-      ),
-    );
-  });
+      // Then both places it looked are named, so the typo is easy to find
+      expect(attempt).toThrow(
+        new RegExp(
+          `no prompts/nope.md in ${path.join(dir, "prompts")} or ${path.join(ORCHESTRATOR_DIR, "prompts")}`,
+        ),
+      );
+    },
+  );
 });
 
 describe("Feature: filling a prompt in", () => {
@@ -380,7 +396,7 @@ describe("Feature: the issues an agent is sent back for", () => {
 
   testInTempDirs(
     "every issue has a prompt for every state that raises it",
-    () => {
+    async () => {
       // Given every issue, named for each state an agent can be raised at in
       const wanted = Object.values(ISSUES).flatMap((issue) =>
         CLAIM_STATES.map((state) =>
@@ -389,7 +405,12 @@ describe("Feature: the issues an agent is sent back for", () => {
       );
 
       // When each fragment it names is looked for on disk
-      const missing = wanted.filter((file) => !fs.existsSync(file));
+      const missing = [];
+      for (const file of wanted) {
+        if (!(await fs.promises.exists(file))) {
+          missing.push(file);
+        }
+      }
 
       // Then every one of them is there, so no issue can be raised wordlessly
       expect(missing).toEqual([]);
@@ -595,7 +616,7 @@ describe("Feature: what an agent's result tool call means", () => {
 
   testInTempDirs(
     "a designer is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the DESIGN stage of an agent
       const tools = STAGE_OF.DESIGN.tools;
 
@@ -604,13 +625,13 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the designer extension, and it is there to load
       expect(tools).toBe("designer");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 
   testInTempDirs(
     "a design reviewer is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the DESIGN_REVIEW stage of an agent
       const tools = STAGE_OF.DESIGN_REVIEW.tools;
 
@@ -619,13 +640,13 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the review extension, and it is there to load
       expect(tools).toBe("design-reviewer");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 
   testInTempDirs(
     "a planner is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the PLAN stage of an agent
       const tools = STAGE_OF.PLAN.tools;
 
@@ -634,13 +655,13 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the planner extension, and it is there to load
       expect(tools).toBe("planner");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 
   testInTempDirs(
     "a plan reviewer is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the PLAN_REVIEW stage of an agent
       const tools = STAGE_OF.PLAN_REVIEW.tools;
 
@@ -649,13 +670,13 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the review extension, and it is there to load
       expect(tools).toBe("plan-reviewer");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 
   testInTempDirs(
     "a worker is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the WORK stage of an agent
       const tools = STAGE_OF.WORK.tools;
 
@@ -664,13 +685,13 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the worker extension, and it is there to load
       expect(tools).toBe("worker");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 
   testInTempDirs(
     "a work reviewer is loaded with the extension its stage names",
-    () => {
+    async () => {
       // Given the WORK_REVIEW stage of an agent
       const tools = STAGE_OF.WORK_REVIEW.tools;
 
@@ -679,7 +700,7 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // Then it is the review extension, and it is there to load
       expect(tools).toBe("work-reviewer");
-      expect(fs.existsSync(file)).toBe(true);
+      expect(await fs.promises.exists(file)).toBe(true);
     },
   );
 

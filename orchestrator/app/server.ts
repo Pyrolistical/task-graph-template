@@ -135,7 +135,7 @@ export class Server implements Manager {
     return this.graph.writeBody(taskId, body);
   }
 
-  async submit(taskId: TaskId): Promise<TransitionResult> {
+  submit(taskId: TaskId): Promise<TransitionResult> {
     const tasks = this.tasks();
     if (tasks.get(taskId)?.state === "MANAGER_REVIEW") {
       return this.lander.merge(taskId);
@@ -145,7 +145,7 @@ export class Server implements Manager {
         `task "${taskId}" is part of a dependency cycle through ${tasks.get(taskId)?.depends_on.join(", ")}; it could never unblock`,
       );
     }
-    return this.transition(taskId, "submit", {}, "manager");
+    return Promise.resolve(this.transition(taskId, "submit", {}, "manager"));
   }
 
   hold(taskId: TaskId, reason: string): TransitionResult {

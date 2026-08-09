@@ -26,15 +26,17 @@ interface Module {
   source: string;
 }
 
-function modules(): Module[] {
+async function modules(): Promise<Module[]> {
   const found: Module[] = [];
 
-  const walk = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  const walk = async (dir: string) => {
+    for (const entry of await fs.promises.readdir(dir, {
+      withFileTypes: true,
+    })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== "prompts") {
-          walk(full);
+          await walk(full);
         }
         continue;
       }
@@ -45,23 +47,25 @@ function modules(): Module[] {
       found.push({
         path: relative,
         layer: layerOf(relative),
-        source: fs.readFileSync(full, "utf-8"),
+        source: await fs.promises.readFile(full, "utf-8"),
       });
     }
   };
 
-  walk(ROOT);
+  await walk(ROOT);
   return found;
 }
 
-function suitesIn(layers: Layer[]): string[] {
+async function suitesIn(layers: Layer[]): Promise<string[]> {
   const found: string[] = [];
 
-  const walk = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  const walk = async (dir: string) => {
+    for (const entry of await fs.promises.readdir(dir, {
+      withFileTypes: true,
+    })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        await walk(full);
       } else if (entry.name.endsWith(".test.ts")) {
         found.push(path.relative(ROOT, full));
       }
@@ -69,7 +73,7 @@ function suitesIn(layers: Layer[]): string[] {
   };
 
   for (const layer of layers) {
-    walk(path.join(ROOT, layer));
+    await walk(path.join(ROOT, layer));
   }
   return found;
 }
@@ -87,9 +91,9 @@ function layerOf(relative: string): Layer | null {
 }
 
 describe("Feature: the dependency rule", () => {
-  test("no module imports a layer further out than its own", () => {
+  test("no module imports a layer further out than its own", async () => {
     // Given every module in the orchestrator, tagged with its layer
-    const layered = modules().filter(
+    const layered = (await modules()).filter(
       (module): module is Module & { layer: Layer } => module.layer !== null,
     );
 
@@ -109,9 +113,9 @@ describe("Feature: the dependency rule", () => {
     expect(crossings).toEqual([]);
   });
 
-  test("the domain and policy layers reach for no effect at all", () => {
+  test("the domain and policy layers reach for no effect at all", async () => {
     // Given the two layers that hold the pure decisions
-    const inner = modules().filter(
+    const inner = (await modules()).filter(
       (module) => module.layer !== null && INNER.includes(module.layer),
     );
 
@@ -127,26 +131,32 @@ describe("Feature: the dependency rule", () => {
     expect(impure).toEqual([]);
   });
 
-  test("no test in an inner layer reaches for the filesystem", () => {
+  test("no test in an inner layer reaches for the filesystem", async () => {
     // Given every suite in the layers that only decide
-    const suites = suitesIn(INNER_TESTS);
+    const suites = await suitesIn(INNER_TESTS);
 
     // Given there are enough of them for the rule to mean something
     expect(suites.length).toBeGreaterThan(4);
 
     // When each is searched for a filesystem effect or the temp directory rig
-    const impure = suites.filter((suite) => {
-      const source = fs.readFileSync(path.join(ROOT, suite), "utf-8");
-      return EFFECTS.test(source) || /temp-dirs\.ts/.test(source);
-    });
+    const impure = [];
+    for (const suite of suites) {
+      const source = await fs.promises.readFile(
+        path.join(ROOT, suite),
+        "utf-8",
+      );
+      if (EFFECTS.test(source) || /temp-dirs\.ts/.test(source)) {
+        impure.push(suite);
+      }
+    }
 
     // Then none of them needs a repository, a task directory or a subprocess
     expect(impure).toEqual([]);
   });
 
-  test("the only modules outside a layer are the extensions and the test rig", () => {
+  test("the only modules outside a layer are the extensions and the test rig", async () => {
     // Given the modules that belong to no layer directory
-    const loose = modules().filter((module) => module.layer === null);
+    const loose = (await modules()).filter((module) => module.layer === null);
 
     // When their names are collected
     const names = loose.map((module) => module.path).sort();

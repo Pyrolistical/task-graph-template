@@ -37,7 +37,7 @@ describe("Feature: the views the console and the manager read", () => {
     "an idle slot is a row of nulls, never a missing row",
     async () => {
       // Given a pool of two slots the scheduler has dispatched nothing to
-      const fixture = makeFixture(2);
+      const fixture = await makeFixture(2);
       const server = await serverFor(fixture);
 
       // When the views are published
@@ -58,9 +58,9 @@ describe("Feature: the views the console and the manager read", () => {
   testInTempDirs(
     "a busy slot names its task, role, pid and activity",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, { [id]: { WORK: [{ notes: "still going" }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, { [id]: { WORK: [{ notes: "still going" }] } });
 
       // Given a task the scheduler is about to dispatch
       const server = await serverFor(fixture);
@@ -92,8 +92,8 @@ describe("Feature: the views the console and the manager read", () => {
   testInTempDirs(
     "every view carries the same transition cursor",
     async () => {
-      const fixture = makeFixture();
-      readyTask(fixture, "Do a thing");
+      const fixture = await makeFixture();
+      await readyTask(fixture, "Do a thing");
 
       // Given a server with a task in its graph
       const server = await serverFor(fixture);
@@ -102,12 +102,15 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then every one of them is stamped with the same cursor
-      const seqs = [
+      const seqs = [];
+      for (const file of [
         pathsOf(server).slotsView,
         pathsOf(server).checksView,
         pathsOf(server).tasksView,
         pathsOf(server).inboxView,
-      ].map((file) => JSON.parse(fs.readFileSync(file, "utf-8")).seq);
+      ]) {
+        seqs.push(JSON.parse(await fs.promises.readFile(file, "utf-8")).seq);
+      }
 
       expect(new Set(seqs).size).toBe(1);
       expect(seqs[0]).toBe(transitionsOf(server).cursor);
@@ -120,13 +123,13 @@ describe("Feature: the views the console and the manager read", () => {
   testInTempDirs(
     "the tasks view carries the blocking count and the held reason",
     async () => {
-      const fixture = makeFixture();
-      const dep = readyTask(fixture, "the dependency");
-      const held = readyTask(fixture, "the held one");
+      const fixture = await makeFixture();
+      const dep = await readyTask(fixture, "the dependency");
+      const held = await readyTask(fixture, "the held one");
       applyTransition(fixture.tasksDir, held, "hold", {
         reason: "waiting on its dependency",
       });
-      editTaskFile(fixture, held, (meta) => {
+      await editTaskFile(fixture, held, (meta) => {
         meta.depends_on = [dep];
       });
       applyTransition(fixture.tasksDir, held, "resume", {});
@@ -159,13 +162,13 @@ describe("Feature: the queue view", () => {
   testInTempDirs(
     "the queue is what the scheduler would dispatch next, with its own state",
     async () => {
-      const fixture = makeFixture();
-      const first = readyTask(fixture, "the first");
-      const second = readyTask(fixture, "the second");
+      const fixture = await makeFixture();
+      const first = await readyTask(fixture, "the first");
+      const second = await readyTask(fixture, "the second");
       applyTransition(fixture.tasksDir, second, "hold", {
         reason: "waiting on the first",
       });
-      editTaskFile(fixture, second, (meta) => {
+      await editTaskFile(fixture, second, (meta) => {
         meta.depends_on = [first];
       });
       applyTransition(fixture.tasksDir, second, "resume", {});
@@ -196,9 +199,12 @@ describe("Feature: the queue view", () => {
 });
 
 describe("Feature: a pool with no agents in it", () => {
-  function emptyPoolFixture(): ReturnType<typeof makeFixture> {
-    const fixture = makeFixture();
-    fs.writeFileSync(fixture.agentsPath, JSON.stringify({ agents: [] }));
+  async function emptyPoolFixture(): Promise<Fixture> {
+    const fixture = await makeFixture();
+    await fs.promises.writeFile(
+      fixture.agentsPath,
+      JSON.stringify({ agents: [] }),
+    );
     return fixture;
   }
 
@@ -206,7 +212,7 @@ describe("Feature: a pool with no agents in it", () => {
     "starting the scheduler is refused, naming the file to add an agent to",
     async () => {
       // Given a server whose pool file declares no agents
-      const fixture = emptyPoolFixture();
+      const fixture = await emptyPoolFixture();
       const server = await serverFor(fixture);
 
       // When the scheduler is started
@@ -225,8 +231,8 @@ describe("Feature: a pool with no agents in it", () => {
     "a task authored with no agents still reaches the queue",
     async () => {
       // Given a server whose pool file declares no agents
-      const fixture = emptyPoolFixture();
-      const id = readyTask(fixture, "Do a thing");
+      const fixture = await emptyPoolFixture();
+      const id = await readyTask(fixture, "Do a thing");
       const server = await serverFor(fixture);
 
       // When the views are published
@@ -246,7 +252,7 @@ describe("Feature: a pool with no agents in it", () => {
     "the slots view names the pool file the console tells a person to edit",
     async () => {
       // Given a server whose pool file declares no agents
-      const fixture = emptyPoolFixture();
+      const fixture = await emptyPoolFixture();
       const server = await serverFor(fixture);
 
       // When the views are published
@@ -254,8 +260,9 @@ describe("Feature: a pool with no agents in it", () => {
 
       // Then the slots view carries the path of that file
       expect(
-        JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8"))
-          .agents_file,
+        JSON.parse(
+          await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
+        ).agents_file,
       ).toBe(fixture.agentsPath);
 
       server.shutdown();
@@ -268,9 +275,9 @@ describe("Feature: what the slots view says about a running agent", () => {
   testInTempDirs(
     "tokens, context and the session file reach the view",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: { WORK: [{ notes: "still going", busy_ms: 3000 }] },
       });
 
@@ -303,9 +310,9 @@ describe("Feature: what the slots view says about a running agent", () => {
   testInTempDirs(
     "compactions are counted in the view",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [{ compact: "overflow", busy_ms: 3000, notes: "still going" }],
         },
@@ -318,10 +325,13 @@ describe("Feature: what the slots view says about a running agent", () => {
       server.setSchedulerEnabled(true);
 
       // When it is dispatched and runs until it compacts
-      await ticksUntil(server, () => compactionsOf(server, id) === 1);
+      await ticksUntil(
+        server,
+        async () => (await compactionsOf(server, id)) === 1,
+      );
 
       // Then the console can see how often it has compacted on this task
-      expect(compactionsOf(server, id)).toBe(1);
+      expect(await compactionsOf(server, id)).toBe(1);
 
       server.shutdown();
     },
@@ -331,9 +341,9 @@ describe("Feature: what the slots view says about a running agent", () => {
   testInTempDirs(
     "a closed task stays in the tasks view",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -376,9 +386,9 @@ describe("Feature: the log of every transition applied", () => {
   testInTempDirs(
     "every applied transition is one line with a from, a to and an author",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -425,7 +435,7 @@ describe("Feature: commands the console writes for the server", () => {
     "a written command toggles the scheduler and an agent, and is consumed",
     async () => {
       // Given a running server watching for console commands
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the console writes the first of the three commands
@@ -433,7 +443,9 @@ describe("Feature: commands the console writes for the server", () => {
 
       // Then each is applied and the file is consumed rather than reapplied
       await applied(() => server.schedulerEnabled);
-      expect(fs.existsSync(pathsOf(server).consoleCommand)).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).consoleCommand)).toBe(
+        false,
+      );
 
       writeCommand(pathsOf(server), {
         command: "agent",
@@ -454,7 +466,7 @@ describe("Feature: commands the console writes for the server", () => {
     "a command left behind by a dead server is applied at startup",
     async () => {
       // Given a command written while no server was listening
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const first = await serverFor(fixture);
       first.shutdown();
       writeCommand(pathsOf(first), { command: "scheduler", enabled: true });
@@ -464,7 +476,9 @@ describe("Feature: commands the console writes for the server", () => {
 
       // Then it applies the waiting command and consumes it
       expect(second.schedulerEnabled).toBe(true);
-      expect(fs.existsSync(pathsOf(second).consoleCommand)).toBe(false);
+      expect(await fs.promises.exists(pathsOf(second).consoleCommand)).toBe(
+        false,
+      );
 
       second.shutdown();
     },
@@ -475,7 +489,7 @@ describe("Feature: commands the console writes for the server", () => {
     "a command naming no agent in the pool is logged, not thrown",
     async () => {
       // Given a running server watching for console commands
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the console names an agent that is not in the pool
@@ -487,15 +501,15 @@ describe("Feature: commands the console writes for the server", () => {
 
       // Then the refusal is logged and the server carries on running
       await eventually(
-        () =>
-          fs
-            .readFileSync(pathsOf(server).serverLog, "utf-8")
-            .includes("refused"),
+        async () =>
+          (
+            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
+          ).includes("refused"),
         "logged the refusal",
       );
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "no agent named",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("no agent named");
       expect(at(server.slotRows(), 0).enabled).toBe(true);
 
       server.shutdown();
@@ -505,19 +519,25 @@ describe("Feature: commands the console writes for the server", () => {
 });
 
 describe("Feature: turning an agent off and on", () => {
-  function pool(fixture: Fixture, entries: Record<string, unknown>[]): void {
-    fs.writeFileSync(fixture.agentsPath, JSON.stringify({ agents: entries }));
+  async function pool(
+    fixture: Fixture,
+    entries: Record<string, unknown>[],
+  ): Promise<void> {
+    await fs.promises.writeFile(
+      fixture.agentsPath,
+      JSON.stringify({ agents: entries }),
+    );
   }
 
   testInTempDirs(
     "an agent configured disabled is never dispatched to",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task nobody picks up");
-      pool(fixture, [
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task nobody picks up");
+      await pool(fixture, [
         { type: "pi", provider: "fake", model: "fake", enabled: false },
       ]);
-      setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
+      await setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
 
       // Given a queued task and a pool whose only agent is turned off
       const server = await serverFor(fixture);
@@ -541,8 +561,8 @@ describe("Feature: turning an agent off and on", () => {
   testInTempDirs(
     "disabling an agent disables every one of its slots",
     async () => {
-      const fixture = makeFixture();
-      pool(fixture, [
+      const fixture = await makeFixture();
+      await pool(fixture, [
         { type: "pi", provider: "fake", model: "fake", slots: 3 },
         { type: "pi", provider: "other", model: "other", slots: 1 },
       ]);
@@ -572,9 +592,9 @@ describe("Feature: turning an agent off and on", () => {
   testInTempDirs(
     "a disabled agent takes no work and a re-enabled one takes it again",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task", ["true"]);
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task", ["true"]);
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -608,9 +628,9 @@ describe("Feature: turning an agent off and on", () => {
   testInTempDirs(
     "a slot running when its agent is disabled finishes that task first",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A slow task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A slow task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -654,7 +674,7 @@ describe("Feature: turning an agent off and on", () => {
     "a slot name passed where an agent belongs is refused",
     async () => {
       // Given a server whose pool holds the one agent pi-fake-fake
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the name of that agent's first slot is passed where an agent belongs
@@ -672,7 +692,7 @@ describe("Feature: turning an agent off and on", () => {
     "a name the pool never held is refused with the agents it does hold",
     async () => {
       // Given a server whose pool holds the one agent pi-fake-fake
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the name nope is passed where an agent belongs
@@ -691,9 +711,9 @@ describe("Feature: aborting the command an agent is running", () => {
   testInTempDirs(
     "aborting a busy slot kills the bash call and the agent finishes its turn",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task to abort");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task to abort");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -722,9 +742,9 @@ describe("Feature: aborting the command an agent is running", () => {
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
       expect(stateOf(server, id)).not.toBe("WORK");
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "aborted bash: git status",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("aborted bash: git status");
 
       server.shutdown();
     },
@@ -735,7 +755,7 @@ describe("Feature: aborting the command an agent is running", () => {
     "aborting an IDLE slot throws",
     async () => {
       // Given a slot the scheduler has dispatched nothing to
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the manager aborts it
@@ -753,7 +773,7 @@ describe("Feature: aborting the command an agent is running", () => {
     "aborting an unknown slot name throws, listing the pool's slot names",
     async () => {
       // Given a server whose pool holds one slot
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the manager aborts a slot that is not in the pool
@@ -772,7 +792,7 @@ describe("Feature: aborting the command an agent is running", () => {
     "aborting by agent key (no slot suffix) throws",
     async () => {
       // Given a server whose slot names carry a number
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the manager aborts using the agent key rather than the slot name
@@ -789,9 +809,9 @@ describe("Feature: aborting the command an agent is running", () => {
   testInTempDirs(
     "a written slot_abort command file drives applyCommand and kills the tool call",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task to abort via command");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task to abort via command");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -818,18 +838,18 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // Then the command is killed, exactly as the manager's own abort would
       await eventually(
-        () =>
-          fs
-            .readFileSync(pathsOf(server).serverLog, "utf-8")
-            .includes("aborted bash"),
+        async () =>
+          (
+            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
+          ).includes("aborted bash"),
         "killed the command",
       );
       server.setSchedulerEnabled(false);
       await server.drain();
       await until(server, () => stateOf(server, id) !== "WORK", 20);
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "aborted bash: git status",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("aborted bash: git status");
 
       server.shutdown();
     },
@@ -840,7 +860,7 @@ describe("Feature: aborting the command an agent is running", () => {
     "a written slot_abort naming an idle slot is logged and dropped",
     async () => {
       // Given a slot the scheduler has dispatched nothing to
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
 
       // When the console writes an abort for that slot
@@ -851,15 +871,15 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // Then the refusal is logged and the server carries on running
       await eventually(
-        () =>
-          fs
-            .readFileSync(pathsOf(server).serverLog, "utf-8")
-            .includes("refused"),
+        async () =>
+          (
+            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
+          ).includes("refused"),
         "logged the refusal",
       );
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        "not running",
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain("not running");
 
       server.shutdown();
     },
@@ -872,7 +892,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
     "detaching stops the server listening on the console channel",
     async () => {
       // Given a running server that has applied a console command already
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const server = await serverFor(fixture);
       writeCommand(pathsOf(server), { command: "scheduler", enabled: true });
       await eventually(() => server.schedulerEnabled, "started its scheduler");
@@ -884,11 +904,13 @@ describe("Feature: a manager that exits while its agents run on", () => {
       // Then a command written afterwards is neither consumed nor applied
       writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
       await Bun.sleep(200);
-      expect(fs.existsSync(pathsOf(server).consoleCommand)).toBe(true);
+      expect(await fs.promises.exists(pathsOf(server).consoleCommand)).toBe(
+        true,
+      );
       expect(server.schedulerEnabled).toBe(true);
 
       // Then the views it published are left on disk for the next manager
-      expect(fs.existsSync(pathsOf(server).slotsView)).toBe(true);
+      expect(await fs.promises.exists(pathsOf(server).slotsView)).toBe(true);
 
       server.shutdown();
     },
@@ -898,8 +920,8 @@ describe("Feature: a manager that exits while its agents run on", () => {
   testInTempDirs(
     "a slot still running for a previous manager is not offered as capacity",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
 
       const alive = Bun.spawn(["sleep", "30"]);
       const runtime = runtimeOf(fixture);

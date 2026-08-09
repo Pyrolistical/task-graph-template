@@ -47,10 +47,10 @@ afterEach(async () => {
 });
 
 async function connect(fixture: Fixture) {
-  fs.mkdirSync(fixture.tasksDir, { recursive: true });
+  await fs.promises.mkdir(fixture.tasksDir, { recursive: true });
   const agentsPath = defaultAgentsPath(fixture.tasksDir);
-  if (!fs.existsSync(agentsPath)) {
-    fs.writeFileSync(
+  if (!(await fs.promises.exists(agentsPath))) {
+    await fs.promises.writeFile(
       agentsPath,
       JSON.stringify({
         agents: [{ type: "pi", provider: "fake", model: "fake", slots: 1 }],
@@ -107,7 +107,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "the manager gets one tool per judgement it can make",
     async () => {
       // Given a server running over stdio against a project
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager asks what it can do
@@ -139,7 +139,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "every view the console draws is readable as a resource",
     async () => {
       // Given a server running over stdio against a project
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager asks what it can read
@@ -166,7 +166,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "the manager is told where the graph, the pool and the prompts are",
     async () => {
       // Given a server running over stdio against a project
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager reads the paths resource
@@ -196,8 +196,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_feedback sends the task back with the findings in the body and the findings file",
     async () => {
       // Given a task that has reached the manager for review
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       takeClaim(fixture.tasksDir, id, {
         slotName: "manager",
         pid: process.pid,
@@ -238,8 +238,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "reload_prompts picks up an override written after startup",
     async () => {
       // Given a running server whose project overrides no prompts yet
-      const fixture = makeFixture();
-      readyTask(fixture, "Do a thing");
+      const fixture = await makeFixture();
+      await readyTask(fixture, "Do a thing");
       const client = await connect(fixture);
       const before = JSON.parse(
         textOf(
@@ -250,9 +250,15 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(before).not.toContain(override);
 
       // Given an override written after the server started
-      writeOverride(fixture, "prompts/WORK.md", "Start on ../ASSIGNMENT.md.\n");
-      fs.mkdirSync(path.join(fixture.tasksDir, "prompts"), { recursive: true });
-      fs.writeFileSync(override, "Start on ../ASSIGNMENT.md.\n");
+      await writeOverride(
+        fixture,
+        "prompts/WORK.md",
+        "Start on ../ASSIGNMENT.md.\n",
+      );
+      await fs.promises.mkdir(path.join(fixture.tasksDir, "prompts"), {
+        recursive: true,
+      });
+      await fs.promises.writeFile(override, "Start on ../ASSIGNMENT.md.\n");
 
       // When the prompts are reloaded
       const after = JSON.parse(
@@ -273,7 +279,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_create returns a path the manager can edit directly",
     async () => {
       // Given a project with no tasks in it yet
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager creates one
@@ -288,7 +294,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then it takes the first id, and the manager is told which file to edit
       expect(created.id).toBe("000001");
-      expect(fs.existsSync(created.filePath)).toBe(true);
+      expect(await fs.promises.exists(created.filePath)).toBe(true);
 
       await client.close();
     },
@@ -299,8 +305,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_write_body replaces the body and leaves the frontmatter alone",
     async () => {
       // Given a task an agent is already working on
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       const client = await connect(fixture);
 
       // When the manager rewrites its body
@@ -310,7 +316,7 @@ describe("Feature: the tool surface the manager works through", () => {
       });
 
       // Then the prose is replaced and the task stays where it was
-      const document = fs.readFileSync(
+      const document = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -326,8 +332,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "a transition the state does not allow comes back as an error, not a mutation",
     async () => {
       // Given a task an agent is working on, which cannot be resumed
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       const client = await connect(fixture);
 
       // When the manager tries to resume it
@@ -343,7 +349,7 @@ describe("Feature: the tool surface the manager works through", () => {
       );
 
       // Then the document is untouched, so a refusal changes nothing
-      const document = fs.readFileSync(
+      const document = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -358,7 +364,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "a task is authored by creating it, writing its body and submitting it",
     async () => {
       // Given a project with no tasks in it yet
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // Given a task created with a goal and a check, waiting to be submitted
@@ -374,7 +380,7 @@ describe("Feature: the tool surface the manager works through", () => {
         name: "task_write_body",
         arguments: { id: created.id, body: "# Goal\n\nDo it." },
       });
-      editTaskFile(fixture, created.id, (meta) => {
+      await editTaskFile(fixture, created.id, (meta) => {
         meta.checks = ["bun test"];
       });
 
@@ -401,8 +407,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "a task with dependencies is submitted into BLOCKED",
     async () => {
       // Given a task edited to depend on another that is still open
-      const fixture = makeFixture();
-      const dep = readyTask(fixture, "the dependency");
+      const fixture = await makeFixture();
+      const dep = await readyTask(fixture, "the dependency");
       const client = await connect(fixture);
       const created = JSON.parse(
         textOf(
@@ -412,7 +418,7 @@ describe("Feature: the tool surface the manager works through", () => {
           }),
         ),
       );
-      editTaskFile(fixture, created.id, (meta) => {
+      await editTaskFile(fixture, created.id, (meta) => {
         meta.depends_on = [dep];
       });
 
@@ -438,7 +444,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_submit refuses a task that depends on itself in a loop",
     async () => {
       // Given two tasks edited to depend on each other
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
       const first = JSON.parse(
         textOf(
@@ -456,10 +462,10 @@ describe("Feature: the tool surface the manager works through", () => {
           }),
         ),
       );
-      editTaskFile(fixture, first.id, (meta) => {
+      await editTaskFile(fixture, first.id, (meta) => {
         meta.depends_on = [second.id];
       });
-      editTaskFile(fixture, second.id, (meta) => {
+      await editTaskFile(fixture, second.id, (meta) => {
         meta.depends_on = [first.id];
       });
 
@@ -484,9 +490,9 @@ describe("Feature: the tool surface the manager works through", () => {
   testInTempDirs(
     "task_submit from MANAGER_REVIEW lands the work and closes the task",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -515,8 +521,12 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the task closes and its work is on the base branch
       expect(result.to).toBe("CLOSED");
-      expect(fs.existsSync(closedTaskPath(fixture.tasksDir, id))).toBe(true);
-      expect(fs.existsSync(path.join(fixture.repo, "a.txt"))).toBe(true);
+      expect(
+        await fs.promises.exists(closedTaskPath(fixture.tasksDir, id)),
+      ).toBe(true);
+      expect(await fs.promises.exists(path.join(fixture.repo, "a.txt"))).toBe(
+        true,
+      );
 
       await client.close();
     },
@@ -527,8 +537,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "the views are readable as resources and carry a cursor",
     async () => {
       // Given a project with a task in it
-      const fixture = makeFixture();
-      readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      await readyTask(fixture, "A task");
       const client = await connect(fixture);
 
       // Given another task created beside the first
@@ -565,8 +575,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "disable_agent and enable_agent move every slot of one agent",
     async () => {
       // Given a pool of two agents, one of them with two slots
-      const fixture = makeFixture();
-      fs.writeFileSync(
+      const fixture = await makeFixture();
+      await fs.promises.writeFile(
         defaultAgentsPath(fixture.tasksDir),
         JSON.stringify({
           agents: [
@@ -622,8 +632,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "the pool is read from the tasks directory",
     async () => {
       // Given a pool file written into the project's task directory
-      const fixture = makeFixture();
-      fs.writeFileSync(
+      const fixture = await makeFixture();
+      await fs.promises.writeFile(
         defaultAgentsPath(fixture.tasksDir),
         JSON.stringify({
           agents: [{ type: "pi", provider: "tasks", model: "tasks", slots: 2 }],
@@ -649,8 +659,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_hold parks a task with the manager's reason on it",
     async () => {
       // Given a task an agent is working on
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       const client = await connect(fixture);
 
       // When the manager parks it
@@ -667,7 +677,7 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(result.to).toBe("HELD_WORK");
 
       // Then the reason it was parked is on the document for a person to read
-      const document = fs.readFileSync(
+      const document = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -682,8 +692,8 @@ describe("Feature: the tool surface the manager works through", () => {
     "task_resume sends a held task back to the phase it was held from",
     async () => {
       // Given a task the manager parked while it was being worked on
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
       const client = await connect(fixture);
       await client.callTool({
         name: "task_hold",
@@ -708,8 +718,8 @@ describe("Feature: the tool surface the manager works through", () => {
 
   testInTempDirs("task_abort closes a held task for good", async () => {
     // Given a task the manager parked and has decided against
-    const fixture = makeFixture();
-    const id = readyTask(fixture, "A task");
+    const fixture = await makeFixture();
+    const id = await readyTask(fixture, "A task");
     const client = await connect(fixture);
     await client.callTool({
       name: "task_hold",
@@ -731,7 +741,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "enable_scheduler is published where the console reads it",
     async () => {
       // Given a server that starts with nothing being dispatched
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager turns dispatching on
@@ -749,7 +759,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "disable_scheduler is published where the console reads it",
     async () => {
       // Given a server that has been dispatching
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
       await client.callTool({ name: "enable_scheduler", arguments: {} });
       expect(await schedulingOf(client)).toBe(true);
@@ -769,7 +779,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "the error resource is empty while the server is working",
     async () => {
       // Given a server that started cleanly
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager reads the error resource
@@ -789,7 +799,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
   testInTempDirs("slot_abort refuses a slot that is idle", async () => {
     // Given a pool whose slots are all sitting idle
-    const fixture = makeFixture();
+    const fixture = await makeFixture();
     const client = await connect(fixture);
     const slots = (await resourceOf(client, "orchestrator://slots", SlotsView))
       .slots;
@@ -811,7 +821,7 @@ describe("Feature: the tool surface the manager works through", () => {
     "slot_abort names the pool when the slot is unknown",
     async () => {
       // Given a server whose pool holds one slot
-      const fixture = makeFixture();
+      const fixture = await makeFixture();
       const client = await connect(fixture);
 
       // When the manager aborts a slot that does not exist
@@ -830,10 +840,10 @@ describe("Feature: the tool surface the manager works through", () => {
 });
 
 describe("Feature: a server that could not start", () => {
-  function brokenPool(): Fixture {
-    const fixture = makeFixture();
-    fs.mkdirSync(fixture.tasksDir, { recursive: true });
-    fs.writeFileSync(
+  async function brokenPool(): Promise<Fixture> {
+    const fixture = await makeFixture();
+    await fs.promises.mkdir(fixture.tasksDir, { recursive: true });
+    await fs.promises.writeFile(
       defaultAgentsPath(fixture.tasksDir),
       '{ "agents": [{ "type": "pi" }] }',
     );
@@ -844,7 +854,7 @@ describe("Feature: a server that could not start", () => {
     "the error resource says why the server did not start",
     async () => {
       // Given a project whose pool file the server refuses to load
-      const fixture = brokenPool();
+      const fixture = await brokenPool();
       const client = await connect(fixture);
 
       // When the manager reads the error resource
@@ -867,7 +877,7 @@ describe("Feature: a server that could not start", () => {
     "a tool fails with that error rather than killing the server",
     async () => {
       // Given a project whose pool file the server refuses to load
-      const fixture = brokenPool();
+      const fixture = await brokenPool();
       const client = await connect(fixture);
 
       // When the manager creates a task
@@ -890,7 +900,7 @@ describe("Feature: a server that could not start", () => {
     "a view resource fails with that error rather than reading nothing",
     async () => {
       // Given a project whose pool file the server refuses to load
-      const fixture = brokenPool();
+      const fixture = await brokenPool();
       const client = await connect(fixture);
 
       // When the manager reads the slots view

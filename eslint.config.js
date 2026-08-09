@@ -21,6 +21,7 @@ export default defineConfig({
   },
   rules: {
     "no-control-regex": "off",
+    "require-await": "error",
     "@typescript-eslint/no-unnecessary-type-assertion": "error",
     "@typescript-eslint/no-unused-vars": [
       "error",

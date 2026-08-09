@@ -57,7 +57,7 @@ export function build(startup: Startup): McpServer {
         "Create a new task and return the path of its document. The document is yours to edit directly until it leaves NEW.",
       inputSchema: z.object({ title: z.string().min(1) }),
     },
-    async ({ title }) => applied(live().createTask(title)),
+    ({ title }) => applied(live().createTask(title)),
   );
 
   mcp.registerTool(
@@ -67,7 +67,7 @@ export function build(startup: Startup): McpServer {
         "Replace a task document's body under the graph lock. Use this for a task you do not hold; edit the file directly for one you do.",
       inputSchema: z.object({ id: taskId, body: z.string().min(1) }),
     },
-    async ({ id, body }) => applied({ filePath: live().writeBody(id, body) }),
+    ({ id, body }) => applied({ filePath: live().writeBody(id, body) }),
   );
 
   mcp.registerTool(
@@ -90,8 +90,7 @@ export function build(startup: Startup): McpServer {
         findings: z.array(z.string().min(1)).min(1),
       }),
     },
-    async ({ id, findings }) =>
-      applied(live().feedback(id, findings, "manager")),
+    ({ id, findings }) => applied(live().feedback(id, findings, "manager")),
   );
 
   mcp.registerTool(
@@ -101,7 +100,7 @@ export function build(startup: Startup): McpServer {
         "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in BLOCKED instead, and a task that unblocks starts again at DESIGN.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => applied(live().resume(id)),
+    ({ id }) => applied(live().resume(id)),
   );
 
   mcp.registerTool(
@@ -111,7 +110,7 @@ export function build(startup: Startup): McpServer {
         "Park a task, whether or not an agent is holding it. It lands in the held state of the phase it was in: HELD_DESIGN from DESIGN or DESIGN_REVIEW, HELD_PLAN from PLAN or PLAN_REVIEW, HELD_WORK from WORK, CHECK or WORK_REVIEW. The document is yours to edit directly while it is held; task_resume sends it back, task_abort closes it.",
       inputSchema: z.object({ id: taskId, reason: z.string().min(1) }),
     },
-    async ({ id, reason }) => applied(live().hold(id, reason)),
+    ({ id, reason }) => applied(live().hold(id, reason)),
   );
 
   mcp.registerTool(
@@ -121,7 +120,7 @@ export function build(startup: Startup): McpServer {
         "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => applied(live().abort(id)),
+    ({ id }) => applied(live().abort(id)),
   );
 
   mcp.registerTool(
@@ -154,7 +153,7 @@ export function build(startup: Startup): McpServer {
         "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
       inputSchema: z.object({}),
     },
-    async () => json(live().reloadPrompts()),
+    () => json(live().reloadPrompts()),
   );
 
   mcp.registerTool(
@@ -164,7 +163,7 @@ export function build(startup: Startup): McpServer {
         "Let an agent be dispatched to again. Names an agent, not a slot: type-provider-model, without the trailing slot number.",
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
-    async ({ agent }) => applied(live().setAgentEnabled(agent, true)),
+    ({ agent }) => applied(live().setAgentEnabled(agent, true)),
   );
 
   mcp.registerTool(
@@ -174,7 +173,7 @@ export function build(startup: Startup): McpServer {
         "Stop dispatching to every slot of an agent. Names an agent, not a slot: type-provider-model, without the trailing slot number. Slots running right now finish their task first; they read as still running with enabled false, and go DISABLED once released.",
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
-    async ({ agent }) => applied(live().setAgentEnabled(agent, false)),
+    ({ agent }) => applied(live().setAgentEnabled(agent, false)),
   );
 
   mcp.registerTool(
@@ -184,7 +183,7 @@ export function build(startup: Startup): McpServer {
         "Abort whatever a slot is doing right now. Names a slot (with the trailing number), only works while the slot is doing something. The aborted turn ends the assignment and releases the slot.",
       inputSchema: z.object({ slot: z.string().min(1) }),
     },
-    async ({ slot }) => applied(live().abortSlot(slot)),
+    ({ slot }) => applied(live().abortSlot(slot)),
   );
 
   function resource(
@@ -194,7 +193,7 @@ export function build(startup: Startup): McpServer {
     mimeType: string,
     read: () => string,
   ): void {
-    mcp.registerResource(name, uri, { description, mimeType }, async () => ({
+    mcp.registerResource(name, uri, { description, mimeType }, () => ({
       contents: [{ uri, mimeType, text: read() }],
     }));
   }

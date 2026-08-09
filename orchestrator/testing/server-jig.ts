@@ -80,15 +80,15 @@ export function serverFor(fixture: Fixture): Promise<Server> {
   });
 }
 
-export function editTaskFile(
+export async function editTaskFile(
   fixture: Fixture,
   id: string,
   edit: (meta: TaskMeta) => void,
-): void {
+): Promise<void> {
   const filePath = activeTaskPath(fixture.tasksDir, id);
   const { meta, body } = readTaskFile(filePath);
   edit(meta);
-  fs.writeFileSync(filePath, rebuildDocument(meta, body));
+  await fs.promises.writeFile(filePath, rebuildDocument(meta, body));
 }
 
 export async function settle(server: Server, ticks = 6): Promise<void> {
@@ -100,32 +100,32 @@ export async function settle(server: Server, ticks = 6): Promise<void> {
 
 export async function until(
   server: Server,
-  done: () => boolean,
+  done: () => boolean | Promise<boolean>,
   ticks = 12,
 ): Promise<void> {
-  for (let i = 0; i < ticks && !done(); i++) {
+  for (let i = 0; i < ticks && !(await done()); i++) {
     await server.tick();
     await server.drain();
   }
-  if (!done()) {
+  if (!(await done())) {
     throw new Error(
-      `the server never reached the expected state in ${ticks} ticks\n${fs.readFileSync(pathsOf(server).serverLog, "utf-8")}`,
+      `the server never reached the expected state in ${ticks} ticks\n${await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")}`,
     );
   }
 }
 
 export async function ticksUntil(
   server: Server,
-  done: () => boolean,
+  done: () => boolean | Promise<boolean>,
   ticks = 40,
 ): Promise<void> {
-  for (let i = 0; i < ticks && !done(); i++) {
+  for (let i = 0; i < ticks && !(await done()); i++) {
     await server.tick();
     await Bun.sleep(25);
   }
-  if (!done()) {
+  if (!(await done())) {
     throw new Error(
-      `the server never reached the expected state in ${ticks} ticks\n${fs.readFileSync(pathsOf(server).serverLog, "utf-8")}`,
+      `the server never reached the expected state in ${ticks} ticks\n${await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")}`,
     );
   }
 }
@@ -189,11 +189,16 @@ export async function reaches(
   await until(server, () => stateOf(server, id) === state, ticks);
 }
 
-export function compactionsOf(server: Server, id: string): number | null {
-  if (!fs.existsSync(pathsOf(server).slotsView)) {
+export async function compactionsOf(
+  server: Server,
+  id: string,
+): Promise<number | null> {
+  if (!(await fs.promises.exists(pathsOf(server).slotsView))) {
     return null;
   }
-  const view = JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8"));
+  const view = JSON.parse(
+    await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
+  );
   const busy = view.slots.find(
     (agent: { task_id: string | null }) => agent.task_id === id,
   );

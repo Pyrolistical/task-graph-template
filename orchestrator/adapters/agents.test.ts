@@ -329,50 +329,56 @@ describe("Feature: loading the pool of agents", () => {
     },
   );
 
-  testInTempDirs("a pi agent always gets its own home, declared or not", () => {
-    // Given a pi agent declaring one path of its own
-    const home = tempDir("pi-home-");
-    const slot = at(
-      parsePool({
-        agents: [
-          { type: "pi", provider: "anthropic", model: "m", write: [home] },
-        ],
-      }),
-      0,
-    );
+  testInTempDirs(
+    "a pi agent always gets its own home, declared or not",
+    async () => {
+      // Given a pi agent declaring one path of its own
+      const home = await tempDir("pi-home-");
+      const slot = at(
+        parsePool({
+          agents: [
+            { type: "pi", provider: "anthropic", model: "m", write: [home] },
+          ],
+        }),
+        0,
+      );
 
-    // When the paths it may write are worked out
-    const writable = agentWrite(slot);
+      // When the paths it may write are worked out
+      const writable = agentWrite(slot);
 
-    // Then pi's home comes on top of what it declared, because pi cannot run without it
-    expect(writable).toEqual([home, PI_HOME]);
-  });
+      // Then pi's home comes on top of what it declared, because pi cannot run without it
+      expect(writable).toEqual([home, PI_HOME]);
+    },
+  );
 
-  testInTempDirs("an agent of another type gets only what it declared", () => {
-    // Given an agent that is not pi, declaring one path of its own
-    const home = tempDir("pi-home-");
-    const slot = at(
-      parsePool({
-        agents: [
-          { type: "other", provider: "anthropic", model: "m", write: [home] },
-        ],
-      }),
-      0,
-    );
+  testInTempDirs(
+    "an agent of another type gets only what it declared",
+    async () => {
+      // Given an agent that is not pi, declaring one path of its own
+      const home = await tempDir("pi-home-");
+      const slot = at(
+        parsePool({
+          agents: [
+            { type: "other", provider: "anthropic", model: "m", write: [home] },
+          ],
+        }),
+        0,
+      );
 
-    // When the paths it may write are worked out
-    const writable = agentWrite(slot);
+      // When the paths it may write are worked out
+      const writable = agentWrite(slot);
 
-    // Then it is given that path and nothing besides
-    expect(writable).toEqual([home]);
-  });
+      // Then it is given that path and nothing besides
+      expect(writable).toEqual([home]);
+    },
+  );
 
   testInTempDirs(
     "a check may write everything any agent in the pool declared",
-    () => {
+    async () => {
       // Given a pool of two agents declaring overlapping write paths
-      const one = tempDir("check-write-");
-      const two = tempDir("check-write-");
+      const one = await tempDir("check-write-");
+      const two = await tempDir("check-write-");
       const slots = parsePool({
         agents: [
           { type: "pi", provider: "anthropic", model: "m", write: [one] },
@@ -567,25 +573,29 @@ describe("Feature: the sandbox an agent is spawned into", () => {
 
   testInTempDirs(
     "a commit with no message fails rather than waiting forever",
-    () => {
+    async () => {
       // Given a repository with something staged, and the sandbox's environment
-      const repo = tempDir("sandbox-editor-");
+      const repo = await tempDir("sandbox-editor-");
       git.gitOrThrow(repo, ["init"]);
-      fs.writeFileSync(path.join(repo, "a.txt"), "a", "utf-8");
+      await fs.promises.writeFile(path.join(repo, "a.txt"), "a", "utf-8");
       git.gitOrThrow(repo, ["add", "a.txt"]);
 
       // When a bare git commit is run under it
-      const result = Bun.spawnSync({
+      const proc = Bun.spawn({
         cmd: ["git", "commit"],
         cwd: repo,
         env: { ...process.env, ...NON_INTERACTIVE_ENV },
         stdout: "pipe",
         stderr: "pipe",
       });
+      const [stderr, exitCode] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
 
       // Then it fails at once instead of blocking on an editor that never opens
-      expect(result.exitCode).not.toBe(0);
-      expect(result.stderr.toString()).toContain("empty commit message");
+      expect(exitCode).not.toBe(0);
+      expect(stderr).toContain("empty commit message");
     },
   );
 
@@ -611,16 +621,19 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     expect(args[at(args, "--chdir") + 1]).toBe(policy.cwd);
   });
 
-  testInTempDirs("a declared write path that does not exist is skipped", () => {
-    // Given a declared path nothing has created yet
-    const missing = path.join(tempDir("sandbox-missing-"), "nope");
+  testInTempDirs(
+    "a declared write path that does not exist is skipped",
+    async () => {
+      // Given a declared path nothing has created yet
+      const missing = path.join(await tempDir("sandbox-missing-"), "nope");
 
-    // When the overlays are worked out
-    const mounted = overlays([missing]);
+      // When the overlays are worked out
+      const mounted = overlays([missing]);
 
-    // Then it is skipped, because there is nothing there to overlay
-    expect(mounted).toEqual([]);
-  });
+      // Then it is skipped, because there is nothing there to overlay
+      expect(mounted).toEqual([]);
+    },
+  );
 
   testInTempDirs(
     "a write path of the home shorthand alone becomes the home directory",
@@ -661,9 +674,9 @@ describe("Feature: the sandbox an agent is spawned into", () => {
     expect(expanded).toBe("/abs/path");
   });
 
-  testInTempDirs("a path declared twice is mounted once", () => {
+  testInTempDirs("a path declared twice is mounted once", async () => {
     // Given the same path declared by two agents in the pool
-    const dir = tempDir("sandbox-write-");
+    const dir = await tempDir("sandbox-write-");
 
     // When the overlays are worked out
     const mounted = overlays([dir, dir]);
@@ -759,41 +772,51 @@ describe("Feature: the sandbox an agent is spawned into", () => {
 });
 
 describe("Feature: the sandbox as it actually runs", () => {
-  function run(policy: Parameters<typeof sandbox>[0], script: string) {
-    const proc = Bun.spawnSync([...sandbox(policy), "bash", "-c", script]);
-    return `${proc.stdout.toString()}${proc.stderr.toString()}`;
+  async function run(policy: Parameters<typeof sandbox>[0], script: string) {
+    const proc = Bun.spawn([...sandbox(policy), "bash", "-c", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return `${stdout}${stderr}`;
   }
 
-  testInTempDirs("the caps we ask for are the caps the kernel applies", () => {
-    // Given a check sandboxed with the limits a check is given
-    const workspace = tempDir("sandbox-limits-");
-    const policy = {
-      cwd: workspace,
-      writable: [workspace],
-      readable: [],
-      overlay: [],
-      oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
-    };
+  testInTempDirs(
+    "the caps we ask for are the caps the kernel applies",
+    async () => {
+      // Given a check sandboxed with the limits a check is given
+      const workspace = await tempDir("sandbox-limits-");
+      const policy = {
+        cwd: workspace,
+        writable: [workspace],
+        readable: [],
+        overlay: [],
+        oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
+      };
 
-    // When it reads its own cgroup and oom score from inside the sandbox
-    const output = run(
-      policy,
-      "cg=$(cut -d: -f3 /proc/self/cgroup); cat /sys/fs/cgroup$cg/memory.max /sys/fs/cgroup$cg/memory.swap.max /sys/fs/cgroup$cg/pids.max /proc/self/oom_score_adj",
-    );
+      // When it reads its own cgroup and oom score from inside the sandbox
+      const output = await run(
+        policy,
+        "cg=$(cut -d: -f3 /proc/self/cgroup); cat /sys/fs/cgroup$cg/memory.max /sys/fs/cgroup$cg/memory.swap.max /sys/fs/cgroup$cg/pids.max /proc/self/oom_score_adj",
+      );
 
-    // Then it is capped at 8G of memory with no swap, at 512 tasks, and at the score 400
-    expect(output.split("\n").slice(0, 4)).toEqual([
-      String(8 * 1024 * 1024 * 1024),
-      "0",
-      TASKS_MAX,
-      String(CHECK_OOM_SCORE_ADJUST),
-    ]);
-  });
+      // Then it is capped at 8G of memory with no swap, at 512 tasks, and at the score 400
+      expect(output.split("\n").slice(0, 4)).toEqual([
+        String(8 * 1024 * 1024 * 1024),
+        "0",
+        TASKS_MAX,
+        String(CHECK_OOM_SCORE_ADJUST),
+      ]);
+    },
+  );
 
-  testInTempDirs("the repository can be read but never written", () => {
+  testInTempDirs("the repository can be read but never written", async () => {
     // Given a sandbox with the repository bound readable
-    const repo = tempRepo();
-    const workspace = tempDir("sandbox-work-");
+    const repo = await tempRepo();
+    const workspace = await tempDir("sandbox-work-");
     const policy = {
       cwd: workspace,
       writable: [workspace],
@@ -804,21 +827,21 @@ describe("Feature: the sandbox as it actually runs", () => {
 
     // When a command reads from the repository and then writes to it
     const output = [
-      run(policy, `cat ${repo}/a.txt`),
-      run(policy, `echo x > ${repo}/poke`),
+      await run(policy, `cat ${repo}/a.txt`),
+      await run(policy, `echo x > ${repo}/poke`),
     ];
 
     // Then the read succeeds, the write is refused, and nothing lands on disk
     expect(output[0]).toContain("one");
     expect(output[1]).toContain("Read-only file system");
-    expect(fs.existsSync(path.join(repo, "poke"))).toBe(false);
+    expect(await fs.promises.exists(path.join(repo, "poke"))).toBe(false);
   });
 
   testInTempDirs(
     "the workspace is writable and the toolchain is readable",
-    () => {
+    async () => {
       // Given a sandbox with only its own workspace writable
-      const workspace = tempDir("sandbox-work-");
+      const workspace = await tempDir("sandbox-work-");
       const policy = {
         cwd: workspace,
         writable: [workspace],
@@ -829,8 +852,8 @@ describe("Feature: the sandbox as it actually runs", () => {
 
       // When a command writes in the workspace and reads the installed toolchain
       const output = [
-        run(policy, `echo ok > ${workspace}/f && cat ${workspace}/f`),
-        run(policy, "test -d /usr/local && echo readable"),
+        await run(policy, `echo ok > ${workspace}/f && cat ${workspace}/f`),
+        await run(policy, "test -d /usr/local && echo readable"),
       ];
 
       // Then the file written in the workspace reads back, and the toolchain under /usr/local is there to read
@@ -841,9 +864,9 @@ describe("Feature: the sandbox as it actually runs", () => {
 
   testInTempDirs(
     "a toolchain's cache is writable and dies with the sandbox",
-    () => {
+    async () => {
       // Given a sandbox with the toolchain cache overlaid
-      const workspace = tempDir("sandbox-work-");
+      const workspace = await tempDir("sandbox-work-");
       const policy = {
         cwd: workspace,
         writable: [workspace],
@@ -854,20 +877,20 @@ describe("Feature: the sandbox as it actually runs", () => {
       const probe = path.join(CACHE_HOME, "sandbox-cache-probe");
 
       // When a command writes into the cache
-      const output = run(policy, `echo ok > ${probe} && cat ${probe}`);
+      const output = await run(policy, `echo ok > ${probe} && cat ${probe}`);
 
       // Then it succeeds inside, and leaves nothing on the real cache afterwards
       expect(output).toContain("ok");
-      expect(fs.existsSync(probe)).toBe(false);
+      expect(await fs.promises.exists(probe)).toBe(false);
     },
   );
 
   testInTempDirs(
     "an agent commits in its worktree without touching the repo",
-    () => {
+    async () => {
       // Given a worktree cloned from a repository the sandbox may only read
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("sandbox-root-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("sandbox-root-"), "worktree");
       git.createWorkspace(repo, "work/000042", workspace, "master");
       const policy = {
         cwd: workspace,
@@ -878,7 +901,7 @@ describe("Feature: the sandbox as it actually runs", () => {
       };
 
       // When a command commits inside the worktree
-      const output = run(
+      const output = await run(
         policy,
         "echo two >> a.txt && git add -A && git commit -qm 'from the sandbox' && git log --oneline -1",
       );

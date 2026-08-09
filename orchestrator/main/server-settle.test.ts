@@ -40,9 +40,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
   testInTempDirs(
     "a finding lands under # Review findings and the task drops back to WORK",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -64,7 +64,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       await reviewCycle(server);
 
       // Then the finding is written into the task body for the worker to read
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -94,9 +94,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
   testInTempDirs(
     "the findings reach the worker as its next prompt, and are cleared once it submits",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -124,16 +124,20 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       await settleTo(server, id, "MANAGER_REVIEW");
 
       // Then the worker's second prompt carried the findings it had to answer
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))[1]).toBe(
+      expect(
+        (await promptsTo(pathsOf(server).sessionDir(id, "worker")))[1],
+      ).toBe(
         promptsOf(server).fragment("WORK-with-findings", {
           findings: [{ finding: "the null case is untested" }],
         }),
       );
       // Then nothing is left queued once the worker has answered them
-      expect(fs.existsSync(pathsOf(server).findings(id))).toBe(false);
-      expect(fs.existsSync(pathsOf(server).messageFile(id, "WORK"))).toBe(
+      expect(await fs.promises.exists(pathsOf(server).findings(id))).toBe(
         false,
       );
+      expect(
+        await fs.promises.exists(pathsOf(server).messageFile(id, "WORK")),
+      ).toBe(false);
 
       server.shutdown();
     },
@@ -143,9 +147,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
   testInTempDirs(
     "the worker sent back by a review works in its own session, never the review's",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -178,11 +182,11 @@ describe("Feature: what a reviewer sends back to the worker", () => {
         `${id}-worker.jsonl`,
       );
       expect(workspaceOf(server, id).session).toBe(worked);
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
-        2,
-      );
       expect(
-        promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+        await promptsTo(pathsOf(server).sessionDir(id, "worker")),
+      ).toHaveLength(2);
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
       ).toHaveLength(2);
 
       server.shutdown();
@@ -193,9 +197,9 @@ describe("Feature: what a reviewer sends back to the worker", () => {
   testInTempDirs(
     "the reviewer gets its own session and a worktree with the work on it",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -224,10 +228,10 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       expect(head).not.toBe(base);
 
       // Then the reviewer read the work in a session of its own
-      const workSessions = fs.readdirSync(
+      const workSessions = await fs.promises.readdir(
         pathsOf(server).sessionDir(id, "worker"),
       );
-      const reviewSessions = fs.readdirSync(
+      const reviewSessions = await fs.promises.readdir(
         pathsOf(server).sessionDir(id, "reviewer"),
       );
       expect(workSessions.length).toBeGreaterThan(0);
@@ -244,9 +248,9 @@ describe("Feature: a review that fails twice", () => {
   testInTempDirs(
     "a first review failure bounces the work back and is counted",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -284,9 +288,9 @@ describe("Feature: a review that fails twice", () => {
   testInTempDirs(
     "a second review failure holds the task with the findings as the reason",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -322,12 +326,14 @@ describe("Feature: a review that fails twice", () => {
       expect(task.claimed_by).toBeNull();
 
       // Then only the first round's findings reached the body
-      const body = bodyOf(activeTaskPath(fixture.tasksDir, id));
+      const body = await bodyOf(activeTaskPath(fixture.tasksDir, id));
       expect(body).toContain("- finding one");
       expect(body).not.toContain("finding two");
 
       // Then the count file is gone and the findings wait for the resume
-      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
+        false,
+      );
       expect(filesOf(fixture).findings(id)).toEqual(["finding two"]);
 
       server.shutdown();
@@ -338,9 +344,9 @@ describe("Feature: a review that fails twice", () => {
   testInTempDirs(
     "a review that finally passes clears the count",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -369,7 +375,9 @@ describe("Feature: a review that fails twice", () => {
 
       // Then the passing review cleared the count
       expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
-      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
+        false,
+      );
       expect(
         transitionsOf(server)
           .read()
@@ -384,9 +392,9 @@ describe("Feature: a review that fails twice", () => {
   testInTempDirs(
     "manager review bounces are never counted",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -430,7 +438,9 @@ describe("Feature: a review that fails twice", () => {
           .read()
           .some((e) => e.transition === "hold"),
       ).toBe(false);
-      expect(fs.existsSync(pathsOf(server).reviewFailures(id))).toBe(false);
+      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
+        false,
+      );
 
       server.shutdown();
     },
@@ -440,9 +450,9 @@ describe("Feature: a review that fails twice", () => {
   testInTempDirs(
     "resume after a review-failure hold starts the count fresh",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -498,9 +508,9 @@ describe("Feature: a submit with nothing committed behind it", () => {
   testInTempDirs(
     "a branch with no commit on it comes back for one",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             { submit: true, notes: "I forgot to commit" },
@@ -517,7 +527,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was nudged once and never held, because the second try passed
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(
         transitionsOf(server)
@@ -533,9 +543,9 @@ describe("Feature: a submit with nothing committed behind it", () => {
   testInTempDirs(
     "an uncommitted change comes back with what git status reports",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -561,7 +571,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was told which file it had left behind, and committed it
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("?? b.txt");
       expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
@@ -577,9 +587,9 @@ describe("Feature: a submit with nothing committed behind it", () => {
   testInTempDirs(
     "an agent that never commits is held, and the slot is released",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: { WORK: [{ submit: true, notes: "forgot to commit" }] },
       });
 
@@ -595,9 +605,9 @@ describe("Feature: a submit with nothing committed behind it", () => {
         "the agent submitted work it never committed: nothing is committed on the branch",
       );
       expect(task.claimed_by).toBeNull();
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
-        5,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "worker")),
+      ).toHaveLength(5);
       expect(at(server.slotRows(), 0).state).toBe("IDLE");
 
       server.shutdown();
@@ -610,9 +620,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "a blocked result holds the task with its message as the reason",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -635,7 +645,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(task.held_reason).toBe("the staging database is unreachable");
       expect(task.claimed_by).toBeNull();
 
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
 
       server.shutdown();
@@ -646,9 +656,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "an agent stuck on one command is asked whether it is blocked, not held",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             { loop: LOOP_LIMIT },
@@ -669,7 +679,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked about the command it repeated, and never held
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("zig build");
       expect(
@@ -686,9 +696,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "an agent that keeps looping is held only once the nudges run out",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, { [id]: { WORK: [{ loop: LOOP_LIMIT }] } });
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, { [id]: { WORK: [{ loop: LOOP_LIMIT }] } });
 
       // Given a worker that repeats one command every time it is nudged
       const server = await serverFor(fixture);
@@ -698,9 +708,9 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Then the task is held, naming the command it was stuck on
       expect(taskOf(server, id).held_reason).toContain("zig build");
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
-        ISSUES.looping.attempts + 1,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "worker")),
+      ).toHaveLength(ISSUES.looping.attempts + 1);
 
       server.shutdown();
     },
@@ -710,9 +720,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "a reviewer that reconsiders its blocker submits instead",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -735,7 +745,9 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then it was asked once and the task was never held
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "reviewer"));
+      const prompts = await promptsTo(
+        pathsOf(server).sessionDir(id, "reviewer"),
+      );
       expect(prompts).toHaveLength(2);
       expect(
         transitionsOf(server)
@@ -751,9 +763,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "a held task is never dispatched again",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: { WORK: [{ blocked: "a wall" }] },
       });
 
@@ -767,9 +779,9 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Then it is still held, and no second agent was ever prompted
       expect(stateOf(server, id)).toBe("HELD_WORK");
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
-        2,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "worker")),
+      ).toHaveLength(2);
 
       server.shutdown();
     },
@@ -779,9 +791,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "a nudge waits for the turn the agent is already in",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [{ raw_final_message: "prose", start_delay_ms: 50 }],
         },
@@ -795,8 +807,8 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Then no nudge was sent into a turn the agent was still inside
       const sessionDir = pathsOf(server).sessionDir(id, "worker");
-      expect(promptsOverlapping(sessionDir)).toEqual([]);
-      expect(promptsTo(sessionDir)).toHaveLength(
+      expect(await promptsOverlapping(sessionDir)).toEqual([]);
+      expect(await promptsTo(sessionDir)).toHaveLength(
         ISSUES["missing-result"].attempts + 1,
       );
 
@@ -808,10 +820,10 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "an edited assignment is restored above the notes, and the redo passes",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setBody(fixture, id, "\n# The body of this task\n");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setBody(fixture, id, "\n# The body of this task\n");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -833,9 +845,9 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then what it changed was put back and only its own section survives
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
-      const assignment = fs.readFileSync(
+      const assignment = await fs.promises.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
@@ -851,9 +863,9 @@ describe("Feature: an agent that stops short of finishing", () => {
   testInTempDirs(
     "a worker that submits without appending notes is prompted, then held",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [{ submit: true, commit: { path: "a.txt", contents: "a" } }],
         },
@@ -871,9 +883,9 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(task.held_reason).toContain(
         "without appending implementation notes",
       );
-      expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
-        5,
-      );
+      expect(
+        await promptsTo(pathsOf(server).sessionDir(id, "worker")),
+      ).toHaveLength(5);
 
       server.shutdown();
     },
@@ -885,10 +897,10 @@ describe("Feature: a review that comes back unusable", () => {
   testInTempDirs(
     "an assignment the reviewer changed is restored, and the review is prompted in place",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setBody(fixture, id, "\n# The body of this task\n");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setBody(fixture, id, "\n# The body of this task\n");
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -918,9 +930,11 @@ describe("Feature: a review that comes back unusable", () => {
       expect(log.some((e) => e.transition === "fail")).toBe(false);
 
       // Then the reviewer was prompted again in place, and its edit was undone
-      const prompts = promptsTo(pathsOf(server).sessionDir(id, "reviewer"));
+      const prompts = await promptsTo(
+        pathsOf(server).sessionDir(id, "reviewer"),
+      );
       expect(prompts).toHaveLength(2);
-      const assignment = fs.readFileSync(
+      const assignment = await fs.promises.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
@@ -938,9 +952,9 @@ describe("Feature: keeping the attempts an agent already made", () => {
   testInTempDirs(
     "a re-dispatch rotates the previous attempt into history",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "Do a thing");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing");
+      await setPlan(fixture, {
         [id]: {
           WORK: [{ raw_final_message: "prose", notes: "attempt one" }],
         },
@@ -951,7 +965,7 @@ describe("Feature: keeping the attempts an agent already made", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Given the manager resumes it with a plan that lets the redo finish
-      setPlan(fixture, {
+      await setPlan(fixture, {
         [id]: {
           WORK: [
             {
@@ -969,16 +983,18 @@ describe("Feature: keeping the attempts an agent already made", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the first attempt is kept in history and the second is the one that counts
-      const history = fs.readdirSync(pathsOf(server).history(id)).sort();
+      const history = (
+        await fs.promises.readdir(pathsOf(server).history(id))
+      ).sort();
       expect(history).toEqual(["ASSIGNMENT.1.md"]);
       expect(
-        fs.readFileSync(
+        await fs.promises.readFile(
           path.join(pathsOf(server).history(id), "ASSIGNMENT.1.md"),
           "utf-8",
         ),
       ).toContain("attempt one");
 
-      const body = fs.readFileSync(
+      const body = await fs.promises.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -994,9 +1010,9 @@ describe("Feature: a failure while finishing with an agent", () => {
   testInTempDirs(
     "the slot is freed and the manager survives instead of rejecting into nothing",
     async () => {
-      const fixture = makeFixture();
-      const id = readyTask(fixture, "A task");
-      setPlan(fixture, {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "A task");
+      await setPlan(fixture, {
         [id]: { WORK: [{ stop_reason: "aborted", break_git: true }] },
       });
 
@@ -1010,16 +1026,18 @@ describe("Feature: a failure while finishing with an agent", () => {
       await server.writeViews();
       const view = parse(
         SlotsView,
-        JSON.parse(fs.readFileSync(pathsOf(server).slotsView, "utf-8")),
+        JSON.parse(
+          await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
+        ),
         "slots view",
         pathsOf(server).slotsView,
       );
       for (const slot of view.slots) {
         expect(slot.state).toBe("IDLE");
       }
-      expect(fs.readFileSync(pathsOf(server).serverLog, "utf-8")).toContain(
-        `on ${id} failed:`,
-      );
+      expect(
+        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
+      ).toContain(`on ${id} failed:`);
 
       server.shutdown();
     },

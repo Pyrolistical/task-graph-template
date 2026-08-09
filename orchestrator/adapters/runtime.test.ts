@@ -36,11 +36,8 @@ afterAll(() => {
 
 const REPO = "/home/model/project";
 
-function runtimeFor(
-  repo = REPO,
-  serverRoot = tempDir("orchestrator-"),
-): Runtime {
-  return new Runtime(repo, serverRoot);
+async function runtimeFor(repo = REPO, serverRoot?: string): Promise<Runtime> {
+  return new Runtime(repo, serverRoot ?? (await tempDir("orchestrator-")));
 }
 
 describe("Feature: where a project's runtime state lives", () => {
@@ -66,56 +63,59 @@ describe("Feature: where a project's runtime state lives", () => {
     expect(key).toBe("-b-project");
   });
 
-  testInTempDirs("every path a task needs hangs off its own directory", () => {
-    // Given a runtime directory for a project
-    const root = tempDir("orchestrator-");
-    const runtime = new Runtime("/home/model/task-graph-template", root);
+  testInTempDirs(
+    "every path a task needs hangs off its own directory",
+    async () => {
+      // Given a runtime directory for a project
+      const root = await tempDir("orchestrator-");
+      const runtime = new Runtime("/home/model/task-graph-template", root);
 
-    // When the paths of one task are worked out
-    const paths = {
-      root: runtime.root,
-      assignment: runtime.assignment("000042"),
-      worktree: runtime.worktree("000042"),
-      session: runtime.sessionDir("000042", "reviewer"),
-      check: runtime.checkLog("000042", 1),
-    };
+      // When the paths of one task are worked out
+      const paths = {
+        root: runtime.root,
+        assignment: runtime.assignment("000042"),
+        worktree: runtime.worktree("000042"),
+        session: runtime.sessionDir("000042", "reviewer"),
+        check: runtime.checkLog("000042", 1),
+      };
 
-    // Then all of them sit under one directory, which discarding removes whole
-    expect(paths).toEqual({
-      root: path.join(root, "-home-model-task-graph-template"),
-      assignment: path.join(
-        root,
-        "-home-model-task-graph-template",
-        "000042",
-        "ASSIGNMENT.md",
-      ),
-      worktree: path.join(
-        root,
-        "-home-model-task-graph-template",
-        "000042",
-        "worktree",
-      ),
-      session: path.join(
-        root,
-        "-home-model-task-graph-template",
-        "000042",
-        "session",
-        "reviewer",
-      ),
-      check: path.join(
-        root,
-        "-home-model-task-graph-template",
-        "000042",
-        "check-1.log",
-      ),
-    });
-  });
+      // Then all of them sit under one directory, which discarding removes whole
+      expect(paths).toEqual({
+        root: path.join(root, "-home-model-task-graph-template"),
+        assignment: path.join(
+          root,
+          "-home-model-task-graph-template",
+          "000042",
+          "ASSIGNMENT.md",
+        ),
+        worktree: path.join(
+          root,
+          "-home-model-task-graph-template",
+          "000042",
+          "worktree",
+        ),
+        session: path.join(
+          root,
+          "-home-model-task-graph-template",
+          "000042",
+          "session",
+          "reviewer",
+        ),
+        check: path.join(
+          root,
+          "-home-model-task-graph-template",
+          "000042",
+          "check-1.log",
+        ),
+      });
+    },
+  );
 
   testInTempDirs(
     "the assignment sits beside the worktree, never inside it",
-    () => {
+    async () => {
       // Given a runtime directory for a project
-      const runtime = runtimeFor();
+      const runtime = await runtimeFor();
 
       // When the assignment and the worktree of one task are compared
       const inside = runtime
@@ -132,25 +132,27 @@ describe("Feature: where a project's runtime state lives", () => {
 
   testInTempDirs(
     "preparing a task makes the directories it will write to",
-    () => {
+    async () => {
       // Given a runtime directory a task has never been dispatched in
-      const runtime = runtimeFor();
+      const runtime = await runtimeFor();
 
       // When the task is prepared
       runtime.prepare("000042");
 
       // Then the history and both session directories are there to be written to
-      expect(fs.existsSync(runtime.history("000042"))).toBe(true);
-      expect(fs.existsSync(runtime.sessionDir("000042", "worker"))).toBe(true);
-      expect(fs.existsSync(runtime.sessionDir("000042", "reviewer"))).toBe(
-        true,
-      );
+      expect(await fs.promises.exists(runtime.history("000042"))).toBe(true);
+      expect(
+        await fs.promises.exists(runtime.sessionDir("000042", "worker")),
+      ).toBe(true);
+      expect(
+        await fs.promises.exists(runtime.sessionDir("000042", "reviewer")),
+      ).toBe(true);
     },
   );
 
-  testInTempDirs("a published view is never seen half written", () => {
+  testInTempDirs("a published view is never seen half written", async () => {
     // Given a view that has already been published once
-    const dir = tempDir("orchestrator-");
+    const dir = await tempDir("orchestrator-");
     const target = path.join(dir, "agents.json");
     writeAtomic(target, '{"agents":[]}');
 
@@ -158,8 +160,8 @@ describe("Feature: where a project's runtime state lives", () => {
     writeAtomic(target, '{"agents":[1]}');
 
     // Then the reader sees the new document whole, with no partial left behind
-    expect(fs.readFileSync(target, "utf-8")).toBe('{"agents":[1]}');
-    expect(fs.readdirSync(dir)).toEqual(["agents.json"]);
+    expect(await fs.promises.readFile(target, "utf-8")).toBe('{"agents":[1]}');
+    expect(await fs.promises.readdir(dir)).toEqual(["agents.json"]);
   });
 });
 
@@ -261,9 +263,9 @@ describe("Feature: where a project's task graph lives", () => {
 });
 
 describe("Feature: keeping a second server out of the runtime directory", () => {
-  testInTempDirs("the first server to start takes the directory", () => {
+  testInTempDirs("the first server to start takes the directory", async () => {
     // Given a runtime directory no server has started against
-    const runtime = runtimeFor();
+    const runtime = await runtimeFor();
 
     // When the server takes the lock
     runtime.takeLock();
@@ -272,22 +274,26 @@ describe("Feature: keeping a second server out of the runtime directory", () => 
     expect(runtime.lockHolder()).toBe(process.pid);
   });
 
-  testInTempDirs("a server holding the directory keeps another out", () => {
-    // Given a runtime directory a live server already holds
-    const serverRoot = tempDir("orchestrator-");
-    runtimeFor(REPO, serverRoot).takeLock();
+  testInTempDirs(
+    "a server holding the directory keeps another out",
+    async () => {
+      // Given a runtime directory a live server already holds
+      const serverRoot = await tempDir("orchestrator-");
+      const runtime = await runtimeFor(REPO, serverRoot);
+      runtime.takeLock();
 
-    // When another server tries to take the lock
-    const attempt = () => runtimeFor(REPO, serverRoot).takeLock();
+      // When another server tries to take the lock
+      const attempt = () => runtime.takeLock();
 
-    // Then it refuses, naming the server that holds the directory
-    expect(attempt).toThrow(`already in use by server ${process.pid}`);
-  });
+      // Then it refuses, naming the server that holds the directory
+      expect(attempt).toThrow(`already in use by server ${process.pid}`);
+    },
+  );
 
   testInTempDirs("a stale lock from a dead server is taken over", async () => {
     // Given a runtime directory whose last server died without clearing its lock
-    const runtime = runtimeFor();
-    fs.writeFileSync(runtime.lockFile, `${await deadPid()}`);
+    const runtime = await runtimeFor();
+    await fs.promises.writeFile(runtime.lockFile, `${await deadPid()}`);
 
     // When a new server takes the lock
     runtime.takeLock();
@@ -296,9 +302,9 @@ describe("Feature: keeping a second server out of the runtime directory", () => 
     expect(runtime.lockHolder()).toBe(process.pid);
   });
 
-  testInTempDirs("a server clears the lock it holds", () => {
+  testInTempDirs("a server clears the lock it holds", async () => {
     // Given a runtime directory the server holds
-    const runtime = runtimeFor();
+    const runtime = await runtimeFor();
     runtime.takeLock();
 
     // When the server is done with it
@@ -312,9 +318,9 @@ describe("Feature: keeping a second server out of the runtime directory", () => 
     "a server does not clear a lock it does not hold",
     async () => {
       // Given a lock some other server holds
-      const runtime = runtimeFor();
+      const runtime = await runtimeFor();
       const other = await deadPid();
-      fs.writeFileSync(runtime.lockFile, `${other}`);
+      await fs.promises.writeFile(runtime.lockFile, `${other}`);
 
       // When the server clears the lock
       runtime.clearLock();
@@ -328,15 +334,15 @@ describe("Feature: keeping a second server out of the runtime directory", () => 
 describe("Feature: the server log", () => {
   testInTempDirs(
     "the log keeps its most recent lines and stays bounded",
-    () => {
+    async () => {
       // Given a server log with a small cap on how much it keeps
-      const runtime = runtimeFor();
+      const runtime = await runtimeFor();
 
       // When far more is written to it than it can hold
       for (let i = 0; i < 200; i++) runtime.log(`line ${i}`, 400);
 
       // Then what is left is under the cap, ends at the newest line, and is whole
-      const contents = fs.readFileSync(runtime.serverLog, "utf-8");
+      const contents = await fs.promises.readFile(runtime.serverLog, "utf-8");
       expect(contents.length).toBeLessThanOrEqual(400);
       expect(contents.endsWith("line 199\n")).toBe(true);
       expect(contents.split("\n").filter((line) => line.length > 0)).toEqual(
@@ -347,29 +353,32 @@ describe("Feature: the server log", () => {
 });
 
 describe("Feature: discarding a task that is finished with", () => {
-  testInTempDirs("the whole task directory goes with it", () => {
+  testInTempDirs("the whole task directory goes with it", async () => {
     // Given a task that has been prepared and written to
-    const runtime = runtimeFor();
+    const runtime = await runtimeFor();
     runtime.prepare("000042");
-    fs.writeFileSync(runtime.assignment("000042"), "gone soon");
+    await fs.promises.writeFile(runtime.assignment("000042"), "gone soon");
 
     // When the task is discarded
     runtime.discard("000042");
 
     // Then nothing of it is left behind on disk
-    expect(fs.existsSync(runtime.taskRoot("000042"))).toBe(false);
+    expect(await fs.promises.exists(runtime.taskRoot("000042"))).toBe(false);
   });
 
-  testInTempDirs("discarding a task that was never started is harmless", () => {
-    // Given a task that was closed before it was ever dispatched
-    const runtime = runtimeFor();
+  testInTempDirs(
+    "discarding a task that was never started is harmless",
+    async () => {
+      // Given a task that was closed before it was ever dispatched
+      const runtime = await runtimeFor();
 
-    // When the task is discarded
-    const attempt = () => runtime.discard("000042");
+      // When the task is discarded
+      const attempt = () => runtime.discard("000042");
 
-    // Then nothing fails, because there was nothing to remove
-    expect(attempt).not.toThrow();
-  });
+      // Then nothing fails, because there was nothing to remove
+      expect(attempt).not.toThrow();
+    },
+  );
 });
 
 describe("Feature: telling whether a process is still running", () => {
@@ -425,25 +434,31 @@ describe("Feature: the log of every transition applied", () => {
     by: "pi-1",
   });
 
-  testInTempDirs("the sequence advances by one for each transition", () => {
-    // Given a fresh transition log
-    const log = new TransitionLog(
-      path.join(tempDir("orchestrator-"), "transitions.jsonl"),
-    );
+  testInTempDirs(
+    "the sequence advances by one for each transition",
+    async () => {
+      // Given a fresh transition log
+      const log = new TransitionLog(
+        path.join(await tempDir("orchestrator-"), "transitions.jsonl"),
+      );
 
-    // When two transitions are appended
-    const appended = [log.append(entry("CHECK")), log.append(entry("WORK"))];
+      // When two transitions are appended
+      const appended = [log.append(entry("CHECK")), log.append(entry("WORK"))];
 
-    // Then each takes the next number, and the cursor reaches the last of them
-    expect(appended.map((one) => one.seq)).toEqual([1, 2]);
-    expect(log.cursor).toBe(2);
-  });
+      // Then each takes the next number, and the cursor reaches the last of them
+      expect(appended.map((one) => one.seq)).toEqual([1, 2]);
+      expect(log.cursor).toBe(2);
+    },
+  );
 
   testInTempDirs(
     "a log reopened by a new server continues its sequence",
-    () => {
+    async () => {
       // Given a log a previous server appended to
-      const filePath = path.join(tempDir("orchestrator-"), "transitions.jsonl");
+      const filePath = path.join(
+        await tempDir("orchestrator-"),
+        "transitions.jsonl",
+      );
       new TransitionLog(filePath).append(entry("CHECK"));
 
       // Given a new server opening the same log
@@ -460,10 +475,10 @@ describe("Feature: the log of every transition applied", () => {
 
   testInTempDirs(
     "a reader is given every transition in the order applied",
-    () => {
+    async () => {
       // Given a log with three transitions in it
       const log = new TransitionLog(
-        path.join(tempDir("orchestrator-"), "transitions.jsonl"),
+        path.join(await tempDir("orchestrator-"), "transitions.jsonl"),
       );
       for (const to of ["WORK", "CHECK", "WORK_REVIEW"] as const) {
         log.append(entry(to));
@@ -482,35 +497,47 @@ describe("Feature: the log of every transition applied", () => {
     },
   );
 
-  testInTempDirs("a log nothing has been written to reads as empty", () => {
-    // Given a log file that does not exist yet
-    const filePath = path.join(tempDir("orchestrator-"), "transitions.jsonl");
+  testInTempDirs(
+    "a log nothing has been written to reads as empty",
+    async () => {
+      // Given a log file that does not exist yet
+      const filePath = path.join(
+        await tempDir("orchestrator-"),
+        "transitions.jsonl",
+      );
 
-    // When the log is read
-    const entries = new TransitionLog(filePath).read();
+      // When the log is read
+      const entries = new TransitionLog(filePath).read();
 
-    // Then it reads as empty rather than failing the first tick
-    expect(entries).toEqual([]);
-  });
+      // Then it reads as empty rather than failing the first tick
+      expect(entries).toEqual([]);
+    },
+  );
 
-  testInTempDirs("the file is trimmed but the sequence keeps counting", () => {
-    // Given a log that keeps only its last ten entries
-    const filePath = path.join(tempDir("orchestrator-"), "transitions.jsonl");
-    const log = new TransitionLog(filePath, 10);
+  testInTempDirs(
+    "the file is trimmed but the sequence keeps counting",
+    async () => {
+      // Given a log that keeps only its last ten entries
+      const filePath = path.join(
+        await tempDir("orchestrator-"),
+        "transitions.jsonl",
+      );
+      const log = new TransitionLog(filePath, 10);
 
-    // When twenty-five transitions are appended
-    for (let i = 0; i < 25; i++) log.append(entry("WORK"));
+      // When twenty-five transitions are appended
+      for (let i = 0; i < 25; i++) log.append(entry("WORK"));
 
-    // Then only the last ten are kept, still numbered from where they happened
-    const kept = log.read();
-    expect(kept).toHaveLength(10);
-    expect(at(kept, 0).seq).toBe(16);
-    expect(at(kept, 9).seq).toBe(25);
+      // Then only the last ten are kept, still numbered from where they happened
+      const kept = log.read();
+      expect(kept).toHaveLength(10);
+      expect(at(kept, 0).seq).toBe(16);
+      expect(at(kept, 9).seq).toBe(25);
 
-    // Then a server reopening the log carries on from the same number
-    expect(log.cursor).toBe(25);
-    expect(new TransitionLog(filePath, 10).cursor).toBe(25);
-  });
+      // Then a server reopening the log carries on from the same number
+      expect(log.cursor).toBe(25);
+      expect(new TransitionLog(filePath, 10).cursor).toBe(25);
+    },
+  );
 });
 
 describe("Feature: keeping what an agent wrote on an earlier attempt", () => {
@@ -529,93 +556,102 @@ describe("Feature: keeping what an agent wrote on an earlier attempt", () => {
     ].join("\n");
   }
 
-  testInTempDirs("the first dispatch of a task has nothing behind it", () => {
-    // Given a task that has never been dispatched
-    const history = path.join(tempDir("orchestrator-"), "history");
+  testInTempDirs(
+    "the first dispatch of a task has nothing behind it",
+    async () => {
+      // Given a task that has never been dispatched
+      const history = path.join(await tempDir("orchestrator-"), "history");
 
-    // When the attempt about to be made is counted
-    const attempt = attemptOf(history);
+      // When the attempt about to be made is counted
+      const attempt = attemptOf(history);
 
-    // Then it is the first
-    expect(attempt).toBe(1);
-  });
+      // Then it is the first
+      expect(attempt).toBe(1);
+    },
+  );
 
   testInTempDirs(
     "rotating never writes over what an agent wrote before",
-    () => {
+    async () => {
       // Given a task whose first attempt has already been rotated into history
-      const dir = tempDir("orchestrator-");
+      const dir = await tempDir("orchestrator-");
       const live = path.join(dir, "ASSIGNMENT.md");
       const history = path.join(dir, "history");
-      fs.writeFileSync(live, assignment("the first attempt"));
+      await fs.promises.writeFile(live, assignment("the first attempt"));
       expect(rotate(live, history)).toBe(path.join(history, historyName(1)));
-      expect(fs.existsSync(live)).toBe(false);
+      expect(await fs.promises.exists(live)).toBe(false);
 
       // Given a second attempt written to the live assignment
-      fs.writeFileSync(live, assignment("the second attempt"));
+      await fs.promises.writeFile(live, assignment("the second attempt"));
 
       // When the live file is rotated into history
       rotate(live, history);
 
       // Then both attempts are kept, numbered in the order they were made
-      expect(fs.readdirSync(history).sort()).toEqual([
+      expect((await fs.promises.readdir(history)).sort()).toEqual([
         "ASSIGNMENT.1.md",
         "ASSIGNMENT.2.md",
       ]);
       expect(
         splitDocument(
-          fs.readFileSync(path.join(history, "ASSIGNMENT.1.md"), "utf-8"),
+          await fs.promises.readFile(
+            path.join(history, "ASSIGNMENT.1.md"),
+            "utf-8",
+          ),
         ).body,
       ).toContain("the first attempt");
       expect(attemptOf(history)).toBe(3);
     },
   );
 
-  testInTempDirs("rotating when there is nothing to rotate is harmless", () => {
-    // Given a task with no live assignment on disk
-    const dir = tempDir("orchestrator-");
+  testInTempDirs(
+    "rotating when there is nothing to rotate is harmless",
+    async () => {
+      // Given a task with no live assignment on disk
+      const dir = await tempDir("orchestrator-");
 
-    // When the assignment is rotated
-    const rotated = rotate(
-      path.join(dir, "ASSIGNMENT.md"),
-      path.join(dir, "history"),
-    );
+      // When the assignment is rotated
+      const rotated = rotate(
+        path.join(dir, "ASSIGNMENT.md"),
+        path.join(dir, "history"),
+      );
 
-    // Then nothing is moved, and the dispatch carries on
-    expect(rotated).toBeNull();
-  });
+      // Then nothing is moved, and the dispatch carries on
+      expect(rotated).toBeNull();
+    },
+  );
 });
 
 describe("Feature: the workspace an agent works in", () => {
-  testInTempDirs("a workspace borrows the repository's objects", () => {
+  testInTempDirs("a workspace borrows the repository's objects", async () => {
     // Given a repository with a commit in it
-    const repo = tempRepo();
+    const repo = await tempRepo();
 
     // Given a path the clone will land on
-    const workspace = path.join(tempDir("clone-"), "worktree");
+    const workspace = path.join(await tempDir("clone-"), "worktree");
 
     // When a workspace is cloned from it
     git.createWorkspace(repo, "work/000001", workspace, "master");
 
     // Then it points at the repository's objects instead of copying them
     expect(
-      fs
-        .readFileSync(
+      (
+        await fs.promises.readFile(
           path.join(workspace, ".git", "objects", "info", "alternates"),
           "utf-8",
         )
-        .trim(),
+      ).trim(),
     ).toBe(path.join(repo, ".git", "objects"));
   });
 
   testInTempDirs(
     "a workspace inherits the repository's commit identity",
-    () => {
+    async () => {
       // Given a repository configured with an author
-      const repo = tempRepo();
+      const repo = await tempRepo();
 
       // Given a path the clone will land on
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const workspace = path.join(await tempDir("clone-"), "worktree");
 
       // When a workspace is cloned from it
       git.createWorkspace(repo, "work/000001", workspace, "master");
@@ -629,12 +665,12 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "a workspace starts on its task branch, cut from the base",
-    () => {
+    async () => {
       // Given a repository with a base branch
-      const repo = tempRepo();
+      const repo = await tempRepo();
 
       // Given a path the clone will land on
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const workspace = path.join(await tempDir("clone-"), "worktree");
 
       // When a workspace is cloned for a task
       git.createWorkspace(repo, "work/000001", workspace, "master");
@@ -651,17 +687,17 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "a recloned workspace comes back to the work already done",
-    () => {
+    async () => {
       // Given a workspace whose commits were harvested before it was removed
-      const repo = tempRepo();
-      const first = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const first = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", first, "master");
-      commitIn(first, "b.txt", "work\n");
+      await commitIn(first, "b.txt", "work\n");
       git.harvest(repo, first, "work/000001");
       git.removeWorkspace(first);
 
       // Given a path the new clone will land on
-      const second = path.join(tempDir("clone-"), "worktree");
+      const second = path.join(await tempDir("clone-"), "worktree");
 
       // When it is cloned again for the same task
       git.createWorkspace(repo, "work/000001", second, "master");
@@ -670,18 +706,18 @@ describe("Feature: the workspace an agent works in", () => {
       expect(
         git.gitOrThrow(second, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
       ).toBe("work/000001");
-      expect(fs.existsSync(path.join(second, "b.txt"))).toBe(true);
+      expect(await fs.promises.exists(path.join(second, "b.txt"))).toBe(true);
     },
   );
 
   testInTempDirs(
     "harvesting lands the branch where the manager can see it",
-    () => {
+    async () => {
       // Given a workspace with a commit the repository has never seen
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
-      commitIn(workspace, "b.txt", "work\n");
+      await commitIn(workspace, "b.txt", "work\n");
       expect(git.branchExists(repo, "work/000001")).toBe(false);
 
       // When the workspace is harvested
@@ -700,10 +736,10 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "harvesting a linked worktree does nothing rather than fail",
-    () => {
+    async () => {
       // Given a linked worktree, which already shares the repository's refs
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("worktree-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("worktree-"), "worktree");
       git.gitOrThrow(repo, [
         "worktree",
         "add",
@@ -713,7 +749,7 @@ describe("Feature: the workspace an agent works in", () => {
         workspace,
         "master",
       ]);
-      commitIn(workspace, "b.txt", "work\n");
+      await commitIn(workspace, "b.txt", "work\n");
       expect(git.sharesRefs(repo, workspace)).toBe(true);
 
       // When the worktree is harvested
@@ -726,12 +762,12 @@ describe("Feature: the workspace an agent works in", () => {
     },
   );
 
-  testInTempDirs("a cloned workspace has refs of its own", () => {
+  testInTempDirs("a cloned workspace has refs of its own", async () => {
     // Given a repository with a commit in it
-    const repo = tempRepo();
+    const repo = await tempRepo();
 
     // Given a path the clone will land on
-    const workspace = path.join(tempDir("clone-"), "worktree");
+    const workspace = path.join(await tempDir("clone-"), "worktree");
 
     // When a workspace is cloned from it
     git.createWorkspace(repo, "work/000001", workspace, "master");
@@ -742,14 +778,14 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "harvesting after a rebase replaces the branch that was there",
-    () => {
+    async () => {
       // Given a harvested branch whose base has since moved on, and a rebase onto it
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
-      commitIn(workspace, "b.txt", "work\n");
+      await commitIn(workspace, "b.txt", "work\n");
       git.harvest(repo, workspace, "work/000001");
-      commitIn(repo, "c.txt", "moved on\n");
+      await commitIn(repo, "c.txt", "moved on\n");
       git.syncBase(workspace, "master");
       expect(git.rebase(workspace, "master").code).toBe(0);
 
@@ -766,12 +802,12 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "syncing brings the workspace's copy of the base forward",
-    () => {
+    async () => {
       // Given a workspace whose base has moved on in the repository
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
-      commitIn(repo, "c.txt", "moved on\n");
+      await commitIn(repo, "c.txt", "moved on\n");
       expect(git.gitOrThrow(workspace, ["rev-parse", "master"])).not.toBe(
         git.gitOrThrow(repo, ["rev-parse", "master"]),
       );
@@ -786,31 +822,34 @@ describe("Feature: the workspace an agent works in", () => {
     },
   );
 
-  testInTempDirs("a fresh workspace carries no commit and no change", () => {
-    // Given a repository with a commit in it
-    const repo = tempRepo();
+  testInTempDirs(
+    "a fresh workspace carries no commit and no change",
+    async () => {
+      // Given a repository with a commit in it
+      const repo = await tempRepo();
 
-    // Given a path the clone will land on
-    const workspace = path.join(tempDir("clone-"), "worktree");
+      // Given a path the clone will land on
+      const workspace = path.join(await tempDir("clone-"), "worktree");
 
-    // When a workspace is cloned from it
-    git.createWorkspace(repo, "work/000001", workspace, "master");
+      // When a workspace is cloned from it
+      git.createWorkspace(repo, "work/000001", workspace, "master");
 
-    // Then the guard sees nothing committed and nothing changed
-    expect(git.commitCount(workspace, "master")).toBe(0);
-    expect(git.uncommitted(workspace)).toEqual([]);
-  });
+      // Then the guard sees nothing committed and nothing changed
+      expect(git.commitCount(workspace, "master")).toBe(0);
+      expect(git.uncommitted(workspace)).toEqual([]);
+    },
+  );
 
   testInTempDirs(
     "a commit in the workspace is counted against the base",
-    () => {
+    async () => {
       // Given a workspace with nothing committed in it
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
 
       // When the agent commits in it
-      commitIn(workspace, "b.txt", "work\n");
+      await commitIn(workspace, "b.txt", "work\n");
 
       // Then the guard sees the commit it made
       expect(git.commitCount(workspace, "master")).toBe(1);
@@ -819,13 +858,13 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "an untracked or modified file counts as uncommitted work",
-    () => {
+    async () => {
       // Given a workspace with one file added and one changed
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
-      fs.writeFileSync(path.join(workspace, "b.txt"), "untracked\n");
-      fs.writeFileSync(path.join(workspace, "a.txt"), "modified\n");
+      await fs.promises.writeFile(path.join(workspace, "b.txt"), "untracked\n");
+      await fs.promises.writeFile(path.join(workspace, "a.txt"), "modified\n");
 
       // When the workspace is read for uncommitted work
       const dirty = git.uncommitted(workspace);
@@ -835,13 +874,13 @@ describe("Feature: the workspace an agent works in", () => {
     },
   );
 
-  testInTempDirs("staged work is still uncommitted work", () => {
+  testInTempDirs("staged work is still uncommitted work", async () => {
     // Given a workspace whose changes have been staged but not committed
-    const repo = tempRepo();
-    const workspace = path.join(tempDir("clone-"), "worktree");
+    const repo = await tempRepo();
+    const workspace = path.join(await tempDir("clone-"), "worktree");
     git.createWorkspace(repo, "work/000001", workspace, "master");
-    fs.writeFileSync(path.join(workspace, "b.txt"), "untracked\n");
-    fs.writeFileSync(path.join(workspace, "a.txt"), "modified\n");
+    await fs.promises.writeFile(path.join(workspace, "b.txt"), "untracked\n");
+    await fs.promises.writeFile(path.join(workspace, "a.txt"), "modified\n");
     git.gitOrThrow(workspace, ["add", "-A"]);
 
     // When the workspace is read for uncommitted work
@@ -876,15 +915,15 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "the base a recloned workspace measures against is its remote",
-    () => {
+    async () => {
       // Given a workspace recloned from a branch that had already been harvested
-      const repo = tempRepo();
-      const first = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const first = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", first, "master");
-      commitIn(first, "b.txt", "work\n");
+      await commitIn(first, "b.txt", "work\n");
       git.harvest(repo, first, "work/000001");
       git.removeWorkspace(first);
-      const second = path.join(tempDir("clone-"), "worktree");
+      const second = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", second, "master");
 
       // When its commits are counted against the base
@@ -898,13 +937,13 @@ describe("Feature: the workspace an agent works in", () => {
 
   testInTempDirs(
     "the commit count stays the agent's own as the base moves",
-    () => {
+    async () => {
       // Given a workspace with one commit, and a base that has moved on since
-      const repo = tempRepo();
-      const workspace = path.join(tempDir("clone-"), "worktree");
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
       git.createWorkspace(repo, "work/000001", workspace, "master");
-      commitIn(workspace, "b.txt", "work\n");
-      commitIn(repo, "c.txt", "moved on\n");
+      await commitIn(workspace, "b.txt", "work\n");
+      await commitIn(repo, "c.txt", "moved on\n");
       git.syncBase(workspace, "master");
 
       // When its commits are counted against the base
@@ -915,18 +954,21 @@ describe("Feature: the workspace an agent works in", () => {
     },
   );
 
-  testInTempDirs("removing a workspace leaves the repository untouched", () => {
-    // Given a workspace cloned from a repository
-    const repo = tempRepo();
-    const workspace = path.join(tempDir("clone-"), "worktree");
-    git.createWorkspace(repo, "work/000001", workspace, "master");
+  testInTempDirs(
+    "removing a workspace leaves the repository untouched",
+    async () => {
+      // Given a workspace cloned from a repository
+      const repo = await tempRepo();
+      const workspace = path.join(await tempDir("clone-"), "worktree");
+      git.createWorkspace(repo, "work/000001", workspace, "master");
 
-    // When the workspace is removed, and removed again
-    git.removeWorkspace(workspace);
+      // When the workspace is removed, and removed again
+      git.removeWorkspace(workspace);
 
-    // Then it is gone, the repository is clean, and removing it twice is harmless
-    expect(fs.existsSync(workspace)).toBe(false);
-    expect(git.gitOrThrow(repo, ["status", "--porcelain"])).toBe("");
-    expect(() => git.removeWorkspace(workspace)).not.toThrow();
-  });
+      // Then it is gone, the repository is clean, and removing it twice is harmless
+      expect(await fs.promises.exists(workspace)).toBe(false);
+      expect(git.gitOrThrow(repo, ["status", "--porcelain"])).toBe("");
+      expect(() => git.removeWorkspace(workspace)).not.toThrow();
+    },
+  );
 });

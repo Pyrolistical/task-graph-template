@@ -33,14 +33,14 @@ export const TASK_STORE_PATH = path.join(
   "task-store.ts",
 );
 
-export function makeTasksDir(): string {
-  const dir = tempDir("task-graph-");
-  fs.writeFileSync(nextTaskIdPath(dir), "1\n");
+export async function makeTasksDir(): Promise<string> {
+  const dir = await tempDir("task-graph-");
+  await fs.promises.writeFile(nextTaskIdPath(dir), "1\n");
   return dir;
 }
 
-export function bodyOf(filePath: string): string {
-  return splitDocument(fs.readFileSync(filePath, "utf-8")).body;
+export async function bodyOf(filePath: string): Promise<string> {
+  return splitDocument(await fs.promises.readFile(filePath, "utf-8")).body;
 }
 
 export async function deadPid(): Promise<number> {
@@ -69,35 +69,41 @@ export function raw(meta: TaskMeta): Record<string, unknown> {
   return parseDocument(rebuildDocument(meta, "\n\n# Goal\n")).raw;
 }
 
-export function writeTask(dir: string, overrides: Partial<TaskMeta>): string {
+export async function writeTask(
+  dir: string,
+  overrides: Partial<TaskMeta>,
+): Promise<string> {
   const meta = baseMeta(overrides);
-  fs.writeFileSync(
+  await fs.promises.writeFile(
     activeTaskPath(dir, meta.id),
     rebuildDocument(meta, "\n\n# Goal\n"),
   );
 
-  const highest = fs
-    .readdirSync(dir)
+  const highest = (await fs.promises.readdir(dir))
     .filter((f) => /^\d{6}\.md$/.test(f))
     .reduce((max, f) => Math.max(max, Number.parseInt(f, 10)), 0);
-  fs.writeFileSync(nextTaskIdPath(dir), `${highest + 1}\n`);
+  await fs.promises.writeFile(nextTaskIdPath(dir), `${highest + 1}\n`);
 
   return meta.id;
 }
 
-export function editTask(
+export async function editTask(
   dir: string,
   id: string,
   edit: (meta: TaskMeta) => void,
-): void {
+): Promise<void> {
   const filePath = activeTaskPath(dir, id);
   const { meta, body } = readTaskFile(filePath);
   edit(meta);
-  fs.writeFileSync(filePath, rebuildDocument(meta, body));
+  await fs.promises.writeFile(filePath, rebuildDocument(meta, body));
 }
 
-export function addDeps(dir: string, id: string, ...deps: string[]): void {
-  editTask(dir, id, (meta) => {
+export async function addDeps(
+  dir: string,
+  id: string,
+  ...deps: string[]
+): Promise<void> {
+  await editTask(dir, id, (meta) => {
     for (const dep of deps) {
       if (!meta.depends_on.includes(dep)) {
         meta.depends_on.push(dep);
@@ -154,13 +160,17 @@ export function enteredAt(dir: string, id: string): number {
   );
 }
 
-export function newTask(title = "a task"): { dir: string; id: string } {
-  const dir = makeTasksDir();
+export async function newTask(
+  title = "a task",
+): Promise<{ dir: string; id: string }> {
+  const dir = await makeTasksDir();
   return { dir, id: createTask(dir, ORCHESTRATOR_DIR, title).id };
 }
 
-export function newTasks(count: number): { dir: string; ids: string[] } {
-  const dir = makeTasksDir();
+export async function newTasks(
+  count: number,
+): Promise<{ dir: string; ids: string[] }> {
+  const dir = await makeTasksDir();
   const ids = Array.from(
     { length: count },
     (_, i) => createTask(dir, ORCHESTRATOR_DIR, `task ${i}`).id,
@@ -168,61 +178,61 @@ export function newTasks(count: number): { dir: string; ids: string[] } {
   return { dir, ids };
 }
 
-export function toDesign(): { dir: string; id: string } {
-  const { dir, id } = newTask();
+export async function toDesign(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await newTask();
   run(dir, id, "submit");
   return { dir, id };
 }
 
-export function toDesignReview(): { dir: string; id: string } {
-  const { dir, id } = toDesign();
+export async function toDesignReview(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toDesign();
   claim(dir, id, "designer");
   run(dir, id, "submit");
   claim(dir, id, "design-reviewer");
   return { dir, id };
 }
 
-export function toPlan(): { dir: string; id: string } {
-  const { dir, id } = toDesignReview();
-  run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
+export async function toPlan(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toDesignReview();
+  run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
-export function toPlanReview(): { dir: string; id: string } {
-  const { dir, id } = toPlan();
+export async function toPlanReview(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toPlan();
   claim(dir, id, "planner");
   run(dir, id, "submit");
   claim(dir, id, "plan-reviewer");
   return { dir, id };
 }
 
-export function planThrough(): { dir: string; id: string } {
-  const { dir, id } = toPlanReview();
-  run(dir, id, "submit", bodyOf(activeTaskPath(dir, id)));
+export async function planThrough(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toPlanReview();
+  run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
-export function toWorking(): { dir: string; id: string } {
-  const { dir, id } = planThrough();
+export async function toWorking(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await planThrough();
   claim(dir, id, "agent-1");
   return { dir, id };
 }
 
-export function toChecking(): { dir: string; id: string } {
-  const { dir, id } = toWorking();
+export async function toChecking(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toWorking();
   run(dir, id, "submit");
   return { dir, id };
 }
 
-export function toAgentReview(): { dir: string; id: string } {
-  const { dir, id } = toChecking();
+export async function toAgentReview(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toChecking();
   run(dir, id, "pass");
   claim(dir, id, "reviewer");
   return { dir, id };
 }
 
-export function toManagerReview(): { dir: string; id: string } {
-  const { dir, id } = toAgentReview();
+export async function toManagerReview(): Promise<{ dir: string; id: string }> {
+  const { dir, id } = await toAgentReview();
   run(dir, id, "submit");
   return { dir, id };
 }
