@@ -1,7 +1,5 @@
 export type FragmentValue =
-  | string
-  | number
-  | Record<string, string | number | boolean>[];
+  string | number | Record<string, string | number | boolean>[];
 
 export type FragmentVars = Record<string, FragmentValue>;
 
@@ -26,7 +24,7 @@ export function render(fragment: string, vars: FragmentVars): string {
   const lines = fragment.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
+    const line = lines[i];
     const open = SECTION_OPEN.exec(line);
 
     if (open === null) {
@@ -34,12 +32,12 @@ export function render(fragment: string, vars: FragmentVars): string {
       continue;
     }
 
-    const name = open[2]!;
+    const name = open[2];
     const body: string[] = [];
     let closed = false;
 
     for (i++; i < lines.length; i++) {
-      const inner = lines[i]!;
+      const inner = lines[i];
       const close = SECTION_CLOSE.exec(inner);
       if (close !== null) {
         if (close[1] !== name) {

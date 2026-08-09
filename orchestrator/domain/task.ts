@@ -62,6 +62,20 @@ export type TaskMeta = z.infer<typeof Meta>;
 
 export const FIELD_ORDER = keysOf(TaskFields.shape);
 
+export function requireWorkspace(task: TaskMeta): Workspace {
+  if (task.workspace === null) {
+    throw new Error(`task "${task.id}" has no workspace`);
+  }
+  return task.workspace;
+}
+
+export function requireSession(task: TaskMeta, workspace: Workspace): string {
+  if (workspace.session === null) {
+    throw new Error(`task "${task.id}" has no session to resume`);
+  }
+  return workspace.session;
+}
+
 const ID_FIELDS = new Set(["id"]);
 
 const QUOTED_TEXT_FIELDS = new Set([

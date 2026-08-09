@@ -74,20 +74,22 @@ function suitesIn(layers: Layer[]): string[] {
 
 function importsOf(module: Module): string[] {
   return [...module.source.matchAll(/from "(\.[^"]*\.ts)"/g)].map((match) => {
-    const target = path.join(path.dirname(module.path), match[1]!);
+    const target = path.join(path.dirname(module.path), match[1]);
     return path.normalize(target);
   });
 }
 
 function layerOf(relative: string): Layer | null {
-  const head = relative.split(path.sep)[0]!;
+  const head = relative.split(path.sep)[0];
   return isLayer(head) ? head : null;
 }
 
 describe("Feature: the dependency rule", () => {
   test("no module imports a layer further out than its own", () => {
     // Given every module in the orchestrator, tagged with its layer
-    const layered = modules().filter((module) => module.layer !== null);
+    const layered = modules().filter(
+      (module): module is Module & { layer: Layer } => module.layer !== null,
+    );
 
     // When each module's imports are resolved to the layer they land in
     const crossings = layered.flatMap((module) =>
@@ -96,7 +98,7 @@ describe("Feature: the dependency rule", () => {
         .filter(
           (edge) =>
             edge.layer !== null &&
-            LAYERS.indexOf(edge.layer) > LAYERS.indexOf(module.layer!),
+            LAYERS.indexOf(edge.layer) > LAYERS.indexOf(module.layer),
         )
         .map((edge) => `${module.path} -> ${edge.target}`),
     );

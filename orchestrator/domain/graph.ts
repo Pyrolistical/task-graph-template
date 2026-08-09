@@ -20,8 +20,7 @@ export function blockingCounts(
   for (const [id] of tasks) {
     const seen = new Set<TaskId>();
     const stack = [...(dependents.get(id) ?? [])];
-    while (stack.length > 0) {
-      const next = stack.pop()!;
+    for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
       if (seen.has(next)) {
         continue;
       }

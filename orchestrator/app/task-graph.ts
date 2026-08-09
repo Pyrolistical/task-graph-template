@@ -202,8 +202,7 @@ export class TaskGraph {
     }
     this.recent.unshift(taskId);
 
-    while (this.recent.length > RECENT_TASKS) {
-      const dropped = this.recent.pop()!;
+    for (const dropped of this.recent.splice(RECENT_TASKS)) {
       if (!tasks.has(dropped)) {
         this.closed.delete(dropped);
         this.paths.discard(dropped);

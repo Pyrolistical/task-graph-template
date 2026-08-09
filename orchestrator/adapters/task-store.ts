@@ -34,6 +34,14 @@ export function findTaskFile(id: string, tasksDir: string): string | null {
   return null;
 }
 
+export function requireTaskFile(id: string, tasksDir: string): string {
+  const filePath = findTaskFile(id, tasksDir);
+  if (filePath === null) {
+    throw new Error(`Task "${id}" not found`);
+  }
+  return filePath;
+}
+
 export function readTaskFile(filePath: string): {
   meta: TaskMeta;
   body: string;
@@ -61,10 +69,7 @@ export function writeTaskBody(
   }
 
   return withLock(tasksDir, () => {
-    const filePath = findTaskFile(id, tasksDir);
-    if (filePath === null) {
-      throw new Error(`Task "${id}" not found`);
-    }
+    const filePath = requireTaskFile(id, tasksDir);
     const { meta } = readTaskFile(filePath);
     writeTaskFile(filePath, meta, normalizeBody(body));
     return filePath;

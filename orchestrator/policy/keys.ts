@@ -11,7 +11,7 @@ export function keys(chunk: string): string[] {
       rest.match(/^\x1b\[<\d+;\d+;\d+[mM]/) ??
       rest.match(/^\x1b\[[0-9;]*[A-Za-z~]/);
     if (sequence === null) {
-      found.push(rest[0]!);
+      found.push(rest[0]);
       at += 1;
       continue;
     }
@@ -35,9 +35,9 @@ export function mouse(key: string): Mouse | null {
     return null;
   }
   return {
-    button: parseInt(match[1]!, 10),
-    column: parseInt(match[2]!, 10) - 1,
-    row: parseInt(match[3]!, 10) - 1,
+    button: parseInt(match[1], 10),
+    column: parseInt(match[2], 10) - 1,
+    row: parseInt(match[3], 10) - 1,
     pressed: match[4] === "M",
   };
 }

@@ -327,7 +327,7 @@ export class PaneLines {
 
     const settled = Math.max(0, entries.length - 1);
     for (let index = this.folded; index < settled; index++) {
-      const entry = entries[index]!;
+      const entry = entries[index];
       if (entry.label !== "usage") {
         this.lines.push(...entryLines(entry, width));
       }
@@ -560,8 +560,8 @@ export function screen(
     off.length === 0 || off.length === cells.length
       ? null
       : hideRegion(
-          off[0]! * (width + 1),
-          off[off.length - 1]! * (width + 1) + width,
+          off[0] * (width + 1),
+          off[off.length - 1] * (width + 1) + width,
           rows,
         );
   if (hide !== null) {

@@ -26,7 +26,7 @@ export function busyRow(
   nowMs = Date.now(),
 ): SlotRow {
   return {
-    ...idleRow(SLOTS[0]!),
+    ...idleRow(SLOTS[0]),
     state: "BUSY",
     task_id: "000123",
     role: "worker",
@@ -53,7 +53,7 @@ export function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
     state_entered: new Date(1000).toISOString(),
     depends_on: [],
     blocking: 0,
-    claimed_by: SLOTS[0]!.name,
+    claimed_by: SLOTS[0].name,
     held_reason: null,
     worktree: "/tmp/worktree",
     ...overrides,
@@ -96,7 +96,7 @@ export function layoutOf(overrides: Partial<Layout> = {}): Layout {
 }
 
 export function paneOf(view: Partial<ConsoleView> = {}): Pane {
-  return panes(viewOf(view))[0]!;
+  return panes(viewOf(view))[0];
 }
 
 export function entryOf(text: string, label = "text"): Entry {

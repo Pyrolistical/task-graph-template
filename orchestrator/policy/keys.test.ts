@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { present } from "../testing/present.ts";
 import { hitAt, keys, mouse, within } from "./keys.ts";
 import type { Hit } from "./console.ts";
 
@@ -69,10 +70,10 @@ describe("Feature: where the mouse was clicked", () => {
     const report = "\x1b[<0;12;3m";
 
     // When it is read as a mouse event
-    const event = mouse(report);
+    const event = present(mouse(report), "a mouse event");
 
     // Then it reads as a release rather than a press
-    expect(event!.pressed).toBe(false);
+    expect(event.pressed).toBe(false);
   });
 
   test("a key that is not a mouse report is not one", () => {
@@ -98,7 +99,10 @@ describe("Feature: where the mouse was clicked", () => {
     ];
 
     // When a click lands inside it
-    const command = hitAt(hits, mouse("\x1b[<0;4;1M")!);
+    const command = hitAt(
+      hits,
+      present(mouse("\x1b[<0;4;1M"), "a mouse event"),
+    );
 
     // Then the switch's command is the one that goes to the server
     expect(command).toEqual({ command: "scheduler", enabled: true });
@@ -116,7 +120,10 @@ describe("Feature: where the mouse was clicked", () => {
     ];
 
     // When a click lands one column past it
-    const command = hitAt(hits, mouse("\x1b[<0;5;1M")!);
+    const command = hitAt(
+      hits,
+      present(mouse("\x1b[<0;5;1M"), "a mouse event"),
+    );
 
     // Then nothing is sent, because the click hit no target
     expect(command).toBeNull();
@@ -127,7 +134,10 @@ describe("Feature: where the mouse was clicked", () => {
     const region = { row: 0, from: 0, to: 4 };
 
     // When a click lands in the same columns one row down
-    const inside = within(region, mouse("\x1b[<0;1;2M")!);
+    const inside = within(
+      region,
+      present(mouse("\x1b[<0;1;2M"), "a mouse event"),
+    );
 
     // Then it is outside the switch, because a target is one row tall
     expect(inside).toBe(false);

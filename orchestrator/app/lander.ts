@@ -4,7 +4,11 @@ import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { HELD_STATES, type TaskState } from "../domain/state-machine.ts";
 import type { TransitionResult } from "../domain/state-machine.ts";
-import type { TaskId, TaskMeta } from "../domain/task.ts";
+import {
+  type TaskId,
+  type TaskMeta,
+  requireWorkspace,
+} from "../domain/task.ts";
 
 const ABORTABLE_STATES: TaskState[] = ["MANAGER_REVIEW", ...HELD_STATES];
 
@@ -19,7 +23,7 @@ export class Lander {
 
   async merge(taskId: TaskId): Promise<TransitionResult> {
     const task = this.requireManagerReview(taskId);
-    const { branch, worktree } = task.workspace!;
+    const { branch, worktree } = requireWorkspace(task);
 
     if (this.workspaces.exists(worktree)) {
       this.workspaces.syncBase(worktree, this.base);

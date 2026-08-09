@@ -58,17 +58,17 @@ function marks(
 ): { at: number; name: string }[] {
   return [...source.matchAll(pattern)].map((match) => ({
     at: match.index,
-    name: match[1]!,
+    name: match[1],
   }));
 }
 
 function stepsIn(source: string): Step[] {
   return [...source.matchAll(STEP)].map((match) => {
-    const keyword = match[1]!;
+    const keyword = match[1];
     if (!isKeyword(keyword)) {
       throw new Error(`"${keyword}" is not a step keyword`);
     }
-    return { keyword, text: match[2]! };
+    return { keyword, text: match[2] };
   });
 }
 
@@ -88,7 +88,7 @@ export function readFile(filePath: string): File {
     if (owner === -1) {
       continue;
     }
-    suites[owner]!.cases.push({
+    suites[owner].cases.push({
       name: test.name,
       steps: stepsIn(source.slice(test.at, ends)),
     });

@@ -117,7 +117,7 @@ describe("Feature: what the server does with a settled turn", () => {
     await settler.settle(runner);
 
     // Then the slot goes back to idle rather than being left holding the task
-    expect(pool.rows()[0]!.state).toBe("IDLE");
+    expect(pool.rows()[0].state).toBe("IDLE");
   });
 
   test("an assignment the agent may not have changed is put back", async () => {
@@ -149,6 +149,6 @@ describe("Feature: what the server does with a settled turn", () => {
 
     // Then nothing is asked of it and the slot goes back to idle
     expect(prompted).toEqual([]);
-    expect(pool.rows()[0]!.state).toBe("IDLE");
+    expect(pool.rows()[0].state).toBe("IDLE");
   });
 });

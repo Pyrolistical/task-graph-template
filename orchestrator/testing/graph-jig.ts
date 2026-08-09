@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { tempDir } from "./temp-dirs.ts";
+import { present } from "./present.ts";
 import {
   type TaskMeta,
   parseDocument,
@@ -145,6 +146,12 @@ export function unclaim(dir: string, id: string): void {
 
 export function metaOf(dir: string, id: string) {
   return readTaskFile(activeTaskPath(dir, id)).meta;
+}
+
+export function enteredAt(dir: string, id: string): number {
+  return Date.parse(
+    present(metaOf(dir, id).state_entered, `a state_entered stamp on `),
+  );
 }
 
 export function newTask(title = "a task"): { dir: string; id: string } {

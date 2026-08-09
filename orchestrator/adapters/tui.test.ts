@@ -313,10 +313,10 @@ describe("Feature: reading the views the server publishes", () => {
     const view = readView(runtime);
 
     // Then it has the agents, the tasks, the checks, the queue and the switch
-    expect(view.slots[0]!.name).toBe(SLOTS[0]!.name);
-    expect(view.tasks[0]!.id).toBe("000123");
+    expect(view.slots[0].name).toBe(SLOTS[0].name);
+    expect(view.tasks[0].id).toBe("000123");
     expect(view.checks).toEqual([]);
-    expect(view.queue[0]!.task_id).toBe("000123");
+    expect(view.queue[0].task_id).toBe("000123");
     expect(view.scheduling).toBe(true);
   });
 
@@ -435,7 +435,7 @@ describe("Feature: reading the views the server publishes", () => {
       expect(
         hits.filter((hit) => hit.command.command === "agent"),
       ).toHaveLength(SLOTS.length);
-      expect(lines.join("\n")).not.toContain(SHOW[0]!);
+      expect(lines.join("\n")).not.toContain(SHOW[0]);
       expect(lines.join("\n")).not.toContain(HIDE.trim());
     },
   );

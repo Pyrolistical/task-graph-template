@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test";
+import { present } from "../testing/present.ts";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -46,16 +47,20 @@ async function toolsOf(state: ClaimState): Promise<Map<string, Tool>> {
   return tools;
 }
 
+function toolOf(tools: Map<string, Tool>, name: string): Tool {
+  return present(tools.get(name), `a  tool`);
+}
+
 function textOf(result: ToolResult): string {
-  return result.content[0]!.text;
+  return result.content[0].text;
 }
 
 async function submitOf(state: ClaimState) {
   const tools = await toolsOf(state);
-  const submit = tools.get("submit")!.parameters;
+  const submit = toolOf(tools, "submit").parameters;
   return {
     tools: [...tools.keys()].sort(),
-    blocked: tools.get("blocked")!.parameters.required,
+    blocked: toolOf(tools, "blocked").parameters.required,
     fields: Object.keys(submit.properties),
     required: submit.required ?? [],
     closed: submit.additionalProperties,
@@ -788,10 +793,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -807,10 +812,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -826,10 +831,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -845,10 +850,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -864,10 +869,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -883,10 +888,10 @@ describe("Feature: what an agent's result tool call means", () => {
 
       // When each of them is called with arguments its stage accepts
       const ended = [
-        await tools.get("submit")!.execute("id", { findings: [] }),
-        await tools
-          .get("blocked")!
-          .execute("id", { message: "the box is down" }),
+        await toolOf(tools, "submit").execute("id", { findings: [] }),
+        await toolOf(tools, "blocked").execute("id", {
+          message: "the box is down",
+        }),
       ];
 
       // Then neither leaves the agent a turn to carry on in
@@ -899,9 +904,9 @@ describe("Feature: what an agent's result tool call means", () => {
     const tools = await toolsOf("WORK_REVIEW");
 
     // When it submits both of them
-    const result = await tools
-      .get("submit")!
-      .execute("id", { findings: ["the null case is untested", "it leaks"] });
+    const result = await toolOf(tools, "submit").execute("id", {
+      findings: ["the null case is untested", "it leaks"],
+    });
 
     // Then it reads back that the work was rejected, and by how much
     expect(textOf(result)).toBe("Work rejected with 2 finding(s).");
@@ -912,7 +917,9 @@ describe("Feature: what an agent's result tool call means", () => {
     const tools = await toolsOf("WORK_REVIEW");
 
     // When it submits an empty list of findings
-    const result = await tools.get("submit")!.execute("id", { findings: [] });
+    const result = await toolOf(tools, "submit").execute("id", {
+      findings: [],
+    });
 
     // Then it reads back that it has accepted the work
     expect(textOf(result)).toBe("Work accepted.");
@@ -925,9 +932,9 @@ describe("Feature: what an agent's result tool call means", () => {
       const tools = await toolsOf("WORK");
 
       // When it reports itself blocked
-      const result = await tools
-        .get("blocked")!
-        .execute("id", { message: "the staging database is unreachable" });
+      const result = await toolOf(tools, "blocked").execute("id", {
+        message: "the staging database is unreachable",
+      });
 
       // Then it reads back that a person has the turn now
       expect(textOf(result)).toBe("Stopped: awaiting a person.");

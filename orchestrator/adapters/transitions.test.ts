@@ -7,7 +7,7 @@ import {
   createTask,
   readTaskFile,
 } from "./task-store.ts";
-import { parseTaskMeta } from "../domain/task.ts";
+import { parseTaskMeta, requireWorkspace } from "../domain/task.ts";
 import {
   type TransitionArgs,
   type TransitionName,
@@ -24,6 +24,7 @@ import {
   closedPath,
   deadPid,
   editTask,
+  enteredAt,
   makeTasksDir,
   metaOf,
   newTask,
@@ -69,8 +70,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a task with a dependency waits instead of starting", () => {
     // Given a new task edited to depend on another
     const { dir, ids } = newTasks(2);
-    const main = ids[0]!;
-    const dep = ids[1]!;
+    const main = ids[0];
+    const dep = ids[1];
     addDeps(dir, main, dep);
 
     // When the task is submitted
@@ -84,8 +85,8 @@ describe("Feature: a task that waits on other tasks", () => {
   testInTempDirs("a blocked task submitted again stays where it is", () => {
     // Given a task already blocked behind a dependency
     const { dir, ids } = newTasks(2);
-    const main = ids[0]!;
-    const dep = ids[1]!;
+    const main = ids[0];
+    const dep = ids[1];
     addDeps(dir, main, dep);
     run(dir, main, "submit");
 
@@ -102,9 +103,9 @@ describe("Feature: a task that waits on other tasks", () => {
     () => {
       // Given a task blocked behind two dependencies, one since edited out
       const { dir, ids } = newTasks(3);
-      const main = ids[0]!;
-      const first = ids[1]!;
-      const second = ids[2]!;
+      const main = ids[0];
+      const first = ids[1];
+      const second = ids[2];
       addDeps(dir, main, first, second);
       run(dir, main, "submit");
       editTask(dir, main, (meta) => {
@@ -817,30 +818,28 @@ describe("Feature: what changes as a task walks the pipeline", () => {
   testInTempDirs("the clock moves even when the task does not", async () => {
     // Given a blocked task, and when it last entered that state
     const { dir, ids } = newTasks(2);
-    const main = ids[0]!;
-    const dep = ids[1]!;
+    const main = ids[0];
+    const dep = ids[1];
     addDeps(dir, main, dep);
     run(dir, main, "submit");
-    const before = metaOf(dir, main).state_entered;
+    const before = enteredAt(dir, main);
     await Bun.sleep(5);
 
     // When it is submitted again and stays blocked
     expect(run(dir, main, "submit").to).toBeNull();
 
     // Then the clock still moved, so the inbox shows how long it has waited
-    expect(Date.parse(metaOf(dir, main).state_entered!)).toBeGreaterThan(
-      Date.parse(before!),
-    );
+    expect(enteredAt(dir, main)).toBeGreaterThan(before);
   });
 
   testInTempDirs("the clock moves when the task moves", async () => {
     // Given a blocked task whose dependency has since been edited out
     const { dir, ids } = newTasks(2);
-    const main = ids[0]!;
-    const dep = ids[1]!;
+    const main = ids[0];
+    const dep = ids[1];
     addDeps(dir, main, dep);
     run(dir, main, "submit");
-    const before = metaOf(dir, main).state_entered;
+    const before = enteredAt(dir, main);
     await Bun.sleep(5);
     editTask(dir, main, (meta) => {
       meta.depends_on = [];
@@ -850,9 +849,7 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     expect(run(dir, main, "submit").to).toBe("DESIGN");
 
     // Then the clock is stamped with the moment it entered its new state
-    expect(Date.parse(metaOf(dir, main).state_entered!)).toBeGreaterThan(
-      Date.parse(before!),
-    );
+    expect(enteredAt(dir, main)).toBeGreaterThan(before);
   });
 });
 
@@ -907,7 +904,7 @@ describe("Feature: the workspace a task is worked in", () => {
     });
 
     // Then no session is recorded, because only work is ever resumed
-    expect(metaOf(dir, id).workspace!.session).toBeNull();
+    expect(requireWorkspace(metaOf(dir, id)).session).toBeNull();
   });
 
   testInTempDirs(
@@ -935,7 +932,7 @@ describe("Feature: the workspace a task is worked in", () => {
 
       // Then the worker's session survives, so the work can still be resumed
       expect(metaOf(dir, id).state).toBe("WORK_REVIEW");
-      expect(metaOf(dir, id).workspace!.session).toBe(work);
+      expect(requireWorkspace(metaOf(dir, id)).session).toBe(work);
     },
   );
 
@@ -968,7 +965,7 @@ describe("Feature: the workspace a task is worked in", () => {
     });
 
     // Then there is no session to resume from, and the field says so
-    expect(metaOf(dir, id).workspace!.session).toBeNull();
+    expect(requireWorkspace(metaOf(dir, id)).session).toBeNull();
   });
 
   testInTempDirs("a branch with no worktree beside it is refused", () => {

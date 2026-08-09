@@ -1,5 +1,12 @@
 import fs from "node:fs";
-import { type TaskMeta, rebuildDocument } from "../domain/task.ts";
+import {
+  type TaskMeta,
+  type Workspace,
+  rebuildDocument,
+  requireSession,
+  requireWorkspace,
+} from "../domain/task.ts";
+import { present } from "./present.ts";
 import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
@@ -191,6 +198,19 @@ export function compactionsOf(server: Server, id: string): number | null {
     (agent: { task_id: string | null }) => agent.task_id === id,
   );
   return busy?.compactions ?? null;
+}
+
+export function taskOf(server: Server, id: string): TaskMeta {
+  return present(server.tasks().get(id), `task "${id}" in the graph`);
+}
+
+export function workspaceOf(server: Server, id: string): Workspace {
+  return requireWorkspace(taskOf(server, id));
+}
+
+export function sessionOf(server: Server, id: string): string {
+  const task = taskOf(server, id);
+  return requireSession(task, requireWorkspace(task));
 }
 
 export function stateOf(server: Server, id: string): string {

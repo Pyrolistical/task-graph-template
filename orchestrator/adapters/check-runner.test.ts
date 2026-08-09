@@ -53,8 +53,8 @@ describe("Feature: running a task's declared checks", () => {
 
       // Then the console can see what is running and under which process
       expect(runner.view).toHaveLength(1);
-      expect(runner.view[0]!.command).toBe("sleep 0.2");
-      expect(runner.view[0]!.pid).toBeGreaterThan(0);
+      expect(runner.view[0].command).toBe("sleep 0.2");
+      expect(runner.view[0].pid).toBeGreaterThan(0);
       expect(runner.isRunning("000042")).toBe(true);
 
       // Then the view empties again once the check is done

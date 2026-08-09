@@ -40,9 +40,9 @@ function cases(file: string): Case[] {
     return {
       file,
       name,
-      given: comments.filter((c) => c[1] === "Given").map((c) => c[2]!),
-      when: comments.filter((c) => c[1] === "When").map((c) => c[2]!),
-      then: comments.filter((c) => c[1] === "Then").map((c) => c[2]!),
+      given: comments.filter((c) => c[1] === "Given").map((c) => c[2]),
+      when: comments.filter((c) => c[1] === "When").map((c) => c[2]),
+      then: comments.filter((c) => c[1] === "Then").map((c) => c[2]),
     };
   });
 }

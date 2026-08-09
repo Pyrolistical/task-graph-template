@@ -503,8 +503,8 @@ describe("Feature: the log of every transition applied", () => {
     // Then only the last ten are kept, still numbered from where they happened
     const kept = log.read();
     expect(kept).toHaveLength(10);
-    expect(kept[0]!.seq).toBe(16);
-    expect(kept[9]!.seq).toBe(25);
+    expect(kept[0].seq).toBe(16);
+    expect(kept[9].seq).toBe(25);
 
     // Then a server reopening the log carries on from the same number
     expect(log.cursor).toBe(25);

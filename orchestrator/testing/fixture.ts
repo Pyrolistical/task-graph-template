@@ -3,9 +3,9 @@ import { z } from "zod";
 import path from "node:path";
 import {
   createTask,
-  findTaskFile,
   nextTaskIdPath,
   readTaskFile,
+  requireTaskFile,
   withLock,
   writeTaskFile,
 } from "../adapters/task-store.ts";
@@ -474,7 +474,7 @@ export function unplannedTask(
   const { id } = createTask(fixture.tasksDir, fixture.orchestratorDir, title);
   if (checks.length > 0) {
     withLock(fixture.tasksDir, () => {
-      const filePath = findTaskFile(id, fixture.tasksDir)!;
+      const filePath = requireTaskFile(id, fixture.tasksDir);
       const { meta, body } = readTaskFile(filePath);
       meta.checks = [...checks];
       writeTaskFile(filePath, meta, body);
@@ -498,7 +498,7 @@ export function readyTask(
     slotName: "design-reviewer",
     pid: process.pid,
   });
-  const designed = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
+  const designed = readTaskFile(requireTaskFile(id, fixture.tasksDir)).body;
   applyTransition(fixture.tasksDir, id, "submit", { body: designed });
   takeClaim(fixture.tasksDir, id, { slotName: "planner", pid: process.pid });
   applyTransition(fixture.tasksDir, id, "submit", {});
@@ -506,14 +506,14 @@ export function readyTask(
     slotName: "plan-reviewer",
     pid: process.pid,
   });
-  const body = readTaskFile(findTaskFile(id, fixture.tasksDir)!).body;
+  const body = readTaskFile(requireTaskFile(id, fixture.tasksDir)).body;
   applyTransition(fixture.tasksDir, id, "submit", { body });
   return id;
 }
 
 export function setBody(fixture: Fixture, id: string, body: string): void {
   withLock(fixture.tasksDir, () => {
-    const filePath = findTaskFile(id, fixture.tasksDir)!;
+    const filePath = requireTaskFile(id, fixture.tasksDir);
     const { meta } = readTaskFile(filePath);
     writeTaskFile(filePath, meta, body);
   });

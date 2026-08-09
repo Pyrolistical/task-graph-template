@@ -171,13 +171,13 @@ describe("Feature: loading the pool of agents", () => {
       const slots = parsePool(pool);
 
       // Then the first may work, review, plan and design, and the second may only review
-      expect(slots[0]!.roles).toEqual([
+      expect(slots[0].roles).toEqual([
         "worker",
         "reviewer",
         "planner",
         "designer",
       ]);
-      expect(slots[1]!.roles).toEqual(["reviewer"]);
+      expect(slots[1].roles).toEqual(["reviewer"]);
     },
   );
 
@@ -283,7 +283,7 @@ describe("Feature: loading the pool of agents", () => {
       const slots = parsePool(pool);
 
       // Then the write path defaults to the zig cache, which is the cache home
-      expect(slots[0]!.write).toEqual([ZIG_WRITE]);
+      expect(slots[0].write).toEqual([ZIG_WRITE]);
       expect(DEFAULT_WRITE).toEqual([ZIG_WRITE]);
       expect(ZIG_WRITE).toBe(CACHE_HOME);
     },
@@ -308,7 +308,7 @@ describe("Feature: loading the pool of agents", () => {
       const slots = parsePool(pool);
 
       // Then those are the only paths outside its worktree the agent may write
-      expect(slots[0]!.write).toEqual(["~/.cache", "~/.cargo"]);
+      expect(slots[0].write).toEqual(["~/.cache", "~/.cargo"]);
     },
   );
 
@@ -321,7 +321,7 @@ describe("Feature: loading the pool of agents", () => {
       };
 
       // When the paths that agent may write are worked out
-      const writable = agentWrite(parsePool(pool)[0]!);
+      const writable = agentWrite(parsePool(pool)[0]);
 
       // Then only pi's own home comes along, because pi cannot run without it
       expect(writable).toEqual([PI_HOME]);
@@ -335,7 +335,7 @@ describe("Feature: loading the pool of agents", () => {
       agents: [
         { type: "pi", provider: "anthropic", model: "m", write: [home] },
       ],
-    })[0]!;
+    })[0];
 
     // When the paths it may write are worked out
     const writable = agentWrite(slot);
@@ -351,7 +351,7 @@ describe("Feature: loading the pool of agents", () => {
       agents: [
         { type: "other", provider: "anthropic", model: "m", write: [home] },
       ],
-    })[0]!;
+    })[0];
 
     // When the paths it may write are worked out
     const writable = agentWrite(slot);

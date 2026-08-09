@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test";
+import { requireWorkspace } from "../domain/task.ts";
 import {
   tempDir,
   testInTempDirs,
@@ -12,10 +13,10 @@ import { branchName } from "../domain/workspace.ts";
 import {
   activeTaskPath,
   closedTaskPath,
-  findTaskFile,
   nextTaskIdPath,
   readTaskFile,
   writeTaskBody,
+  requireTaskFile,
 } from "../adapters/task-store.ts";
 import { readView } from "../adapters/tui.ts";
 import { defaultTasksDir } from "../adapters/runtime.ts";
@@ -45,6 +46,9 @@ import {
   settleTo,
   stateOf,
   walkTo,
+  taskOf,
+  workspaceOf,
+  sessionOf,
 } from "../testing/server-jig.ts";
 
 describe("Feature: where a project's task graph is found", () => {
@@ -421,7 +425,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "HELD_DESIGN");
 
       // Then the task is held, saying what the designer never wrote
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toContain(
         "the designer submitted without appending a design section",
       );
@@ -573,7 +577,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "HELD_PLAN");
 
       // Then the task is held, saying what the planner never wrote
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toContain(
         "the planner submitted without appending a todo list",
       );
@@ -653,7 +657,7 @@ describe("Feature: the design and planning phases", () => {
       await walkTo(server, id, "HELD_PLAN");
 
       // Then the task is held, saying which rule the planner broke
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toContain(
         "wrote to the worktree during design or planning",
       );
@@ -714,7 +718,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await reaches(server, id, "HELD_DESIGN");
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toBe("the acceptance criteria are empty");
 
       // When the manager resumes it
@@ -745,7 +749,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await reaches(server, id, "HELD_PLAN");
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toBe("the acceptance criteria are empty");
 
       // When the manager resumes it
@@ -777,7 +781,7 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
       server.setSchedulerEnabled(true);
       await reaches(server, id, "HELD_PLAN");
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toBe("the criteria contradict the goal");
 
       // When the manager resumes it
@@ -842,7 +846,7 @@ describe("Feature: the design and planning phases", () => {
           pid: process.pid,
         });
         applyTransition(fixture.tasksDir, id, "submit", {
-          body: readTaskFile(findTaskFile(id, fixture.tasksDir)!).body,
+          body: readTaskFile(requireTaskFile(id, fixture.tasksDir)).body,
         });
       }
       server.claim(reviewing, { slotName: "planner", pid: process.pid });
@@ -1124,19 +1128,20 @@ describe("Feature: handing a task to an agent", () => {
       await server.tick();
 
       // Then the document names the agent, its process and everything it needs
-      const held = server.tasks().get(id)!;
+      const held = taskOf(server, id);
+      const workspace = requireWorkspace(held);
       expect(held.claimed_by).toBe("pi-fake-fake-1");
       expect(held.claimed_pid).toBeGreaterThan(0);
-      expect(held.workspace!.slot).toBe("pi-fake-fake-1");
-      expect(held.workspace!.branch).toBe(branchName(id));
-      expect(held.workspace!.worktree).toBe(pathsOf(server).worktree(id));
-      expect(fs.existsSync(held.workspace!.session!)).toBe(true);
+      expect(workspace.slot).toBe("pi-fake-fake-1");
+      expect(workspace.branch).toBe(branchName(id));
+      expect(workspace.worktree).toBe(pathsOf(server).worktree(id));
+      expect(fs.existsSync(sessionOf(server, id))).toBe(true);
 
       await reaches(server, id, "MANAGER_REVIEW");
       server.setSchedulerEnabled(false);
 
       // Then the claim is released once the work is done
-      expect(server.tasks().get(id)!.claimed_by).toBeNull();
+      expect(taskOf(server, id).claimed_by).toBeNull();
 
       server.shutdown();
     },
@@ -1180,7 +1185,7 @@ describe("Feature: handing a task to an agent", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the branch it recorded is the one used, not the one it would pick
-      expect(server.tasks().get(id)!.workspace!.branch).toBe(legacy);
+      expect(workspaceOf(server, id).branch).toBe(legacy);
       expect(git.branchExists(fixture.repo, branchName(id))).toBe(false);
 
       expect((await server.submit(id)).to).toBe("CLOSED");

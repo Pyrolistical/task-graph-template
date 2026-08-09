@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setSystemTime } from "bun:test";
 import { tempDir, testInTempDirs } from "../testing/temp-dirs.ts";
+import { present } from "../testing/present.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { type Activity, describeActivity } from "../domain/activity.ts";
@@ -271,7 +272,9 @@ describe("Feature: matching a reply to what was asked", () => {
       );
 
       // Then the waiting request is answered by its own reply
-      expect((await expected).data!.sessionFile).toBe("/tmp/s.jsonl");
+      expect(
+        present((await expected).data, "the reply payload").sessionFile,
+      ).toBe("/tmp/s.jsonl");
     },
   );
 

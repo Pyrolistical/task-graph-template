@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test";
+import { present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -31,6 +32,8 @@ import {
   stateOf,
   until,
   walkTo,
+  taskOf,
+  workspaceOf,
 } from "../testing/server-jig.ts";
 
 describe("Feature: what a reviewer sends back to the worker", () => {
@@ -74,9 +77,12 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       ]);
 
       // Then the transition is recorded as the server's, not the reviewer's
-      const applied = transitionsOf(server)
-        .read()
-        .find((e) => e.transition === "feedback" && e.from === "WORK_REVIEW")!;
+      const applied = present(
+        transitionsOf(server)
+          .read()
+          .find((e) => e.transition === "feedback" && e.from === "WORK_REVIEW"),
+        "a feedback transition out of WORK_REVIEW",
+      );
       expect(applied.to).toBe("WORK");
       expect(applied.by).toBe("server");
 
@@ -171,7 +177,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
         pathsOf(server).sessionDir(id, "worker"),
         `${id}-worker.jsonl`,
       );
-      expect(server.tasks().get(id)!.workspace!.session).toBe(worked);
+      expect(workspaceOf(server, id).session).toBe(worked);
       expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         2,
       );
@@ -308,7 +314,7 @@ describe("Feature: a review that fails twice", () => {
       await settleTo(server, id, "HELD_WORK");
 
       // Then the task is held with the second round's findings as the reason
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toBe(
         "failed 2 rounds of WORK_REVIEW with:\n- finding two",
@@ -584,7 +590,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "HELD_WORK", 20);
 
       // Then the task is held with a reason the manager can act on
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.held_reason).toBe(
         "the agent submitted work it never committed: nothing is committed on the branch",
       );
@@ -592,7 +598,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         5,
       );
-      expect(server.slotRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0].state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -624,7 +630,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is parked with the agent's own words as the reason
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toBe("the staging database is unreachable");
       expect(task.claimed_by).toBeNull();
@@ -691,7 +697,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, naming the command it was stuck on
-      expect(server.tasks().get(id)!.held_reason).toContain("zig build");
+      expect(taskOf(server, id).held_reason).toContain("zig build");
       expect(promptsTo(pathsOf(server).sessionDir(id, "worker"))).toHaveLength(
         ISSUES.looping.attempts + 1,
       );
@@ -860,7 +866,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, saying which part of the assignment is missing
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toContain(
         "without appending implementation notes",

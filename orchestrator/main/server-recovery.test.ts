@@ -29,6 +29,7 @@ import {
   unclaimed,
   until,
   walkTo,
+  taskOf,
 } from "../testing/server-jig.ts";
 
 describe("Feature: picking a project back up at startup", () => {
@@ -151,8 +152,8 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 
       // Then the claim is dropped, the stage is kept and the workspace survives
       expect(stateOf(server, id)).toBe("WORK");
-      expect(server.tasks().get(id)!.claimed_by).toBeNull();
-      expect(server.tasks().get(id)!.workspace).not.toBeNull();
+      expect(taskOf(server, id).claimed_by).toBeNull();
+      expect(taskOf(server, id).workspace).not.toBeNull();
 
       server.shutdown();
     },
@@ -178,10 +179,10 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await unclaimed(server, id);
 
       // Then the slot is idle and the task is back in the queue where it stood
-      const row = server.slotRows()[0]!;
+      const row = server.slotRows()[0];
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
-      expect(server.tasks().get(id)!.claimed_by).toBeNull();
+      expect(taskOf(server, id).claimed_by).toBeNull();
 
       server.shutdown();
     },
@@ -205,7 +206,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await unclaimed(server, id);
 
       // Then the dead slot does not shield the task, and is released with it
-      expect(server.slotRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0].state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -310,7 +311,7 @@ describe("Feature: an abort that races a dispatch", () => {
       await server.drain();
       expect(stateOf(server, id)).toBe("CLOSED");
       expect(server.tasks().get(id)).toBeUndefined();
-      expect(server.slotRows()[0]!.state).toBe("IDLE");
+      expect(server.slotRows()[0].state).toBe("IDLE");
 
       server.shutdown();
     },
@@ -338,7 +339,7 @@ describe("Feature: an abort that races a dispatch", () => {
       // Then the slot goes back to idle, and the lost dispatch is logged
       await ticking;
       await server.drain();
-      const row = server.slotRows()[0]!;
+      const row = server.slotRows()[0];
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
       expect(
@@ -370,7 +371,7 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // Then the agent holds the task, and the manager can no longer abort it
       expect(stateOf(server, id)).toBe("WORK");
-      expect(server.tasks().get(id)!.claimed_by).toBe("pi-fake-fake-1");
+      expect(taskOf(server, id).claimed_by).toBe("pi-fake-fake-1");
       expect(() => server.abort(id)).toThrow(/not in/);
 
       server.shutdown();

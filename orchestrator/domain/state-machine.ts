@@ -186,7 +186,7 @@ export const REVIEW_FAILURE_LIMIT = 2;
 export const NEXT_STATE = tableOf(
   STAGES.slice(0, -1),
   (stage) => stage.state,
-  (_stage, index) => STAGES[index + 1]!.state,
+  (_stage, index) => STAGES[index + 1].state,
 );
 
 export const HELD_STATES = ["HELD_DESIGN", "HELD_PLAN", "HELD_WORK"] as const;

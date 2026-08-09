@@ -8,7 +8,13 @@ import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../domain/agents.ts";
 import { messageOf } from "../domain/errors.ts";
-import { type TaskId, type TaskMeta, normalizeBody } from "../domain/task.ts";
+import {
+  type TaskId,
+  type TaskMeta,
+  normalizeBody,
+  requireSession,
+  requireWorkspace,
+} from "../domain/task.ts";
 import { type Role, STAGE_OF } from "../domain/state-machine.ts";
 import { branchName } from "../domain/workspace.ts";
 import { type Candidate, schedule } from "../policy/scheduler.ts";
@@ -137,7 +143,8 @@ export class Dispatcher {
     role: Role,
   ): Promise<void> {
     const slot = runner.slot;
-    const workspace = task.workspace!;
+    const workspace = requireWorkspace(task);
+    const session = requireSession(task, workspace);
     runner.checkout = {
       branch: workspace.branch,
       worktree: workspace.worktree,
@@ -157,15 +164,15 @@ export class Dispatcher {
     );
     runner.process = process;
 
-    await process.switchSession(workspace.session!);
-    runner.session = workspace.session;
+    await process.switchSession(session);
+    runner.session = session;
     this.requireStill(task, slot);
     this.graph.claim(task.id, {
       slotName: slot.name,
       pid: process.pid,
       branch: workspace.branch,
       worktree: workspace.worktree,
-      session: workspace.session!,
+      session,
     });
 
     runner.state = "BUSY";

@@ -192,7 +192,7 @@ export class Pool {
     runner.process.abortBash();
     this.publisher.log(`${name} aborted bash: ${activity.target}`);
 
-    return this.rows().find((row) => row.name === name)!;
+    return this.rowOf(runner);
   }
 
   spawn(
@@ -278,27 +278,29 @@ export class Pool {
   }
 
   rows(): SlotRow[] {
-    return this.runners().map((runner) => {
-      const enabled = !this.disabled.has(runner.slot.agent);
-      if (runner.state === "IDLE") {
-        return idleRow(runner.slot, enabled);
-      }
+    return this.runners().map((runner) => this.rowOf(runner));
+  }
 
-      return {
-        ...idleRow(runner.slot, enabled),
-        state: runner.state,
-        task_id: runner.taskId,
-        role: runner.role,
-        pid: runner.process?.pid ?? runner.detachedPid,
-        started_at: runner.startedAt,
-        activity: runner.process?.stream.state.activity ?? { kind: "none" },
-        tokens: runner.tokens,
-        context_percent: runner.contextPercent,
-        compactions: runner.compactions,
-        session: runner.session,
-        retry: runner.retry,
-      };
-    });
+  private rowOf(runner: Runner): SlotRow {
+    const enabled = !this.disabled.has(runner.slot.agent);
+    if (runner.state === "IDLE") {
+      return idleRow(runner.slot, enabled);
+    }
+
+    return {
+      ...idleRow(runner.slot, enabled),
+      state: runner.state,
+      task_id: runner.taskId,
+      role: runner.role,
+      pid: runner.process?.pid ?? runner.detachedPid,
+      started_at: runner.startedAt,
+      activity: runner.process?.stream.state.activity ?? { kind: "none" },
+      tokens: runner.tokens,
+      context_percent: runner.contextPercent,
+      compactions: runner.compactions,
+      session: runner.session,
+      retry: runner.retry,
+    };
   }
 
   async readStats(): Promise<void> {

@@ -15,7 +15,7 @@ export function tokensPerSecond(
   if (first === undefined) {
     return null;
   }
-  const last = samples[samples.length - 1]!;
+  const last = samples[samples.length - 1];
   let durationMs = last.timestampMs - first.timestampMs;
   if (durationMs <= 0) {
     durationMs = nowMs - first.timestampMs;

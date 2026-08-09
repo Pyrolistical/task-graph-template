@@ -66,7 +66,7 @@ export function createWorkspace(
 
   const inherited = identity(repo);
   for (let at = 0; at < inherited.length; at += 2) {
-    gitOrThrow(worktree, ["config", inherited[at]!, inherited[at + 1]!]);
+    gitOrThrow(worktree, ["config", inherited[at], inherited[at + 1]]);
   }
 
   if (!existing) {

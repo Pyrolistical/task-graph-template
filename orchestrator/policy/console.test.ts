@@ -6,6 +6,7 @@ import {
   setSystemTime,
   test,
 } from "bun:test";
+import { present } from "../testing/present.ts";
 import { type Activity, elapsed } from "../domain/activity.ts";
 import { idleRow } from "../domain/agents.ts";
 import {
@@ -110,7 +111,7 @@ describe("Feature: joining a slot to the task it is running", () => {
   test("a disabled slot's pane is drawn to the right of a running one", () => {
     // Given a view whose first slot is disabled and whose second is running
     const view = {
-      slots: [idleRow(SLOTS[0]!, false), busyRow({ ...SLOTS[1]! })],
+      slots: [idleRow(SLOTS[0], false), busyRow({ ...SLOTS[1] })],
     };
 
     // When the view is joined into one pane per slot
@@ -118,12 +119,12 @@ describe("Feature: joining a slot to the task it is running", () => {
 
     // Then the running slot comes first, so the disabled ones group at the right
     expect(drawn.map((pane) => pane.slot.enabled)).toEqual([true, false]);
-    expect(drawn[0]!.slot.name).toBe(SLOTS[1]!.name);
+    expect(drawn[0].slot.name).toBe(SLOTS[1].name);
   });
 
   test("an idle slot shows no task, no check and no clock", () => {
     // Given a view whose only slot is idle
-    const view = { slots: [idleRow(SLOTS[1]!)] };
+    const view = { slots: [idleRow(SLOTS[1])] };
 
     // When the view is joined into one pane per slot
     const pane = paneOf(view);
@@ -420,7 +421,7 @@ describe("Feature: which lines of a transcript a pane shows", () => {
 
     // Then it is one line, led by the time and who said it
     expect(lines).toHaveLength(1);
-    expect(plain(lines[0]!)).toBe("00:00:00 assistant: hello there");
+    expect(plain(lines[0])).toBe("00:00:00 assistant: hello there");
   });
 
   test("a pane too narrow for the prefix puts the text on its own lines", () => {
@@ -432,7 +433,7 @@ describe("Feature: which lines of a transcript a pane shows", () => {
 
     // Then the prefix takes a line of its own and the text follows below it
     expect(lines.length).toBeGreaterThan(1);
-    expect(plain(lines[0]!)).toBe("00:00:00 assi…");
+    expect(plain(lines[0])).toBe("00:00:00 assi…");
     expect(lines.slice(1).map(plain).join(" ")).toContain("hello");
   });
 });
@@ -580,7 +581,7 @@ describe("Feature: keeping a pane's wrapped lines between frames", () => {
     const cache: PaneLines = new PaneLines();
     const entries = [entryOf("one"), entryOf("two"), entryOf("three")];
     const before = cache.update(entries, 40);
-    const kept = before[0]!;
+    const kept = before[0];
 
     // Given another entry arriving below it
     entries.push(entryOf("four"));
@@ -604,7 +605,7 @@ describe("Feature: keeping a pane's wrapped lines between frames", () => {
     last.text = "thinking deeper";
 
     // Then the pane redraws it rather than showing the half of it it cached
-    expect(renderLine(cache.update(entries, 40)[1]!)).toContain(
+    expect(renderLine(cache.update(entries, 40)[1])).toContain(
       "thinking deeper",
     );
   });
@@ -637,7 +638,7 @@ describe("Feature: keeping a pane's wrapped lines between frames", () => {
     const refreshed = cache.update(entries, 40);
 
     // Then the old lines are thrown away and only the new session is drawn
-    expect(renderLine(refreshed[0]!)).toContain("fresh");
+    expect(renderLine(refreshed[0])).toContain("fresh");
     expect(refreshed).toHaveLength(1);
   });
 });
@@ -646,9 +647,7 @@ describe("Feature: drawing the whole screen", () => {
   function cells(count: number) {
     return Array.from({ length: count }, (_, index) => ({
       pane: paneOf({
-        slots: [
-          busyRow({ ...SLOTS[index % SLOTS.length]!, task_id: "000123" }),
-        ],
+        slots: [busyRow({ ...SLOTS[index % SLOTS.length], task_id: "000123" })],
       }),
       rate: null,
       lines: (width: number) =>
@@ -658,7 +657,7 @@ describe("Feature: drawing the whole screen", () => {
 
   function deep(count: number) {
     const many = cells(2);
-    many[0]!.lines = (width: number) =>
+    many[0].lines = (width: number) =>
       new PaneLines().update(
         Array.from({ length: count }, (_, index) => entryOf(`line ${index}`)),
         width,
@@ -668,7 +667,7 @@ describe("Feature: drawing the whole screen", () => {
 
   function disabledCell(index: number) {
     return {
-      pane: paneOf({ slots: [idleRow(SLOTS[index % SLOTS.length]!, false)] }),
+      pane: paneOf({ slots: [idleRow(SLOTS[index % SLOTS.length], false)] }),
       rate: null,
       lines: (width: number) => new PaneLines().update([], width),
     };
@@ -676,7 +675,7 @@ describe("Feature: drawing the whole screen", () => {
 
   test("a disabled pane carries a button to hide every disabled agent", () => {
     // Given one running slot and one whose agent has been turned off
-    const panes = [cells(1)[0]!, disabledCell(1)];
+    const panes = [cells(1)[0], disabledCell(1)];
 
     // When the screen is drawn
     const { lines, hits } = screen(panes, [], layoutOf());
@@ -684,13 +683,13 @@ describe("Feature: drawing the whole screen", () => {
     // Then the button sits in the middle of the disabled pane, and is a target
     const hide = hits.filter((hit) => hit.command.command === "hide_disabled");
     expect(hide).toHaveLength(1);
-    expect(bare(lines[hide[0]!.row]!)).toContain(HIDE.trim());
-    expect(hide[0]!.from).toBeGreaterThan(paneWidth(100, 2));
+    expect(bare(lines[hide[0].row])).toContain(HIDE.trim());
+    expect(hide[0].from).toBeGreaterThan(paneWidth(100, 2));
   });
 
   test("two disabled panes share one button, centred across both", () => {
     // Given one running slot and two whose agents have been turned off
-    const panes = [cells(1)[0]!, disabledCell(1), disabledCell(2)];
+    const panes = [cells(1)[0], disabledCell(1), disabledCell(2)];
 
     // When the screen is drawn
     const { lines, hits } = screen(panes, [], layoutOf());
@@ -700,9 +699,9 @@ describe("Feature: drawing the whole screen", () => {
     const width = paneWidth(100, 3);
     const span = { from: width + 1, to: 3 * width + 2 };
     expect(hide).toHaveLength(1);
-    expect(bare(lines[hide[0]!.row]!)).toContain(HIDE.trim());
-    expect(hide[0]!.to - hide[0]!.from).toBe(textWidth(HIDE));
-    expect(hide[0]!.from + hide[0]!.to).toBe(span.from + span.to);
+    expect(bare(lines[hide[0].row])).toContain(HIDE.trim());
+    expect(hide[0].to - hide[0].from).toBe(textWidth(HIDE));
+    expect(hide[0].from + hide[0].to).toBe(span.from + span.to);
   });
 
   test("a screen with nothing running offers no button to hide with", () => {
@@ -741,7 +740,7 @@ describe("Feature: drawing the whole screen", () => {
     const { lines } = screen(panes, [], layoutOf(), 2);
 
     // Then the column is eight columns wide, and the pane takes the rest
-    const row = bare(lines[QUEUE_LINES]!);
+    const row = bare(lines[QUEUE_LINES]);
     expect(row).toHaveLength(100);
     expect(row.indexOf("│")).toBe(100 - COLLAPSED_WIDTH - 1);
   });
@@ -755,10 +754,10 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then the column still ends at the last column, and its targets sit on it
     const show = hits.filter((hit) => hit.command.command === "show_disabled");
-    expect(bare(lines[QUEUE_LINES]!)).toHaveLength(100);
-    expect(bare(lines[1]!).lastIndexOf("┬")).toBe(100 - COLLAPSED_WIDTH - 1);
-    expect(bare(lines[show[0]!.row]!).slice(show[0]!.from, show[0]!.to)).toBe(
-      SHOW[0]!,
+    expect(bare(lines[QUEUE_LINES])).toHaveLength(100);
+    expect(bare(lines[1]).lastIndexOf("┬")).toBe(100 - COLLAPSED_WIDTH - 1);
+    expect(bare(lines[show[0].row]).slice(show[0].from, show[0].to)).toBe(
+      SHOW[0],
     );
   });
 
@@ -773,7 +772,7 @@ describe("Feature: drawing the whole screen", () => {
     const show = hits.filter((hit) => hit.command.command === "show_disabled");
     expect(show).toHaveLength(SHOW.length);
     expect(
-      show.map((hit) => bare(lines[hit.row]!).slice(hit.from, hit.to)),
+      show.map((hit) => bare(lines[hit.row]).slice(hit.from, hit.to)),
     ).toEqual(SHOW);
   });
 
@@ -786,8 +785,8 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then the message is centred, under a line saying the console cannot draw
     expect(lines).toHaveLength(12);
-    expect(bare(lines[5]!).trim()).toBe("the console cannot draw");
-    expect(bare(lines[6]!).trim()).toBe(message);
+    expect(bare(lines[5]).trim()).toBe("the console cannot draw");
+    expect(bare(lines[6]).trim()).toBe(message);
   });
 
   test("a console that cannot draw offers nothing to click on", () => {
@@ -817,8 +816,8 @@ describe("Feature: drawing the whole screen", () => {
     // Then the queue stays on top and the file to edit is centred below it
     expect(lines).toHaveLength(12);
     expect(lines[0]).toContain("the queue");
-    expect(bare(lines[6]!)).toContain("the pool has no agents");
-    expect(bare(lines[7]!)).toContain(`add one to ${agentsFile}`);
+    expect(bare(lines[6])).toContain("the pool has no agents");
+    expect(bare(lines[7])).toContain(`add one to ${agentsFile}`);
   });
 
   test("a pool with no agents offers no pane to click on", () => {
@@ -865,7 +864,7 @@ describe("Feature: drawing the whole screen", () => {
     const { lines } = screen(panes, [{ text: "the queue" }], layoutOf());
 
     // Then the second row is a full-width rule, forked where the panes divide
-    const rule = bare(lines[1]!);
+    const rule = bare(lines[1]);
     expect(rule).toContain("┬");
     expect(rule.indexOf("┬")).toBe(paneWidth(100, 2));
     expect(textWidth(rule)).toBe(100);
@@ -887,10 +886,10 @@ describe("Feature: drawing the whole screen", () => {
   test("emoji in a transcript keep the divider in the same column", () => {
     // Given two screens differing only in the emoji one transcript carries
     const emoji = cells(2);
-    emoji[0]!.lines = (width: number) =>
+    emoji[0].lines = (width: number) =>
       new PaneLines().update([entryOf("🔥 shipping 🚀 it")], width);
     const columnOf = (lines: string[], row: number) => {
-      const line = bare(lines[row]!);
+      const line = bare(lines[row]);
       return textWidth(line.slice(0, line.indexOf("│")));
     };
 
@@ -914,7 +913,7 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then the button appears, so the reader knows there is more to see
     expect(news).toEqual(newsRegion(100, 12));
-    expect(lines[news!.row]).toContain(NEWS);
+    expect(lines[present(news, "a news region").row]).toContain(NEWS);
   });
 
   test("a screen that is following never shows the button", () => {
@@ -978,12 +977,12 @@ describe("Feature: drawing the whole screen", () => {
     const toggles = hits.filter((hit) => hit.command.command === "agent");
     expect(toggles).toHaveLength(2);
     expect(toggles[0]).toMatchObject({ row: QUEUE_LINES, from: 0 });
-    expect(toggles[1]!.from).toBe(paneWidth(100, 2) + 1);
+    expect(toggles[1].from).toBe(paneWidth(100, 2) + 1);
 
     // Then clicking one asks for the state its agent is not in
-    expect(toggles[0]!.command).toEqual({
+    expect(toggles[0].command).toEqual({
       command: "agent",
-      agent: SLOTS[0]!.agent,
+      agent: SLOTS[0].agent,
       enabled: false,
     });
   });
@@ -996,11 +995,14 @@ describe("Feature: drawing the whole screen", () => {
     const { hits } = screen(panes, [], layoutOf());
 
     // Then the abort target sits on the activity row and names that slot
-    const abort = hits.find((hit) => hit.command.command === "slot_abort");
-    expect(abort!.row).toBe(QUEUE_LINES + 2);
-    expect(abort!.command).toEqual({
+    const abort = present(
+      hits.find((hit) => hit.command.command === "slot_abort"),
+      "an abort target",
+    );
+    expect(abort.row).toBe(QUEUE_LINES + 2);
+    expect(abort.command).toEqual({
       command: "slot_abort",
-      slot: SLOTS[0]!.name,
+      slot: SLOTS[0].name,
     });
   });
 
@@ -1015,14 +1017,17 @@ describe("Feature: drawing the whole screen", () => {
     const width = paneWidth(100, 2);
     const aborts = hits.filter((hit) => hit.command.command === "slot_abort");
     expect(aborts).toHaveLength(2);
-    expect(aborts[0]!.from).toBeLessThan(width);
-    expect(aborts[1]!.from).toBeGreaterThanOrEqual(width + 1);
+    expect(aborts[0].from).toBeLessThan(width);
+    expect(aborts[1].from).toBeGreaterThanOrEqual(width + 1);
   });
 
   test("a click inside the abort target sends the abort, and past it sends nothing", () => {
     // Given a screen with one abort target on it
     const { hits } = screen(cells(1), [], layoutOf());
-    const abort = hits.find((hit) => hit.command.command === "slot_abort")!;
+    const abort = present(
+      hits.find((hit) => hit.command.command === "slot_abort"),
+      "an abort target",
+    );
 
     // When a click lands on its first column and another one past its last
     const clicked = [
@@ -1048,7 +1053,7 @@ describe("Feature: drawing the whole screen", () => {
     // Given a pane whose slot is idle
     const panes = [
       {
-        pane: paneOf({ slots: [idleRow(SLOTS[0]!)] }),
+        pane: paneOf({ slots: [idleRow(SLOTS[0])] }),
         rate: null,
         lines: (width: number) =>
           new PaneLines().update([entryOf("nothing")], width),
@@ -1163,7 +1168,7 @@ describe("Feature: the switches on a pane header", () => {
     const lines = header(pane, null, 60, 1000);
 
     // Then the switch comes first, then the identity, then how long it has run
-    expect(renderLine(lines[0]!)).toBe(
+    expect(renderLine(lines[0])).toBe(
       "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1                0s",
     );
   });
@@ -1173,7 +1178,7 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf();
 
     // When its header is drawn
-    const line = renderLine(header(pane, null, 30, 1000)[0]!);
+    const line = renderLine(header(pane, null, 30, 1000)[0]);
 
     // Then the identity is what gives way, and the row still fills the pane
     expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
@@ -1182,10 +1187,10 @@ describe("Feature: the switches on a pane header", () => {
 
   test("a disabled slot reads as idle behind an off switch", () => {
     // Given a slot whose agent has been turned off
-    const pane = paneOf({ slots: [idleRow(SLOTS[0]!, false)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], false)] });
 
     // When its header is drawn
-    const line = renderLine(header(pane, null, 60, 1000)[0]!);
+    const line = renderLine(header(pane, null, 60, 1000)[0]);
 
     // Then the switch says disabled and the slot itself still reads as idle
     expect(line).toBe(
@@ -1197,7 +1202,7 @@ describe("Feature: the switches on a pane header", () => {
 describe("Feature: the abort button on a pane", () => {
   test("a slot doing nothing offers no button", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ slots: [idleRow(SLOTS[0]!)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0])] });
 
     // When the button is drawn
     const button = abortButton(pane);
@@ -1267,7 +1272,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf();
 
     // When the header is drawn
-    const line = renderLine(header(pane, null, 60, 1000)[2]!);
+    const line = renderLine(header(pane, null, 60, 1000)[2]);
 
     // Then the activity is at the left of the row and the button at its right
     expect(line).toBe(
@@ -1277,10 +1282,10 @@ describe("Feature: the abort button on a pane", () => {
 
   test("an idle pane's activity row is blank", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ slots: [idleRow(SLOTS[0]!)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0])] });
 
     // When the header is drawn
-    const line = renderLine(header(pane, null, 60, 1000)[2]!);
+    const line = renderLine(header(pane, null, 60, 1000)[2]);
 
     // Then the activity row carries nothing at all
     expect(line).toBe("\x1b[2m\x1b[0m");
@@ -1302,7 +1307,7 @@ describe("Feature: the abort button on a pane", () => {
     });
 
     // When the header is drawn for a thirty-column pane
-    const line = renderLine(header(pane, null, 30, 1000)[2]!);
+    const line = renderLine(header(pane, null, 30, 1000)[2]);
 
     // Then the command is clipped, the elapsed time and button both survive
     expect(line).toBe(
@@ -1395,8 +1400,8 @@ describe("Feature: the queue line above the panes", () => {
     const { hits } = queueHeader(view, 100);
 
     // Then its switch is a target at the top left that would turn it off
-    expect(hits[0]!.command).toEqual({ command: "scheduler", enabled: false });
-    expect(hits[0]!.from).toBe(0);
-    expect(hits[0]!.row).toBe(0);
+    expect(hits[0].command).toEqual({ command: "scheduler", enabled: false });
+    expect(hits[0].from).toBe(0);
+    expect(hits[0].row).toBe(0);
   });
 });

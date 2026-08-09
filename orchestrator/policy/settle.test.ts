@@ -171,7 +171,7 @@ describe("Feature: settling an agent that finished its turn", () => {
     expect(intents[0]).toEqual({ kind: "restore", section: null });
 
     // Then the modified-assignment issue is raised against it
-    expect(intents[1]!.kind).toBe("raise");
+    expect(intents[1].kind).toBe("raise");
   });
 
   test("a worker that committed nothing is told its work is uncommitted", () => {

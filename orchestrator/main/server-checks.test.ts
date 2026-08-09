@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test";
+import { requireWorkspace } from "../domain/task.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -26,6 +27,9 @@ import {
   stateOf,
   until,
   walkTo,
+  taskOf,
+  workspaceOf,
+  sessionOf,
 } from "../testing/server-jig.ts";
 
 describe("Feature: running a task's checks", () => {
@@ -53,7 +57,7 @@ describe("Feature: running a task's checks", () => {
       await dispatchOnce(server);
 
       // Then the task goes back to work with the failure queued for the agent
-      const task = server.tasks().get(id)!;
+      const task = taskOf(server, id);
       expect(task.state).toBe("WORK");
       const queued = fs.readFileSync(
         pathsOf(server).messageFile(id, "WORK"),
@@ -199,9 +203,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
       // Given a task whose check failed once and whose session was kept
       const server = await serverFor(fixture);
       await dispatchOnce(server);
-      const afterFailure = server.tasks().get(id)!;
+      const afterFailure = taskOf(server, id);
       expect(afterFailure.state).toBe("WORK");
-      expect(afterFailure.workspace!.session).not.toBeNull();
+      expect(requireWorkspace(afterFailure).session).not.toBeNull();
 
       // When the agent is dispatched again and finishes the work
       await walkTo(server, id, "MANAGER_REVIEW");
@@ -282,7 +286,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       // Given a task whose session was opened where an older server put it
       const server = await serverFor(fixture);
       await dispatchOnce(server);
-      const opened = server.tasks().get(id)!.workspace!.session!;
+      const opened = sessionOf(server, id);
       const legacyDir = path.join(
         pathsOf(server).taskRoot(id),
         "session",
@@ -306,9 +310,9 @@ describe("Feature: sending a task back to the agent that did it", () => {
       // Then the session is reopened where the document says it lies
       expect(stateOf(server, id)).toBe("WORK");
       const view = readView(runtimeOf(fixture));
-      expect(view.slots[0]!.state).toBe("BUSY");
-      expect(view.slots[0]!.session).toBe(legacy);
-      expect(server.tasks().get(id)!.workspace!.session).toBe(legacy);
+      expect(view.slots[0].state).toBe("BUSY");
+      expect(view.slots[0].session).toBe(legacy);
+      expect(workspaceOf(server, id).session).toBe(legacy);
 
       server.shutdown();
     },
