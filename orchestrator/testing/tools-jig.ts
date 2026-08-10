@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PiProcess } from "../adapters/pi-process.ts";
@@ -12,7 +12,7 @@ import {
   type ClaimState,
 } from "../domain/state-machine.ts";
 
-const PROMPTS = new PromptFiles(ORCHESTRATOR_DIR);
+const PROMPTS = await PromptFiles.open(ORCHESTRATOR_DIR);
 
 interface Scenario {
   name: string;
@@ -171,14 +171,14 @@ async function trial(
     String(trialNumber),
   );
   const worktree = path.join(sessionDir, "worktree");
-  await fs.promises.mkdir(worktree, { recursive: true });
-  await fs.promises.writeFile(
+  await fs.mkdir(worktree, { recursive: true });
+  await fs.writeFile(
     path.join(sessionDir, "ASSIGNMENT.md"),
     `\n\n${scenario.prompt}\n`,
   );
 
   const calls: ResultCall[] = [];
-  const pi = new PiProcess(
+  const pi = await PiProcess.open(
     {
       provider,
       model,

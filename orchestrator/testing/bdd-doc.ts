@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { memberOf } from "../domain/lookup.ts";
 import { groupOf } from "../domain/pattern.ts";
@@ -7,7 +7,8 @@ const ORCHESTRATOR = path.join(import.meta.dir, "..");
 const REPO_ROOT = path.join(ORCHESTRATOR, "..");
 const DEFAULT_OUT = path.join(REPO_ROOT, "docs", "bdd.md");
 
-const TEST_START = /^ {2}(?:test|testInTempDirs)\(\s*"((?:[^"\\]|\\.)*)"/gm;
+const TEST_START =
+  /^ {2}(?:test|testInTempDirs|testInTempDirsIf)\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const DESCRIBE_START = /^describe\(\s*"((?:[^"\\]|\\.)*)"/gm;
 const STEP = /^\s*\/\/ (Given|When|Then) (.+)$/gm;
 
@@ -35,21 +36,21 @@ export interface File {
   suites: Suite[];
 }
 
-function suiteFiles(dir: string): string[] {
+async function suiteFiles(dir: string): Promise<string[]> {
   const found: string[] = [];
 
-  const walk = (current: string) => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+  const walk = async (current: string) => {
+    for (const entry of await fs.readdir(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        await walk(full);
       } else if (entry.name.endsWith(".test.ts")) {
         found.push(full);
       }
     }
   };
 
-  walk(dir);
+  await walk(dir);
   return found.sort();
 }
 
@@ -73,8 +74,8 @@ function stepsIn(source: string): Step[] {
   });
 }
 
-export function readFile(filePath: string): File {
-  const source = fs.readFileSync(filePath, "utf-8");
+export async function readFile(filePath: string): Promise<File> {
+  const source = await fs.readFile(filePath, "utf-8");
   const describes = marks(source, DESCRIBE_START);
   const tests = marks(source, TEST_START);
 
@@ -133,8 +134,10 @@ export function render(files: File[]): string {
 
 if (import.meta.main) {
   const out = process.argv[2] ?? DEFAULT_OUT;
-  const files = suiteFiles(ORCHESTRATOR).map(readFile);
-  fs.writeFileSync(out, render(files), "utf-8");
+  const files = await Promise.all(
+    (await suiteFiles(ORCHESTRATOR)).map(readFile),
+  );
+  await fs.writeFile(out, render(files), "utf-8");
   const cases = files.reduce(
     (total, file) =>
       total + file.suites.reduce((sum, suite) => sum + suite.cases.length, 0),

@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import type { AgentProcess } from "../app/ports/agents.ts";
 import { errorOf } from "../domain/errors.ts";
 import {
@@ -12,6 +12,8 @@ import {
   spawnArgs,
 } from "../domain/protocol.ts";
 
+function ignored(): void {}
+
 export class PiProcess implements AgentProcess {
   readonly stream: PiStream;
   readonly pid: number;
@@ -22,16 +24,15 @@ export class PiProcess implements AgentProcess {
   private abortRequested = false;
   private stderr = "";
 
-  constructor(
+  private constructor(
     options: SpawnOptions,
-    command = "pi",
-    launch: string[] = [],
-    onUsage: OnUsage = () => {},
-    onCompaction: OnCompaction = () => {},
-    onResult: OnResult = () => {},
+    command: string,
+    launch: string[],
+    onUsage: OnUsage,
+    onCompaction: OnCompaction,
+    onResult: OnResult,
   ) {
     this.stream = new PiStream(onUsage, onCompaction, onResult);
-    fs.mkdirSync(options.sessionDir, { recursive: true });
 
     this.proc = Bun.spawn([...launch, command, ...spawnArgs(options)], {
       cwd: options.cwd,
@@ -45,6 +46,25 @@ export class PiProcess implements AgentProcess {
     this.pid = this.proc.pid;
     void this.pump();
     void this.pumpErrors();
+  }
+
+  static async open(
+    options: SpawnOptions,
+    command = "pi",
+    launch: string[] = [],
+    onUsage: OnUsage = () => {},
+    onCompaction: OnCompaction = () => {},
+    onResult: OnResult = () => {},
+  ): Promise<PiProcess> {
+    await fs.mkdir(options.sessionDir, { recursive: true });
+    return new PiProcess(
+      options,
+      command,
+      launch,
+      onUsage,
+      onCompaction,
+      onResult,
+    );
   }
 
   private async pump(): Promise<void> {
@@ -79,15 +99,13 @@ export class PiProcess implements AgentProcess {
   send(command: Record<string, unknown>): Promise<PiResponse> {
     const id = String(++this.nextId);
     const expected = this.stream.expect(id);
-    try {
-      this.write({ id, ...command });
-    } catch (err) {
+    this.write({ id, ...command }).catch((err: unknown) => {
       this.stream.reject(id, errorOf(err));
-    }
+    });
     return expected;
   }
 
-  private write(payload: Record<string, unknown>): void {
+  private async write(payload: Record<string, unknown>): Promise<void> {
     if (this.closed) {
       throw new Error("the pi process stdin is already closed");
     }
@@ -96,8 +114,14 @@ export class PiProcess implements AgentProcess {
         this.stream.state.failure ?? "the pi process has already exited",
       );
     }
-    this.proc.stdin.write(`${JSON.stringify(payload)}\n`);
-    this.proc.stdin.flush();
+    await this.proc.stdin.write(`${JSON.stringify(payload)}\n`);
+    await this.proc.stdin.flush();
+  }
+
+  private signal(payload: Record<string, unknown>): void {
+    this.write(payload).catch((err: unknown) => {
+      this.stream.fail(errorOf(err).message);
+    });
   }
 
   async newSession(): Promise<string> {
@@ -126,11 +150,11 @@ export class PiProcess implements AgentProcess {
 
   abort(): void {
     this.abortRequested = true;
-    this.write({ type: "abort" });
+    this.signal({ type: "abort" });
   }
 
   abortBash(): void {
-    this.write({ type: "abort_bash" });
+    this.signal({ type: "abort_bash" });
   }
 
   async steer(message: string): Promise<void> {
@@ -167,7 +191,7 @@ export class PiProcess implements AgentProcess {
       return;
     }
     this.closed = true;
-    this.proc.stdin.end();
+    Promise.resolve(this.proc.stdin.end()).catch(ignored);
   }
 
   kill(): void {

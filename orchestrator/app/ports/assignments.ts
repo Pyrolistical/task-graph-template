@@ -1,8 +1,9 @@
+import type { Awaitable } from "../../domain/awaitable.ts";
 import type { TaskId } from "../../domain/task.ts";
 
 export interface Assignments {
-  read(taskId: TaskId): string;
-  write(taskId: TaskId, contents: string): void;
-  exists(taskId: TaskId): boolean;
-  rotate(taskId: TaskId): void;
+  read(taskId: TaskId): Awaitable<string>;
+  write(taskId: TaskId, contents: string): Awaitable<void>;
+  exists(taskId: TaskId): Awaitable<boolean>;
+  rotate(taskId: TaskId): Awaitable<void>;
 }

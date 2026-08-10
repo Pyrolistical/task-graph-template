@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { groupOf } from "./domain/pattern.ts";
 import { memberOf } from "./domain/lookup.ts";
@@ -30,7 +30,7 @@ async function modules(): Promise<Module[]> {
   const found: Module[] = [];
 
   const walk = async (dir: string) => {
-    for (const entry of await fs.promises.readdir(dir, {
+    for (const entry of await fs.readdir(dir, {
       withFileTypes: true,
     })) {
       const full = path.join(dir, entry.name);
@@ -47,7 +47,7 @@ async function modules(): Promise<Module[]> {
       found.push({
         path: relative,
         layer: layerOf(relative),
-        source: await fs.promises.readFile(full, "utf-8"),
+        source: await fs.readFile(full, "utf-8"),
       });
     }
   };
@@ -60,7 +60,7 @@ async function suitesIn(layers: Layer[]): Promise<string[]> {
   const found: string[] = [];
 
   const walk = async (dir: string) => {
-    for (const entry of await fs.promises.readdir(dir, {
+    for (const entry of await fs.readdir(dir, {
       withFileTypes: true,
     })) {
       const full = path.join(dir, entry.name);
@@ -141,10 +141,7 @@ describe("Feature: the dependency rule", () => {
     // When each is searched for a filesystem effect or the temp directory rig
     const impure = [];
     for (const suite of suites) {
-      const source = await fs.promises.readFile(
-        path.join(ROOT, suite),
-        "utf-8",
-      );
+      const source = await fs.readFile(path.join(ROOT, suite), "utf-8");
       if (EFFECTS.test(source) || /temp-dirs\.ts/.test(source)) {
         impure.push(suite);
       }

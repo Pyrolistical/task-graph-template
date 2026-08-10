@@ -1,11 +1,12 @@
 import { describe, expect } from "bun:test";
 import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { applyTransition } from "../adapters/task-documents.ts";
 import { takeClaim } from "../adapters/task-documents.ts";
-import { viewJson, writeAtomic } from "../adapters/runtime.ts";
+import { writeAtomic } from "../adapters/files.ts";
+import { viewJson } from "../adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
@@ -16,7 +17,6 @@ import { writeCommand } from "../adapters/command.ts";
 import { readView } from "../adapters/tui.ts";
 import { idleRow } from "../domain/agents.ts";
 import { aSlot } from "../testing/ports.ts";
-import { eventually } from "../testing/wait.ts";
 import {
   compactionsOf,
   editTaskFile,
@@ -44,13 +44,13 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then every slot is a row, so the console shows the whole pool
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       expect(view.slots).toHaveLength(2);
       expect(at(view.slots, 0).state).toBe("IDLE");
       expect(at(view.slots, 0).task_id).toBeNull();
       expect(at(view.slots, 1).name).toBe("pi-fake-fake-2");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -66,13 +66,13 @@ describe("Feature: the views the console and the manager read", () => {
       const server = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When the agent is dispatched and the views are published
       await server.tick();
 
       // Then its row names the task, the role, the process and what it is doing
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       const busy = present(
         view.slots.find((agent) => agent.task_id === id),
         `a slot row for task `,
@@ -84,7 +84,7 @@ describe("Feature: the views the console and the manager read", () => {
       expect(busy.pid).toBeGreaterThan(0);
 
       await server.drain();
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -109,13 +109,13 @@ describe("Feature: the views the console and the manager read", () => {
         pathsOf(server).tasksView,
         pathsOf(server).inboxView,
       ]) {
-        seqs.push(JSON.parse(await fs.promises.readFile(file, "utf-8")).seq);
+        seqs.push(JSON.parse(await fs.readFile(file, "utf-8")).seq);
       }
 
       expect(new Set(seqs).size).toBe(1);
-      expect(seqs[0]).toBe(transitionsOf(server).cursor);
+      expect(seqs[0]).toBe((await transitionsOf(server)).cursor);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -126,24 +126,29 @@ describe("Feature: the views the console and the manager read", () => {
       const fixture = await makeFixture();
       const dep = await readyTask(fixture, "the dependency");
       const held = await readyTask(fixture, "the held one");
-      applyTransition(fixture.tasksDir, held, "hold", {
+      await applyTransition(fixture.tasksDir, held, "hold", {
         reason: "waiting on its dependency",
       });
       await editTaskFile(fixture, held, (meta) => {
         meta.depends_on = [dep];
       });
-      applyTransition(fixture.tasksDir, held, "resume", {});
+      await applyTransition(fixture.tasksDir, held, "resume", {});
 
       // Given a task another task waits on, held on something only a person can fix
       const server = await serverFor(fixture);
-      server.claim(dep, { slotName: "a", pid: process.pid });
-      server.transition(dep, "hold", { reason: "waiting on a person" }, "test");
+      await server.claim(dep, { slotName: "a", pid: process.pid });
+      await server.transition(
+        dep,
+        "hold",
+        { reason: "waiting on a person" },
+        "test",
+      );
 
       // When the views are published
       await server.writeViews();
 
       // Then its row says how much it blocks and what it is waiting on
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       const row = present(
         view.tasks.find((task) => task.id === dep),
         `a task row for `,
@@ -152,7 +157,7 @@ describe("Feature: the views the console and the manager read", () => {
       expect(row.held_reason).toBe("waiting on a person");
       expect(row.state).toBe("HELD_WORK");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -165,13 +170,13 @@ describe("Feature: the queue view", () => {
       const fixture = await makeFixture();
       const first = await readyTask(fixture, "the first");
       const second = await readyTask(fixture, "the second");
-      applyTransition(fixture.tasksDir, second, "hold", {
+      await applyTransition(fixture.tasksDir, second, "hold", {
         reason: "waiting on the first",
       });
       await editTaskFile(fixture, second, (meta) => {
         meta.depends_on = [first];
       });
-      applyTransition(fixture.tasksDir, second, "resume", {});
+      await applyTransition(fixture.tasksDir, second, "resume", {});
 
       // Given one queued task and one blocked behind it
       const server = await serverFor(fixture);
@@ -180,7 +185,7 @@ describe("Feature: the queue view", () => {
       await server.writeViews();
 
       // Then the queue holds only what could be dispatched, with its own rank
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       expect(view.scheduling).toBe(false);
       expect(view.queue).toHaveLength(1);
       expect(at(view.queue, 0).task_id).toBe(first);
@@ -188,11 +193,11 @@ describe("Feature: the queue view", () => {
       expect(at(view.queue, 0).blocking).toBe(1);
 
       // Then the switch in the view follows the scheduler it draws
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await server.writeViews();
-      expect(readView(runtimeOf(fixture)).scheduling).toBe(true);
+      expect((await readView(await runtimeOf(fixture))).scheduling).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -201,10 +206,7 @@ describe("Feature: the queue view", () => {
 describe("Feature: a pool with no agents in it", () => {
   async function emptyPoolFixture(): Promise<Fixture> {
     const fixture = await makeFixture();
-    await fs.promises.writeFile(
-      fixture.agentsPath,
-      JSON.stringify({ agents: [] }),
-    );
+    await fs.writeFile(fixture.agentsPath, JSON.stringify({ agents: [] }));
     return fixture;
   }
 
@@ -216,13 +218,13 @@ describe("Feature: a pool with no agents in it", () => {
       const server = await serverFor(fixture);
 
       // When the scheduler is started
-      const attempt = () => server.setSchedulerEnabled(true);
+      const attempt = server.setSchedulerEnabled(true);
 
       // Then it is refused, naming the pool file a person can add an agent to
-      expect(attempt).toThrow(`add one to ${fixture.agentsPath}`);
+      await expect(attempt).rejects.toThrow(`add one to ${fixture.agentsPath}`);
       expect(server.schedulerEnabled).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -239,11 +241,11 @@ describe("Feature: a pool with no agents in it", () => {
       await server.writeViews();
 
       // Then the task is queued, waiting for an agent to be added
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       expect(view.queue.map((one) => one.task_id)).toEqual([id]);
       expect(view.slots).toEqual([]);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -260,12 +262,11 @@ describe("Feature: a pool with no agents in it", () => {
 
       // Then the slots view carries the path of that file
       expect(
-        JSON.parse(
-          await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
-        ).agents_file,
+        JSON.parse(await fs.readFile(pathsOf(server).slotsView, "utf-8"))
+          .agents_file,
       ).toBe(fixture.agentsPath);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -285,13 +286,13 @@ describe("Feature: what the slots view says about a running agent", () => {
       const server = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When the agent is dispatched and the views are published
       await server.tick();
 
       // Then the console can show how much context is left and where to read it
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       const busy = present(
         view.slots.find((agent) => agent.task_id === id),
         `a slot row for task `,
@@ -302,7 +303,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       expect(busy).not.toHaveProperty("cost");
       expect(busy.session).toContain("session/worker");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -322,7 +323,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       const server = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When it is dispatched and runs until it compacts
       await ticksUntil(
@@ -333,7 +334,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       // Then the console can see how often it has compacted on this task
       expect(await compactionsOf(server, id)).toBe(1);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -358,16 +359,16 @@ describe("Feature: what the slots view says about a running agent", () => {
 
       // Given work that has been reviewed and is waiting on the manager
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
 
       // When the manager merges it
       await server.submit(id);
 
       // Then the closed task is still shown, so the manager sees what just landed
       await server.writeViews();
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       const row = present(
         view.tasks.find((task) => task.id === id),
         `a task row for `,
@@ -376,7 +377,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       expect(row.title).toBe("A task");
       expect(row.claimed_by).toBeNull();
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -408,7 +409,7 @@ describe("Feature: the log of every transition applied", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then every transition is one numbered line, in the order it happened
-      const entries = transitionsOf(server).read();
+      const entries = await (await transitionsOf(server)).read();
       expect(entries.map((e) => e.seq)).toEqual(entries.map((_, i) => i + 1));
 
       // Then each line says where the task came from, went to, and who moved it
@@ -421,16 +422,13 @@ describe("Feature: the log of every transition applied", () => {
       expect(submit.by).toBe("pi-fake-fake-1");
       expect(entries.some((e) => e.by === "server")).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
 });
 
 describe("Feature: commands the console writes for the server", () => {
-  const applied = (done: () => boolean) =>
-    eventually(done, "applied the console command");
-
   testInTempDirs(
     "a written command toggles the scheduler and an agent, and is consumed",
     async () => {
@@ -439,25 +437,29 @@ describe("Feature: commands the console writes for the server", () => {
       const server = await serverFor(fixture);
 
       // When the console writes the first of the three commands
-      writeCommand(pathsOf(server), { command: "scheduler", enabled: true });
+      await writeCommand(pathsOf(server), {
+        command: "scheduler",
+        enabled: true,
+      });
 
       // Then each is applied and the file is consumed rather than reapplied
-      await applied(() => server.schedulerEnabled);
-      expect(await fs.promises.exists(pathsOf(server).consoleCommand)).toBe(
-        false,
-      );
+      await ticksUntil(server, () => server.schedulerEnabled);
+      expect(await fs.exists(pathsOf(server).consoleCommand)).toBe(false);
 
-      writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(server), {
         command: "agent",
         agent: "pi-fake-fake",
         enabled: false,
       });
-      await applied(() => !at(server.slotRows(), 0).enabled);
+      await ticksUntil(server, () => !at(server.slotRows(), 0).enabled);
 
-      writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
-      await applied(() => !server.schedulerEnabled);
+      await writeCommand(pathsOf(server), {
+        command: "scheduler",
+        enabled: false,
+      });
+      await ticksUntil(server, () => !server.schedulerEnabled);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -468,19 +470,20 @@ describe("Feature: commands the console writes for the server", () => {
       // Given a command written while no server was listening
       const fixture = await makeFixture();
       const first = await serverFor(fixture);
-      first.shutdown();
-      writeCommand(pathsOf(first), { command: "scheduler", enabled: true });
+      await first.shutdown();
+      await writeCommand(pathsOf(first), {
+        command: "scheduler",
+        enabled: true,
+      });
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then it applies the waiting command and consumes it
       expect(second.schedulerEnabled).toBe(true);
-      expect(await fs.promises.exists(pathsOf(second).consoleCommand)).toBe(
-        false,
-      );
+      expect(await fs.exists(pathsOf(second).consoleCommand)).toBe(false);
 
-      second.shutdown();
+      await second.shutdown();
     },
     30000,
   );
@@ -493,26 +496,24 @@ describe("Feature: commands the console writes for the server", () => {
       const server = await serverFor(fixture);
 
       // When the console names an agent that is not in the pool
-      writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(server), {
         command: "agent",
         agent: "pi-nobody-nothing",
         enabled: false,
       });
 
       // Then the refusal is logged and the server carries on running
-      await eventually(
-        async () =>
-          (
-            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
-          ).includes("refused"),
-        "logged the refusal",
+      await ticksUntil(server, async () =>
+        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+          "refused",
+        ),
       );
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("no agent named");
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "no agent named",
+      );
       expect(at(server.slotRows(), 0).enabled).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -523,10 +524,7 @@ describe("Feature: turning an agent off and on", () => {
     fixture: Fixture,
     entries: Record<string, unknown>[],
   ): Promise<void> {
-    await fs.promises.writeFile(
-      fixture.agentsPath,
-      JSON.stringify({ agents: entries }),
-    );
+    await fs.writeFile(fixture.agentsPath, JSON.stringify({ agents: entries }));
   }
 
   testInTempDirs(
@@ -543,17 +541,17 @@ describe("Feature: turning an agent off and on", () => {
       const server = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When the scheduler runs over the graph
       await settle(server);
 
       // Then nothing is dispatched, and the console says why
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
       expect(at(server.slotRows(), 0).state).toBe("DISABLED");
       expect(at(server.slotRows(), 0).enabled).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -572,7 +570,7 @@ describe("Feature: turning an agent off and on", () => {
       expect(server.slotRows().every((row) => row.enabled)).toBe(true);
 
       // When one of them is disabled
-      const rows = server.setAgentEnabled("pi-fake-fake", false);
+      const rows = await server.setAgentEnabled("pi-fake-fake", false);
 
       // Then every slot of that agent is disabled, and the other agent is not
       expect(rows).toHaveLength(3);
@@ -584,7 +582,7 @@ describe("Feature: turning an agent off and on", () => {
       expect(untouched).toHaveLength(1);
       expect(at(untouched, 0).state).toBe("IDLE");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -609,18 +607,18 @@ describe("Feature: turning an agent off and on", () => {
 
       // Given a queued task and an agent that has been disabled
       const server = await serverFor(fixture);
-      server.setAgentEnabled("pi-fake-fake", false);
-      server.setSchedulerEnabled(true);
+      await server.setAgentEnabled("pi-fake-fake", false);
+      await server.setSchedulerEnabled(true);
       await settle(server);
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
       // When the agent is enabled again
-      server.setAgentEnabled("pi-fake-fake", true);
+      await server.setAgentEnabled("pi-fake-fake", true);
 
       // Then the task it could not take is dispatched and worked to the manager
       await reaches(server, id, "MANAGER_REVIEW");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -645,12 +643,12 @@ describe("Feature: turning an agent off and on", () => {
 
       // Given an agent part way through a task
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await server.tick();
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
       // When its agent is disabled
-      const disabled = server.setAgentEnabled("pi-fake-fake", false);
+      const disabled = await server.setAgentEnabled("pi-fake-fake", false);
 
       // Then the slot keeps its task, showing as running under a disabled agent
       const row = at(disabled, 0);
@@ -663,9 +661,9 @@ describe("Feature: turning an agent off and on", () => {
       await settle(server);
       expect(at(server.slotRows(), 0).state).toBe("DISABLED");
       expect(at(server.slotRows(), 0).task_id).toBeNull();
-      expect(stateOf(server, id)).toBe("WORK_REVIEW");
+      expect(await stateOf(server, id)).toBe("WORK_REVIEW");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -678,12 +676,12 @@ describe("Feature: turning an agent off and on", () => {
       const server = await serverFor(fixture);
 
       // When the name of that agent's first slot is passed where an agent belongs
-      const attempt = () => server.setAgentEnabled("pi-fake-fake-1", false);
+      const attempt = server.setAgentEnabled("pi-fake-fake-1", false);
 
       // Then it is refused as no agent of that name
-      expect(attempt).toThrow('no agent named "pi-fake-fake-1"');
+      await expect(attempt).rejects.toThrow('no agent named "pi-fake-fake-1"');
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -696,12 +694,12 @@ describe("Feature: turning an agent off and on", () => {
       const server = await serverFor(fixture);
 
       // When the name nope is passed where an agent belongs
-      const attempt = () => server.setAgentEnabled("nope", false);
+      const attempt = server.setAgentEnabled("nope", false);
 
       // Then it is refused, and the pool it does have is named
-      expect(attempt).toThrow("the pool has pi-fake-fake");
+      await expect(attempt).rejects.toThrow("the pool has pi-fake-fake");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -728,25 +726,29 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // Given an agent stuck inside a long-running command
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await server.tick();
       const row = at(server.slotRows(), 0);
       expect(row.state).toBe("BUSY");
       expect(row.activity.kind).toBe("tool-call");
 
       // When the manager aborts that command
-      server.abortSlot(row.name);
+      await server.abortSlot(row.name);
 
       // Then the command is killed and the agent finishes its turn from there
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
       await server.drain();
-      await until(server, () => stateOf(server, id) !== "WORK", 20);
-      expect(stateOf(server, id)).not.toBe("WORK");
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("aborted bash: git status");
+      await until(
+        server,
+        async () => (await stateOf(server, id)) !== "WORK",
+        20,
+      );
+      expect(await stateOf(server, id)).not.toBe("WORK");
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "aborted bash: git status",
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -759,12 +761,12 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts it
-      const attempt = () => server.abortSlot("pi-fake-fake-1");
+      const attempt = server.abortSlot("pi-fake-fake-1");
 
       // Then it is refused, because there is no command to kill
-      expect(attempt).toThrow(/not running/);
+      await expect(attempt).rejects.toThrow(/not running/);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -777,13 +779,15 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts a slot that is not in the pool
-      const attempt = () => server.abortSlot("pi-nobody-1");
+      const attempt = server.abortSlot("pi-nobody-1");
 
       // Then it is refused, and the slot names it does have are listed
-      expect(attempt).toThrow(/no agent slot named "pi-nobody-1"/);
-      expect(attempt).toThrow(/pi-fake-fake-1/);
+      await expect(attempt).rejects.toThrow(
+        /no agent slot named "pi-nobody-1"/,
+      );
+      await expect(attempt).rejects.toThrow(/pi-fake-fake-1/);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -796,12 +800,14 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the manager aborts using the agent key rather than the slot name
-      const attempt = () => server.abortSlot("pi-fake-fake");
+      const attempt = server.abortSlot("pi-fake-fake");
 
       // Then it is refused, because an abort names one running process
-      expect(attempt).toThrow(/no agent slot named "pi-fake-fake"/);
+      await expect(attempt).rejects.toThrow(
+        /no agent slot named "pi-fake-fake"/,
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -826,32 +832,34 @@ describe("Feature: aborting the command an agent is running", () => {
 
       // Given an agent stuck inside a long-running command
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await server.tick();
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
       // When the console writes an abort for that slot
-      writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(server), {
         command: "slot_abort",
         slot: "pi-fake-fake-1",
       });
 
       // Then the command is killed, exactly as the manager's own abort would
-      await eventually(
-        async () =>
-          (
-            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
-          ).includes("aborted bash"),
-        "killed the command",
+      await ticksUntil(server, async () =>
+        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+          "aborted bash",
+        ),
       );
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
       await server.drain();
-      await until(server, () => stateOf(server, id) !== "WORK", 20);
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("aborted bash: git status");
+      await until(
+        server,
+        async () => (await stateOf(server, id)) !== "WORK",
+        20,
+      );
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "aborted bash: git status",
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -864,24 +872,22 @@ describe("Feature: aborting the command an agent is running", () => {
       const server = await serverFor(fixture);
 
       // When the console writes an abort for that slot
-      writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(server), {
         command: "slot_abort",
         slot: "pi-fake-fake-1",
       });
 
       // Then the refusal is logged and the server carries on running
-      await eventually(
-        async () =>
-          (
-            await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
-          ).includes("refused"),
-        "logged the refusal",
+      await ticksUntil(server, async () =>
+        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+          "refused",
+        ),
       );
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("not running");
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "not running",
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -894,25 +900,29 @@ describe("Feature: a manager that exits while its agents run on", () => {
       // Given a running server that has applied a console command already
       const fixture = await makeFixture();
       const server = await serverFor(fixture);
-      writeCommand(pathsOf(server), { command: "scheduler", enabled: true });
-      await eventually(() => server.schedulerEnabled, "started its scheduler");
+      await writeCommand(pathsOf(server), {
+        command: "scheduler",
+        enabled: true,
+      });
+      await ticksUntil(server, () => server.schedulerEnabled);
       expect(server.schedulerEnabled).toBe(true);
 
       // When the manager detaches from it
-      server.detach();
+      await server.detach();
 
       // Then a command written afterwards is neither consumed nor applied
-      writeCommand(pathsOf(server), { command: "scheduler", enabled: false });
+      await writeCommand(pathsOf(server), {
+        command: "scheduler",
+        enabled: false,
+      });
       await Bun.sleep(200);
-      expect(await fs.promises.exists(pathsOf(server).consoleCommand)).toBe(
-        true,
-      );
+      expect(await fs.exists(pathsOf(server).consoleCommand)).toBe(true);
       expect(server.schedulerEnabled).toBe(true);
 
       // Then the views it published are left on disk for the next manager
-      expect(await fs.promises.exists(pathsOf(server).slotsView)).toBe(true);
+      expect(await fs.exists(pathsOf(server).slotsView)).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -924,8 +934,8 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const id = await readyTask(fixture, "A task");
 
       const alive = Bun.spawn(["sleep", "30"]);
-      const runtime = runtimeOf(fixture);
-      writeAtomic(
+      const runtime = await runtimeOf(fixture);
+      await writeAtomic(
         runtime.slotsView,
         viewJson(
           1,
@@ -945,7 +955,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
         ),
       );
 
-      takeClaim(fixture.tasksDir, id, {
+      await takeClaim(fixture.tasksDir, id, {
         slotName: "pi-fake-fake-1",
         pid: alive.pid,
       });
@@ -954,19 +964,19 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const second = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      second.setSchedulerEnabled(true);
+      await second.setSchedulerEnabled(true);
 
       // When a new server starts and ticks with the scheduler on
       await settle(second, 1);
 
       // Then the slot is reattached rather than dispatched to again
-      const view = readView(runtimeOf(fixture));
+      const view = await readView(await runtimeOf(fixture));
       expect(at(view.slots, 0).state).toBe("BUSY");
       expect(at(view.slots, 0).pid).toBe(alive.pid);
-      expect(stateOf(second, id)).toBe("WORK");
+      expect(await stateOf(second, id)).toBe("WORK");
 
       alive.kill();
-      second.shutdown();
+      await second.shutdown();
     },
     30000,
   );

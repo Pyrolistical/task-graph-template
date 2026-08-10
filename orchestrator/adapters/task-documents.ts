@@ -1,7 +1,7 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { ClaimArgs, CreatedTask, Tasks } from "../app/ports/tasks.ts";
-import { messageOf } from "../domain/errors.ts";
+import { hasCode, messageOf } from "../domain/errors.ts";
 import {
   type TaskId,
   type TaskMeta,
@@ -21,14 +21,15 @@ import {
   isValidState,
   requireText,
 } from "../domain/state-machine.ts";
+import { exists } from "./files.ts";
+import { isProcessAlive } from "./processes.ts";
 import {
   activeTaskPath,
   closeTaskFile,
   createTask,
   findTaskFile,
-  isProcessAlive,
+  graphLock,
   readTaskFile,
-  withLock,
   writeTaskBody,
   writeTaskFile,
 } from "./task-store.ts";
@@ -38,17 +39,18 @@ export interface Scan {
   problems: Map<string, string>;
 }
 
-export function readActiveTasks(tasksDir: string): Scan {
+export async function readActiveTasks(tasksDir: string): Promise<Scan> {
   const tasks = new Map<TaskId, TaskMeta>();
   const problems = new Map<string, string>();
 
-  for (const entry of fs.readdirSync(tasksDir, { withFileTypes: true })) {
+  const entries = await fs.readdir(tasksDir, { withFileTypes: true });
+  for (const entry of entries) {
     if (!entry.isFile() || !/^\d{6}\.md$/.test(entry.name)) {
       continue;
     }
     const filePath = path.join(tasksDir, entry.name);
     try {
-      const { raw } = parseDocument(fs.readFileSync(filePath, "utf-8"));
+      const { raw } = parseDocument(await fs.readFile(filePath, "utf-8"));
       const meta = parseTaskMeta(raw, filePath);
       tasks.set(meta.id, meta);
     } catch (err) {
@@ -59,28 +61,34 @@ export function readActiveTasks(tasksDir: string): Scan {
   return { tasks, problems };
 }
 
-export function readTaskBody(tasksDir: string, id: TaskId): string {
+export async function readTaskBody(
+  tasksDir: string,
+  id: TaskId,
+): Promise<string> {
   const filePath = activeTaskPath(tasksDir, id);
-  return splitDocument(fs.readFileSync(filePath, "utf-8")).body.trim();
+  return splitDocument(await fs.readFile(filePath, "utf-8")).body.trim();
 }
 
-function activeTaskFiles(tasksDir: string): string[] {
-  return fs
-    .readdirSync(tasksDir, { withFileTypes: true })
+async function activeTaskIds(tasksDir: string): Promise<TaskId[]> {
+  const entries = await fs.readdir(tasksDir, { withFileTypes: true });
+  return entries
     .filter((e) => e.isFile() && /^\d{6}\.md$/.test(e.name))
-    .map((e) => path.join(tasksDir, e.name));
+    .map((e) => path.basename(e.name, ".md"));
 }
 
-function propagateClose(
+async function propagateClose(
   tasksDir: string,
   closedId: TaskId,
   now: string,
-): { unblocked: TaskId[]; dependentsUpdated: TaskId[] } {
+): Promise<{ unblocked: TaskId[]; dependentsUpdated: TaskId[] }> {
   const unblocked: TaskId[] = [];
   const dependentsUpdated: TaskId[] = [];
 
-  for (const filePath of activeTaskFiles(tasksDir)) {
-    const { meta, body } = readTaskFile(filePath);
+  for (const id of await activeTaskIds(tasksDir)) {
+    const filePath = activeTaskPath(tasksDir, id);
+    if (!(await exists(filePath))) continue;
+
+    const { meta, body } = await readTaskFile(filePath);
     if (!meta.depends_on.includes(closedId)) continue;
 
     meta.depends_on = meta.depends_on.filter((d) => d !== closedId);
@@ -92,82 +100,90 @@ function propagateClose(
     }
     meta.state_entered = now;
 
-    writeTaskFile(filePath, meta, body);
+    await writeTaskFile(filePath, meta, body);
   }
 
   return { unblocked, dependentsUpdated };
 }
 
-export function applyTransition(
+async function settleTransition(
   tasksDir: string,
   taskId: TaskId,
   name: TransitionName,
   args: TransitionArgs,
-): TransitionResult {
-  return withLock(tasksDir, () => {
-    const filePath = findTaskFile(taskId, tasksDir);
-    if (!filePath) {
-      throw new Error(`Task "${taskId}" not found`);
-    }
+  now: string,
+): Promise<TransitionResult> {
+  const filePath = await findTaskFile(taskId, tasksDir);
+  if (!filePath) {
+    throw new Error(`Task "${taskId}" not found`);
+  }
 
-    const { meta, body } = readTaskFile(filePath);
+  const { meta, body } = await readTaskFile(filePath);
 
-    if (meta.id !== taskId) {
-      throw new Error(`Task file ${filePath} declares id "${meta.id}"`);
-    }
+  if (meta.id !== taskId) {
+    throw new Error(`Task file ${filePath} declares id "${meta.id}"`);
+  }
 
-    if (!isValidState(meta.state)) {
-      throw new Error(
-        `Task "${meta.id}" is ${meta.state} and has no further transitions`,
-      );
-    }
+  if (!isValidState(meta.state)) {
+    throw new Error(
+      `Task "${meta.id}" is ${meta.state} and has no further transitions`,
+    );
+  }
 
-    const from = meta.state;
-    const now = new Date().toISOString();
-    const decided = decide(meta, body, name, args);
+  const from = meta.state;
+  const decided = decide(meta, body, name, args);
 
-    meta.state_entered = now;
-    meta.claimed_by = null;
-    meta.claimed_pid = null;
+  meta.state_entered = now;
+  meta.claimed_by = null;
+  meta.claimed_pid = null;
 
-    if (decided.kind === "stay") {
-      writeTaskFile(filePath, meta, body);
-      return { taskId, from, to: null, unblocked: [], dependentsUpdated: [] };
-    }
+  if (decided.kind === "stay") {
+    await writeTaskFile(filePath, meta, body);
+    return { taskId, from, to: null, unblocked: [], dependentsUpdated: [] };
+  }
 
-    const nextBody = decided.body ?? body;
-    meta.state = decided.to;
-    if (!isHeld(decided.to)) {
-      meta.held_reason = null;
-    }
+  const nextBody = decided.body ?? body;
+  meta.state = decided.to;
+  if (!isHeld(decided.to)) {
+    meta.held_reason = null;
+  }
 
-    if (decided.to === "CLOSED") {
-      meta.workspace = null;
-      const closedPath = closeTaskFile(filePath, tasksDir, meta, nextBody);
-      const { unblocked, dependentsUpdated } = propagateClose(
-        tasksDir,
-        taskId,
-        now,
-      );
-      return {
-        taskId,
-        from,
-        to: "CLOSED",
-        closedPath,
-        unblocked,
-        dependentsUpdated,
-      };
-    }
-
-    writeTaskFile(filePath, meta, nextBody);
+  if (decided.to === "CLOSED") {
+    meta.workspace = null;
+    const closedPath = await closeTaskFile(filePath, tasksDir, meta, nextBody);
     return {
       taskId,
       from,
-      to: decided.to,
+      to: "CLOSED",
+      closedPath,
       unblocked: [],
       dependentsUpdated: [],
     };
-  });
+  }
+
+  await writeTaskFile(filePath, meta, nextBody);
+  return {
+    taskId,
+    from,
+    to: decided.to,
+    unblocked: [],
+    dependentsUpdated: [],
+  };
+}
+
+export async function applyTransition(
+  tasksDir: string,
+  taskId: TaskId,
+  name: TransitionName,
+  args: TransitionArgs,
+): Promise<TransitionResult> {
+  const now = new Date().toISOString();
+  const settled = await settleTransition(tasksDir, taskId, name, args, now);
+
+  if (settled.to !== "CLOSED") {
+    return settled;
+  }
+  return { ...settled, ...(await propagateClose(tasksDir, taskId, now)) };
 }
 
 function requirePid(value: unknown): number {
@@ -189,72 +205,71 @@ function workSession(
   return session === undefined ? null : session;
 }
 
-export function takeClaim(
+export async function takeClaim(
   tasksDir: string,
   taskId: TaskId,
   args: ClaimArgs,
-): void {
-  withLock(tasksDir, () => {
-    const filePath = findTaskFile(taskId, tasksDir);
-    if (!filePath) {
-      throw new Error(`Task "${taskId}" not found`);
-    }
+): Promise<void> {
+  const filePath = await findTaskFile(taskId, tasksDir);
+  if (!filePath) {
+    throw new Error(`Task "${taskId}" not found`);
+  }
 
-    const { meta, body } = readTaskFile(filePath);
+  const { meta, body } = await readTaskFile(filePath);
 
-    if (!isClaimState(meta.state)) {
-      throw new Error(
-        `Task "${taskId}" is in ${meta.state}, which no agent runs. Claimable states: ${CLAIM_STATES.join(", ")}`,
-      );
-    }
-    if (meta.claimed_by !== null) {
-      throw new Error(
-        `Task "${taskId}" is already claimed by "${meta.claimed_by}" (PID ${meta.claimed_pid})`,
-      );
-    }
+  if (!isClaimState(meta.state)) {
+    throw new Error(
+      `Task "${taskId}" is in ${meta.state}, which no agent runs. Claimable states: ${CLAIM_STATES.join(", ")}`,
+    );
+  }
+  if (meta.claimed_by !== null) {
+    throw new Error(
+      `Task "${taskId}" is already claimed by "${meta.claimed_by}" (PID ${meta.claimed_pid})`,
+    );
+  }
 
-    meta.claimed_by = requireText(args.slotName, "slotName");
-    meta.claimed_pid = requirePid(args.pid);
+  meta.claimed_by = requireText(args.slotName, "slotName");
+  meta.claimed_pid = requirePid(args.pid);
 
-    if (args.branch !== undefined || args.worktree !== undefined) {
-      const session = workSession(meta, args.session);
-      meta.workspace = {
-        branch: requireText(args.branch, "branch"),
-        worktree: requireText(args.worktree, "worktree"),
-        slot: meta.claimed_by,
-        session,
-      };
-    }
+  if (args.branch !== undefined || args.worktree !== undefined) {
+    const session = workSession(meta, args.session);
+    meta.workspace = {
+      branch: requireText(args.branch, "branch"),
+      worktree: requireText(args.worktree, "worktree"),
+      slot: meta.claimed_by,
+      session,
+    };
+  }
 
-    writeTaskFile(filePath, meta, body);
-  });
+  await writeTaskFile(filePath, meta, body);
 }
 
-export function clearClaim(tasksDir: string, taskId: TaskId): void {
-  withLock(tasksDir, () => {
-    const filePath = findTaskFile(taskId, tasksDir);
-    if (!filePath) {
-      throw new Error(`Task "${taskId}" not found`);
-    }
+export async function clearClaim(
+  tasksDir: string,
+  taskId: TaskId,
+): Promise<void> {
+  const filePath = await findTaskFile(taskId, tasksDir);
+  if (!filePath) {
+    throw new Error(`Task "${taskId}" not found`);
+  }
 
-    const { meta, body } = readTaskFile(filePath);
+  const { meta, body } = await readTaskFile(filePath);
 
-    if (meta.claimed_pid === null) {
-      throw new Error(
-        `Task "${taskId}" is in ${meta.state} with no claim to clear`,
-      );
-    }
-    if (isProcessAlive(meta.claimed_pid)) {
-      throw new Error(
-        `Task "${taskId}" is still claimed by a live process (PID ${meta.claimed_pid}); a claim is only cleared once its process is gone`,
-      );
-    }
+  if (meta.claimed_pid === null) {
+    throw new Error(
+      `Task "${taskId}" is in ${meta.state} with no claim to clear`,
+    );
+  }
+  if (await isProcessAlive(meta.claimed_pid)) {
+    throw new Error(
+      `Task "${taskId}" is still claimed by a live process (PID ${meta.claimed_pid}); a claim is only cleared once its process is gone`,
+    );
+  }
 
-    meta.claimed_by = null;
-    meta.claimed_pid = null;
+  meta.claimed_by = null;
+  meta.claimed_pid = null;
 
-    writeTaskFile(filePath, meta, body);
-  });
+  await writeTaskFile(filePath, meta, body);
 }
 
 export class TaskDocuments implements Tasks {
@@ -263,24 +278,33 @@ export class TaskDocuments implements Tasks {
     private readonly orchestratorDir: string,
   ) {}
 
-  list(): Scan {
+  list(): Promise<Scan> {
     return readActiveTasks(this.tasksDir);
   }
 
-  read(id: TaskId): TaskMeta | null {
-    const filePath = findTaskFile(id, this.tasksDir);
-    return filePath === null ? null : readTaskFile(filePath).meta;
+  async read(id: TaskId): Promise<TaskMeta | null> {
+    const filePath = await findTaskFile(id, this.tasksDir);
+    if (filePath === null) {
+      return null;
+    }
+    const found = await readTaskFile(filePath).catch((err: unknown) => {
+      if (hasCode(err, "ENOENT")) {
+        return null;
+      }
+      throw err;
+    });
+    return found === null ? null : found.meta;
   }
 
-  body(id: TaskId): string {
+  body(id: TaskId): Promise<string> {
     return readTaskBody(this.tasksDir, id);
   }
 
-  create(title: string): CreatedTask {
+  create(title: string): Promise<CreatedTask> {
     return createTask(this.tasksDir, this.orchestratorDir, title);
   }
 
-  writeBody(id: TaskId, body: string): string {
+  writeBody(id: TaskId, body: string): Promise<string> {
     return writeTaskBody(this.tasksDir, id, body);
   }
 
@@ -288,15 +312,23 @@ export class TaskDocuments implements Tasks {
     id: TaskId,
     name: TransitionName,
     args: TransitionArgs,
-  ): TransitionResult {
+  ): Promise<TransitionResult> {
     return applyTransition(this.tasksDir, id, name, args);
   }
 
-  claim(id: TaskId, args: ClaimArgs): void {
-    takeClaim(this.tasksDir, id, args);
+  async claim(id: TaskId, args: ClaimArgs): Promise<void> {
+    await takeClaim(this.tasksDir, id, args);
   }
 
-  releaseClaim(id: TaskId): void {
-    clearClaim(this.tasksDir, id);
+  async releaseClaim(id: TaskId): Promise<void> {
+    await clearClaim(this.tasksDir, id);
+  }
+
+  takeLock(): Promise<void> {
+    return graphLock(this.tasksDir).take();
+  }
+
+  clearLock(): Promise<void> {
+    return graphLock(this.tasksDir).clear();
   }
 }

@@ -1,15 +1,15 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ViewName } from "../app/ports/publisher.ts";
-import { hasCode } from "../domain/errors.ts";
 import type { TaskId } from "../domain/task.ts";
 import {
   type ClaimState,
   type Role,
   ALL_ROLES,
 } from "../domain/state-machine.ts";
-import { isProcessAlive } from "./task-store.ts";
+import { Appendable } from "./appendable.ts";
+import { PidLock } from "./pid-lock.ts";
 
 export const SERVER_ROOT = "/tmp/task-graph-server";
 
@@ -46,12 +46,6 @@ export function defaultAgentsPath(tasksDir: string): string {
   return path.join(tasksDir, "agents.json");
 }
 
-export function writeAtomic(filePath: string, contents: string): void {
-  const temp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, contents, "utf-8");
-  fs.renameSync(temp, filePath);
-}
-
 export function viewJson(
   seq: number,
   key: string,
@@ -61,30 +55,45 @@ export function viewJson(
   return `${JSON.stringify({ at: new Date().toISOString(), seq, ...extra, [key]: rows }, null, 2)}\n`;
 }
 
-function trimToLastBytes(filePath: string, cap: number): void {
-  const size = fs.statSync(filePath).size;
+async function trimToLastBytes(
+  handle: fs.FileHandle,
+  cap: number,
+): Promise<void> {
+  const { size } = await handle.stat();
   if (size <= cap) {
     return;
   }
 
-  const handle = fs.openSync(filePath, "r");
   const buffer = Buffer.alloc(cap);
-  fs.readSync(handle, buffer, 0, cap, size - cap);
-  fs.closeSync(handle);
-
-  const text = buffer.toString("utf-8");
+  const { bytesRead } = await handle.read(buffer, 0, cap, size - cap);
+  const text = buffer.subarray(0, bytesRead).toString("utf-8");
   const firstBreak = text.indexOf("\n");
-  writeAtomic(filePath, firstBreak === -1 ? "" : text.slice(firstBreak + 1));
+  const kept = firstBreak === -1 ? "" : text.slice(firstBreak + 1);
+  await handle.truncate(0);
+  await handle.appendFile(kept, "utf-8");
 }
 
 export class Runtime {
   readonly repo: string;
   readonly root: string;
 
+  private readonly logging: Appendable;
+  private readonly locking: PidLock;
+
   constructor(repoPath: string, serverRoot = SERVER_ROOT) {
     this.repo = path.resolve(repoPath);
     this.root = path.join(serverRoot, repoKey(this.repo));
-    fs.mkdirSync(this.root, { recursive: true });
+    this.logging = new Appendable(this.serverLog);
+    this.locking = new PidLock(path.join(this.root, "lock"), this.root);
+  }
+
+  static async open(
+    repoPath: string,
+    serverRoot = SERVER_ROOT,
+  ): Promise<Runtime> {
+    const runtime = new Runtime(repoPath, serverRoot);
+    await fs.mkdir(runtime.root, { recursive: true });
+    return runtime;
   }
 
   get serverLog(): string {
@@ -124,53 +133,19 @@ export class Runtime {
   }
 
   get lockFile(): string {
-    return path.join(this.root, "lock");
+    return this.locking.filePath;
   }
 
-  takeLock(): void {
-    if (this.claimLock()) {
-      return;
-    }
-    const holder = this.lockHolder();
-    if (holder !== null && isProcessAlive(holder)) {
-      throw new Error(`${this.root} is already in use by server ${holder}`);
-    }
-    fs.rmSync(this.lockFile, { force: true });
-    if (!this.claimLock()) {
-      throw new Error(`${this.root} was just taken by another server`);
-    }
+  takeLock(): Promise<void> {
+    return this.locking.take();
   }
 
-  clearLock(): void {
-    if (this.lockHolder() === process.pid) {
-      fs.rmSync(this.lockFile, { force: true });
-    }
+  clearLock(): Promise<void> {
+    return this.locking.clear();
   }
 
-  lockHolder(): number | null {
-    let held: string;
-    try {
-      held = fs.readFileSync(this.lockFile, "utf-8");
-    } catch (err) {
-      if (hasCode(err, "ENOENT")) {
-        return null;
-      }
-      throw err;
-    }
-    const holder = Number.parseInt(held, 10);
-    return Number.isInteger(holder) ? holder : null;
-  }
-
-  private claimLock(): boolean {
-    try {
-      fs.writeFileSync(this.lockFile, `${process.pid}`, { flag: "wx" });
-      return true;
-    } catch (err) {
-      if (hasCode(err, "EEXIST")) {
-        return false;
-      }
-      throw err;
-    }
+  lockHolder(): Promise<number | null> {
+    return this.locking.holder();
   }
 
   taskRoot(id: TaskId): string {
@@ -213,25 +188,26 @@ export class Runtime {
     return path.join(this.messagesDir(id), `${state}.md`);
   }
 
-  prepare(id: TaskId): void {
-    fs.mkdirSync(this.history(id), { recursive: true });
+  async prepare(id: TaskId): Promise<void> {
+    await fs.mkdir(this.history(id), { recursive: true });
     for (const role of ALL_ROLES) {
-      fs.mkdirSync(this.sessionDir(id, role), { recursive: true });
+      await fs.mkdir(this.sessionDir(id, role), { recursive: true });
     }
-    fs.mkdirSync(this.messagesDir(id), { recursive: true });
+    await fs.mkdir(this.messagesDir(id), { recursive: true });
   }
 
-  discard(id: TaskId): void {
-    fs.rmSync(this.taskRoot(id), { recursive: true, force: true });
+  async discard(id: TaskId): Promise<void> {
+    await fs.rm(this.taskRoot(id), { recursive: true, force: true });
   }
 
-  log(line: string, cap = SERVER_LOG_CAP_BYTES): void {
-    fs.mkdirSync(this.root, { recursive: true });
-    fs.appendFileSync(
-      this.serverLog,
-      `${new Date().toISOString()} ${line}\n`,
-      "utf-8",
-    );
-    trimToLastBytes(this.serverLog, cap);
+  log(line: string, cap = SERVER_LOG_CAP_BYTES): Promise<void> {
+    return this.logging.use(async (handle) => {
+      await handle.appendFile(`${new Date().toISOString()} ${line}\n`, "utf-8");
+      await trimToLastBytes(handle, cap);
+    });
+  }
+
+  close(): Promise<void> {
+    return this.logging.close();
   }
 }

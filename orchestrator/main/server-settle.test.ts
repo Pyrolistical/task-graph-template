@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test";
 import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { activeTaskPath } from "../adapters/task-store.ts";
 import { SlotsView } from "../domain/agents.ts";
@@ -64,7 +64,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       await reviewCycle(server);
 
       // Then the finding is written into the task body for the worker to read
-      const body = await fs.promises.readFile(
+      const body = await fs.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
@@ -72,21 +72,21 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       expect(body).toContain("- the null case is untested");
 
       // Then it is also left where the next dispatch will pick it up
-      expect(filesOf(fixture).findings(id)).toEqual([
+      expect(await (await filesOf(fixture)).findings(id)).toEqual([
         "the null case is untested",
       ]);
 
       // Then the transition is recorded as the server's, not the reviewer's
       const applied = present(
-        transitionsOf(server)
-          .read()
-          .find((e) => e.transition === "feedback" && e.from === "WORK_REVIEW"),
+        (await (await transitionsOf(server)).read()).find(
+          (e) => e.transition === "feedback" && e.from === "WORK_REVIEW",
+        ),
         "a feedback transition out of WORK_REVIEW",
       );
       expect(applied.to).toBe("WORK");
       expect(applied.by).toBe("server");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -132,14 +132,12 @@ describe("Feature: what a reviewer sends back to the worker", () => {
         }),
       );
       // Then nothing is left queued once the worker has answered them
-      expect(await fs.promises.exists(pathsOf(server).findings(id))).toBe(
+      expect(await fs.exists(pathsOf(server).findings(id))).toBe(false);
+      expect(await fs.exists(pathsOf(server).messageFile(id, "WORK"))).toBe(
         false,
       );
-      expect(
-        await fs.promises.exists(pathsOf(server).messageFile(id, "WORK")),
-      ).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -181,7 +179,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
         pathsOf(server).sessionDir(id, "worker"),
         `${id}-worker.jsonl`,
       );
-      expect(workspaceOf(server, id).session).toBe(worked);
+      expect((await workspaceOf(server, id)).session).toBe(worked);
       expect(
         await promptsTo(pathsOf(server).sessionDir(id, "worker")),
       ).toHaveLength(2);
@@ -189,7 +187,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
         await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
       ).toHaveLength(2);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -219,26 +217,32 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the reviewer saw a worktree with the work committed on it
-      const head = git
-        .gitOrThrow(pathsOf(server).worktree(id), ["rev-parse", "HEAD"])
-        .trim();
-      const base = git
-        .gitOrThrow(pathsOf(server).worktree(id), ["rev-parse", "master"])
-        .trim();
+      const head = (
+        await git.gitOrThrow(pathsOf(server).worktree(id), [
+          "rev-parse",
+          "HEAD",
+        ])
+      ).trim();
+      const base = (
+        await git.gitOrThrow(pathsOf(server).worktree(id), [
+          "rev-parse",
+          "master",
+        ])
+      ).trim();
       expect(head).not.toBe(base);
 
       // Then the reviewer read the work in a session of its own
-      const workSessions = await fs.promises.readdir(
+      const workSessions = await fs.readdir(
         pathsOf(server).sessionDir(id, "worker"),
       );
-      const reviewSessions = await fs.promises.readdir(
+      const reviewSessions = await fs.readdir(
         pathsOf(server).sessionDir(id, "reviewer"),
       );
       expect(workSessions.length).toBeGreaterThan(0);
       expect(reviewSessions.length).toBeGreaterThan(0);
       expect(reviewSessions).not.toEqual(workSessions);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -267,20 +271,20 @@ describe("Feature: a review that fails twice", () => {
       const server = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When the work is done, checked and reviewed once
-      await until(server, () =>
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "feedback"),
+      await until(server, async () =>
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "feedback",
+        ),
       );
 
       // Then the failure is counted and the work only bounced back
-      expect(filesOf(fixture).failures(id)).toBe(1);
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await (await filesOf(fixture)).failures(id)).toBe(1);
+      expect(await stateOf(server, id)).toBe("WORK");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -318,7 +322,7 @@ describe("Feature: a review that fails twice", () => {
       await settleTo(server, id, "HELD_WORK");
 
       // Then the task is held with the second round's findings as the reason
-      const task = taskOf(server, id);
+      const task = await taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toBe(
         "failed 2 rounds of WORK_REVIEW with:\n- finding two",
@@ -331,12 +335,12 @@ describe("Feature: a review that fails twice", () => {
       expect(body).not.toContain("finding two");
 
       // Then the count file is gone and the findings wait for the resume
-      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
-        false,
-      );
-      expect(filesOf(fixture).findings(id)).toEqual(["finding two"]);
+      expect(await fs.exists(pathsOf(server).reviewFailures(id))).toBe(false);
+      expect(await (await filesOf(fixture)).findings(id)).toEqual([
+        "finding two",
+      ]);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -374,17 +378,15 @@ describe("Feature: a review that fails twice", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the passing review cleared the count
-      expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
-      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
-        false,
-      );
+      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(await fs.exists(pathsOf(server).reviewFailures(id))).toBe(false);
       expect(
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "hold",
+        ),
       ).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -415,7 +417,7 @@ describe("Feature: a review that fails twice", () => {
       // Given work the manager will send back twice
       const server = await serverFor(fixture);
       await walkTo(server, id, "MANAGER_REVIEW");
-      server.transition(
+      await server.transition(
         id,
         "feedback",
         { findings: ["the manager wants changes"] },
@@ -424,7 +426,7 @@ describe("Feature: a review that fails twice", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // When the manager sends it back again after the redo
-      server.transition(
+      await server.transition(
         id,
         "feedback",
         { findings: ["the manager wants more changes"] },
@@ -432,17 +434,15 @@ describe("Feature: a review that fails twice", () => {
       );
 
       // Then it is back in WORK, never held, and no review was ever counted
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
       expect(
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "hold",
+        ),
       ).toBe(false);
-      expect(await fs.promises.exists(pathsOf(server).reviewFailures(id))).toBe(
-        false,
-      );
+      expect(await fs.exists(pathsOf(server).reviewFailures(id))).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -484,21 +484,24 @@ describe("Feature: a review that fails twice", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Given the manager resumes it, and a server with its scheduler enabled
-      server.transition(id, "resume", {}, "manager");
-      server.setSchedulerEnabled(true);
+      await server.transition(id, "resume", {}, "manager");
+      await server.setSchedulerEnabled(true);
 
       // When the redo fails once
-      await until(server, () => filesOf(fixture).failures(id) === 1);
+      await until(
+        server,
+        async () => (await (await filesOf(fixture)).failures(id)) === 1,
+      );
 
       // Then one failure only bounces it, never holds it again
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
       expect(
-        transitionsOf(server)
-          .read()
-          .filter((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).filter(
+          (e) => e.transition === "hold",
+        ),
       ).toHaveLength(1);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -530,12 +533,12 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "hold",
+        ),
       ).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -574,12 +577,12 @@ describe("Feature: a submit with nothing committed behind it", () => {
       const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("?? b.txt");
-      expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
+      expect(await git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
       expect(
-        git.commitCount(pathsOf(server).worktree(id), "master"),
+        await git.commitCount(pathsOf(server).worktree(id), "master"),
       ).toBeGreaterThan(0);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -600,7 +603,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       await walkTo(server, id, "HELD_WORK", 20);
 
       // Then the task is held with a reason the manager can act on
-      const task = taskOf(server, id);
+      const task = await taskOf(server, id);
       expect(task.held_reason).toBe(
         "the agent submitted work it never committed: nothing is committed on the branch",
       );
@@ -610,7 +613,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       ).toHaveLength(5);
       expect(at(server.slotRows(), 0).state).toBe("IDLE");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -640,7 +643,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is parked with the agent's own words as the reason
-      const task = taskOf(server, id);
+      const task = await taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toBe("the staging database is unreachable");
       expect(task.claimed_by).toBeNull();
@@ -648,7 +651,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -683,12 +686,12 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("zig build");
       expect(
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "hold",
+        ),
       ).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -707,12 +710,12 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, naming the command it was stuck on
-      expect(taskOf(server, id).held_reason).toContain("zig build");
+      expect((await taskOf(server, id)).held_reason).toContain("zig build");
       expect(
         await promptsTo(pathsOf(server).sessionDir(id, "worker")),
       ).toHaveLength(ISSUES.looping.attempts + 1);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -750,12 +753,12 @@ describe("Feature: an agent that stops short of finishing", () => {
       );
       expect(prompts).toHaveLength(2);
       expect(
-        transitionsOf(server)
-          .read()
-          .some((e) => e.transition === "hold"),
+        (await (await transitionsOf(server)).read()).some(
+          (e) => e.transition === "hold",
+        ),
       ).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -771,19 +774,19 @@ describe("Feature: an agent that stops short of finishing", () => {
 
       // Given a task held after its agent reported a blocker
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await reaches(server, id, "HELD_WORK");
 
       // When the scheduler runs for three more ticks
       await settle(server, 3);
 
       // Then it is still held, and no second agent was ever prompted
-      expect(stateOf(server, id)).toBe("HELD_WORK");
+      expect(await stateOf(server, id)).toBe("HELD_WORK");
       expect(
         await promptsTo(pathsOf(server).sessionDir(id, "worker")),
       ).toHaveLength(2);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -812,7 +815,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         ISSUES["missing-result"].attempts + 1,
       );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -847,7 +850,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       // Then what it changed was put back and only its own section survives
       const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
-      const assignment = await fs.promises.readFile(
+      const assignment = await fs.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
@@ -855,7 +858,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       expect(assignment).not.toContain("# Changed");
       expect(assignment).toContain("did the work");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -878,7 +881,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       await walkTo(server, id, "HELD_WORK");
 
       // Then the task is held, saying which part of the assignment is missing
-      const task = taskOf(server, id);
+      const task = await taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toContain(
         "without appending implementation notes",
@@ -887,7 +890,7 @@ describe("Feature: an agent that stops short of finishing", () => {
         await promptsTo(pathsOf(server).sessionDir(id, "worker")),
       ).toHaveLength(5);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -926,7 +929,7 @@ describe("Feature: a review that comes back unusable", () => {
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the task never went back to the worker over the reviewer's mistake
-      const log = transitionsOf(server).read();
+      const log = await (await transitionsOf(server)).read();
       expect(log.some((e) => e.transition === "fail")).toBe(false);
 
       // Then the reviewer was prompted again in place, and its edit was undone
@@ -934,7 +937,7 @@ describe("Feature: a review that comes back unusable", () => {
         pathsOf(server).sessionDir(id, "reviewer"),
       );
       expect(prompts).toHaveLength(2);
-      const assignment = await fs.promises.readFile(
+      const assignment = await fs.readFile(
         pathsOf(server).assignment(id),
         "utf-8",
       );
@@ -942,7 +945,7 @@ describe("Feature: a review that comes back unusable", () => {
       expect(assignment).not.toContain("# Changed");
       expect(assignment).toContain("did the work");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -977,30 +980,28 @@ describe("Feature: keeping the attempts an agent already made", () => {
           WORK_REVIEW: [{ submit: true }],
         },
       });
-      server.transition(id, "resume", {}, "manager");
+      await server.transition(id, "resume", {}, "manager");
 
       // When the second attempt finishes the work
       await walkTo(server, id, "MANAGER_REVIEW");
 
       // Then the first attempt is kept in history and the second is the one that counts
-      const history = (
-        await fs.promises.readdir(pathsOf(server).history(id))
-      ).sort();
+      const history = (await fs.readdir(pathsOf(server).history(id))).sort();
       expect(history).toEqual(["ASSIGNMENT.1.md"]);
       expect(
-        await fs.promises.readFile(
+        await fs.readFile(
           path.join(pathsOf(server).history(id), "ASSIGNMENT.1.md"),
           "utf-8",
         ),
       ).toContain("attempt one");
 
-      const body = await fs.promises.readFile(
+      const body = await fs.readFile(
         activeTaskPath(fixture.tasksDir, id),
         "utf-8",
       );
       expect(body).toContain("attempt two");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -1026,20 +1027,18 @@ describe("Feature: a failure while finishing with an agent", () => {
       await server.writeViews();
       const view = parse(
         SlotsView,
-        JSON.parse(
-          await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
-        ),
+        JSON.parse(await fs.readFile(pathsOf(server).slotsView, "utf-8")),
         "slots view",
         pathsOf(server).slotsView,
       );
       for (const slot of view.slots) {
         expect(slot.state).toBe("IDLE");
       }
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain(`on ${id} failed:`);
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        `on ${id} failed:`,
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );

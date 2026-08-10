@@ -1,3 +1,4 @@
+import type { Awaitable } from "../domain/awaitable.ts";
 import type { Paths } from "./ports/paths.ts";
 import type { Publisher } from "./ports/publisher.ts";
 import type { Reviews } from "./ports/reviews.ts";
@@ -46,8 +47,16 @@ export class TaskGraph {
     private readonly paths: Paths,
   ) {}
 
-  rememberMostRecent(): void {
-    const sorted = [...this.list().values()].sort((a, b) =>
+  takeLock(): Awaitable<void> {
+    return this.tasks.takeLock();
+  }
+
+  clearLock(): Awaitable<void> {
+    return this.tasks.clearLock();
+  }
+
+  async rememberMostRecent(): Promise<void> {
+    const sorted = [...(await this.list()).values()].sort((a, b) =>
       (b.state_entered ?? "").localeCompare(a.state_entered ?? ""),
     );
     for (const task of sorted.slice(0, RECENT_TASKS)) {
@@ -55,31 +64,31 @@ export class TaskGraph {
     }
   }
 
-  list(): Map<TaskId, TaskMeta> {
-    const { tasks, problems } = this.tasks.list();
+  async list(): Promise<Map<TaskId, TaskMeta>> {
+    const { tasks, problems } = await this.tasks.list();
 
     for (const [filePath, message] of problems) {
       if (this.problems.get(filePath) !== message) {
-        this.publisher.log(`ignoring ${filePath}: ${message}`);
+        await this.publisher.log(`ignoring ${filePath}: ${message}`);
       }
     }
     for (const filePath of this.problems.keys()) {
       if (!problems.has(filePath)) {
-        this.publisher.log(`${filePath} parses again`);
+        await this.publisher.log(`${filePath} parses again`);
       }
     }
     this.problems = problems;
-    this.reportCycles(tasks);
+    await this.reportCycles(tasks);
 
     return tasks;
   }
 
-  private reportCycles(tasks: Map<TaskId, TaskMeta>): void {
+  private async reportCycles(tasks: Map<TaskId, TaskMeta>): Promise<void> {
     const cycling = new Set(detectCycles(tasks));
 
     for (const id of cycling) {
       if (!this.cycling.has(id)) {
-        this.publisher.log(
+        await this.publisher.log(
           `task ${id} depends on itself through ${tasks.get(id)?.depends_on.join(", ")}; it can never unblock`,
         );
       }
@@ -87,48 +96,48 @@ export class TaskGraph {
     this.cycling = cycling;
   }
 
-  snapshot(): Snapshot {
-    const tasks = this.list();
+  async snapshot(): Promise<Snapshot> {
+    const tasks = await this.list();
     return { tasks, blocking: blockingCounts(tasks) };
   }
 
-  read(taskId: TaskId): TaskMeta | null {
+  read(taskId: TaskId): Awaitable<TaskMeta | null> {
     return this.tasks.read(taskId);
   }
 
-  body(taskId: TaskId): string {
+  body(taskId: TaskId): Awaitable<string> {
     return this.tasks.body(taskId);
   }
 
-  create(title: string): CreatedTask {
+  create(title: string): Awaitable<CreatedTask> {
     return this.tasks.create(title);
   }
 
-  writeBody(taskId: TaskId, body: string): string {
+  writeBody(taskId: TaskId, body: string): Awaitable<string> {
     return this.tasks.writeBody(taskId, body);
   }
 
-  claim(taskId: TaskId, args: ClaimArgs): void {
-    this.tasks.claim(taskId, args);
-    this.remember(taskId, this.list());
+  async claim(taskId: TaskId, args: ClaimArgs): Promise<void> {
+    await this.tasks.claim(taskId, args);
+    await this.remember(taskId, await this.list());
   }
 
-  releaseClaim(taskId: TaskId): void {
-    this.tasks.releaseClaim(taskId);
-    this.remember(taskId, this.list());
+  async releaseClaim(taskId: TaskId): Promise<void> {
+    await this.tasks.releaseClaim(taskId);
+    await this.remember(taskId, await this.list());
   }
 
-  transition(
+  async transition(
     taskId: TaskId,
     name: TransitionName,
     args: TransitionArgs,
     by: string,
-  ): TransitionResult {
-    const tasks = this.list();
+  ): Promise<TransitionResult> {
+    const tasks = await this.list();
     const before = tasks.get(taskId);
-    const result = this.tasks.apply(taskId, name, args);
+    const result = await this.tasks.apply(taskId, name, args);
     if (name === "submit" && isReviewState(result.from)) {
-      this.reviews.clearFailures(taskId);
+      await this.reviews.clearFailures(taskId);
     }
     const to = result.to ?? before?.state ?? "NEW";
 
@@ -140,28 +149,32 @@ export class TaskGraph {
         claimed_by: null,
         worktree: null,
       });
-      this.teardown(before);
-      this.paths.discard(taskId);
+      await this.teardown(before);
+      await this.paths.discard(taskId);
     }
 
-    this.transitions.append({
+    await this.transitions.append({
       task_id: taskId,
       transition: name,
       from: result.from,
       to,
       by,
     });
-    this.remember(taskId, tasks);
+    await this.remember(taskId, tasks);
     return result;
   }
 
-  feedback(taskId: TaskId, findings: string[], by: string): TransitionResult {
-    this.reviews.setFindings(taskId, findings);
-    const state = this.tasks.read(taskId)?.state;
+  async feedback(
+    taskId: TaskId,
+    findings: string[],
+    by: string,
+  ): Promise<TransitionResult> {
+    await this.reviews.setFindings(taskId, findings);
+    const state = (await this.tasks.read(taskId))?.state;
     if (state !== undefined && isReviewState(state)) {
-      const failures = this.reviews.failures(taskId) + 1;
+      const failures = (await this.reviews.failures(taskId)) + 1;
       if (failures >= REVIEW_FAILURE_LIMIT) {
-        this.reviews.clearFailures(taskId);
+        await this.reviews.clearFailures(taskId);
         return this.transition(
           taskId,
           "hold",
@@ -169,20 +182,20 @@ export class TaskGraph {
           by,
         );
       }
-      this.reviews.setFailures(taskId, failures);
+      await this.reviews.setFailures(taskId, failures);
     }
     return this.transition(taskId, "feedback", { findings }, by);
   }
 
-  teardown(task: TaskMeta): void {
+  async teardown(task: TaskMeta): Promise<void> {
     const workspace = task.workspace;
     if (workspace === null) {
       return;
     }
 
-    this.workspaces.remove(workspace.worktree);
-    if (this.workspaces.branchExists(workspace.branch)) {
-      this.workspaces.deleteBranch(workspace.branch);
+    await this.workspaces.remove(workspace.worktree);
+    if (await this.workspaces.branchExists(workspace.branch)) {
+      await this.workspaces.deleteBranch(workspace.branch);
     }
   }
 
@@ -195,7 +208,10 @@ export class TaskGraph {
     );
   }
 
-  private remember(taskId: TaskId, tasks: Map<TaskId, TaskMeta>): void {
+  private async remember(
+    taskId: TaskId,
+    tasks: Map<TaskId, TaskMeta>,
+  ): Promise<void> {
     const at = this.recent.indexOf(taskId);
     if (at !== -1) {
       this.recent.splice(at, 1);
@@ -205,7 +221,7 @@ export class TaskGraph {
     for (const dropped of this.recent.splice(RECENT_TASKS)) {
       if (!tasks.has(dropped)) {
         this.closed.delete(dropped);
-        this.paths.discard(dropped);
+        await this.paths.discard(dropped);
       }
     }
   }

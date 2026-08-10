@@ -18,20 +18,25 @@ export interface PathReport {
 }
 
 export interface Manager {
-  createTask(title: string): CreatedTask;
-  writeBody(id: TaskId, body: string): string;
-  tasks(): Map<TaskId, TaskMeta>;
+  enqueue<T>(work: () => Promise<T>): Promise<T>;
+  createTask(title: string): Promise<CreatedTask>;
+  writeBody(id: TaskId, body: string): Promise<string>;
+  tasks(): Promise<Map<TaskId, TaskMeta>>;
   submit(id: TaskId): Promise<TransitionResult>;
-  feedback(id: TaskId, findings: string[], by: string): TransitionResult;
-  hold(id: TaskId, reason: string): TransitionResult;
-  resume(id: TaskId): TransitionResult;
-  abort(id: TaskId): TransitionResult;
-  setSchedulerEnabled(enabled: boolean): void;
-  setAgentEnabled(agent: string, enabled: boolean): SlotRow[];
-  abortSlot(name: string): SlotRow;
-  reloadPrompts(): string[];
+  feedback(
+    id: TaskId,
+    findings: string[],
+    by: string,
+  ): Promise<TransitionResult>;
+  hold(id: TaskId, reason: string): Promise<TransitionResult>;
+  resume(id: TaskId): Promise<TransitionResult>;
+  abort(id: TaskId): Promise<TransitionResult>;
+  setSchedulerEnabled(enabled: boolean): Promise<void>;
+  setAgentEnabled(agent: string, enabled: boolean): Promise<SlotRow[]>;
+  abortSlot(name: string): Promise<SlotRow>;
+  reloadPrompts(): Promise<string[]>;
   writeViews(): Promise<void>;
-  view(name: ViewName): string;
+  view(name: ViewName): Promise<string>;
   pathReport(): PathReport;
   readonly lastError: string | null;
 }

@@ -32,15 +32,15 @@ export class Dispatcher {
     private readonly base: string,
   ) {}
 
-  resumable(tasks: Map<TaskId, TaskMeta>): Set<TaskId> {
+  async resumable(tasks: Map<TaskId, TaskMeta>): Promise<Set<TaskId>> {
     const ids = new Set<TaskId>();
     for (const [id, task] of tasks) {
       if (
         task.state === "WORK" &&
         task.claimed_by === null &&
         task.workspace?.session != null &&
-        this.pool.hasSession(task.workspace.session) &&
-        this.messages.queued(id, "WORK")
+        (await this.pool.hasSession(task.workspace.session)) &&
+        (await this.messages.queued(id, "WORK"))
       ) {
         ids.add(id);
       }
@@ -51,7 +51,7 @@ export class Dispatcher {
   async run({ tasks, blocking }: Snapshot): Promise<void> {
     for (const { candidate, slot } of schedule(
       tasks,
-      this.resumable(tasks),
+      await this.resumable(tasks),
       blocking,
       this.pool.freeSlots(),
       this.pool.rates.rateOf,
@@ -63,10 +63,10 @@ export class Dispatcher {
       try {
         await this.assign(task, candidate, slot);
       } catch (err) {
-        this.publisher.log(
+        await this.publisher.log(
           `dispatch of ${task.id} to ${slot.name} failed: ${messageOf(err)}`,
         );
-        this.pool.finish(this.pool.runner(slot.name));
+        await this.pool.finish(this.pool.runner(slot.name));
       }
     }
   }
@@ -90,26 +90,26 @@ export class Dispatcher {
     }
 
     const state = candidate.state;
-    this.paths.prepare(task.id);
+    await this.paths.prepare(task.id);
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
 
-    if (!this.workspaces.exists(worktree)) {
-      this.workspaces.create(branch, worktree, this.base);
+    if (!(await this.workspaces.exists(worktree))) {
+      await this.workspaces.create(branch, worktree, this.base);
     }
 
     const section = STAGE_OF[state].section;
     runner.checkout = {
       branch,
       worktree,
-      head: this.workspaces.head(worktree),
+      head: await this.workspaces.head(worktree),
       dispatched:
-        section === null && this.assignments.exists(task.id)
-          ? this.assignments.read(task.id)
-          : this.writeAssignment(task, section),
+        section === null && (await this.assignments.exists(task.id))
+          ? await this.assignments.read(task.id)
+          : await this.writeAssignment(task, section),
     };
 
-    const process = this.pool.spawn(
+    const process = await this.pool.spawn(
       runner,
       { taskId: task.id, state, role: candidate.role, cwd: worktree },
       (settling) => this.settler.compacted(settling),
@@ -118,8 +118,8 @@ export class Dispatcher {
 
     const session = await process.newSession();
     runner.session = session;
-    this.requireStill(task, slot);
-    this.graph.claim(task.id, {
+    await this.requireStill(task, slot);
+    await this.graph.claim(task.id, {
       slotName: slot.name,
       pid: process.pid,
       branch,
@@ -128,8 +128,8 @@ export class Dispatcher {
     });
 
     runner.state = "BUSY";
-    const queued = this.messages.drain(task.id, state);
-    const message = this.settler.nudge(task.id, state);
+    const queued = await this.messages.drain(task.id, state);
+    const message = await this.settler.nudge(task.id, state);
     await this.settler.prompt(
       this.pool.requireRun(runner),
       queued === "" ? message : `${queued}\n\n${message}`,
@@ -148,11 +148,11 @@ export class Dispatcher {
     runner.checkout = {
       branch: workspace.branch,
       worktree: workspace.worktree,
-      head: this.workspaces.head(workspace.worktree),
-      dispatched: this.assignments.read(task.id),
+      head: await this.workspaces.head(workspace.worktree),
+      dispatched: await this.assignments.read(task.id),
     };
 
-    const process = this.pool.spawn(
+    const process = await this.pool.spawn(
       runner,
       {
         taskId: task.id,
@@ -166,8 +166,8 @@ export class Dispatcher {
 
     await process.switchSession(session);
     runner.session = session;
-    this.requireStill(task, slot);
-    this.graph.claim(task.id, {
+    await this.requireStill(task, slot);
+    await this.graph.claim(task.id, {
       slotName: slot.name,
       pid: process.pid,
       branch: workspace.branch,
@@ -177,16 +177,16 @@ export class Dispatcher {
 
     runner.state = "BUSY";
 
-    const queued = this.messages.drain(task.id, "WORK");
+    const queued = await this.messages.drain(task.id, "WORK");
     await this.settler.prompt(
       this.pool.requireRun(runner),
-      queued === "" ? this.settler.nudge(task.id, "WORK") : queued,
+      queued === "" ? await this.settler.nudge(task.id, "WORK") : queued,
     );
     this.settler.watch(runner);
   }
 
-  private requireStill(task: TaskMeta, slot: Slot): void {
-    const current = this.graph.list().get(task.id);
+  private async requireStill(task: TaskMeta, slot: Slot): Promise<void> {
+    const current = (await this.graph.list()).get(task.id);
     if (current?.state !== task.state) {
       throw new Error(
         `${task.id} left ${task.state} before ${slot.name} could claim it`,
@@ -199,12 +199,15 @@ export class Dispatcher {
     }
   }
 
-  private writeAssignment(task: TaskMeta, section: string | null): string {
-    this.assignments.rotate(task.id);
+  private async writeAssignment(
+    task: TaskMeta,
+    section: string | null,
+  ): Promise<string> {
+    await this.assignments.rotate(task.id);
 
-    const body = normalizeBody(this.graph.body(task.id));
+    const body = normalizeBody(await this.graph.body(task.id));
     const dispatched = section === null ? body : `${body}\n${section}\n`;
-    this.assignments.write(task.id, dispatched);
+    await this.assignments.write(task.id, dispatched);
     return dispatched;
   }
 }

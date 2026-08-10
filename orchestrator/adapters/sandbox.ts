@@ -1,6 +1,7 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { Awaitable } from "../domain/awaitable.ts";
 
 export const SANDBOX_COMMAND = "bwrap";
 
@@ -101,44 +102,71 @@ export function sandboxArgs(policy: SandboxPolicy): string[] {
   return args;
 }
 
-let limitsProbe: boolean | undefined;
+let limitsProbe: Promise<boolean> | undefined;
 
-export function hasLimits(): boolean {
+export function hasLimits(): Promise<boolean> {
   if (limitsProbe === undefined) {
-    limitsProbe =
-      Bun.spawnSync({
-        cmd: [
-          LIMIT_COMMAND,
-          "--user",
-          "--scope",
-          "--quiet",
-          "--collect",
-          "-p",
-          `MemoryMax=${MEMORY_MAX}`,
-          "-p",
-          "MemorySwapMax=0",
-          "-p",
-          `TasksMax=${TASKS_MAX}`,
-          "--",
-          OOM_COMMAND,
-          "-n",
-          "0",
-          "--",
-          "true",
-        ],
-        stdout: "ignore",
-        stderr: "ignore",
-      }).exitCode === 0;
+    const proc = Bun.spawn({
+      cmd: [
+        LIMIT_COMMAND,
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "-p",
+        `MemoryMax=${MEMORY_MAX}`,
+        "-p",
+        "MemorySwapMax=0",
+        "-p",
+        `TasksMax=${TASKS_MAX}`,
+        "--",
+        OOM_COMMAND,
+        "-n",
+        "0",
+        "--",
+        "true",
+      ],
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    limitsProbe = proc.exited.then((code) => code === 0);
   }
   return limitsProbe;
 }
 
-export function sandbox(
+let overlayProbe: Promise<boolean> | undefined;
+
+export function hasOverlay(): Promise<boolean> {
+  if (overlayProbe === undefined) {
+    const probe = os.tmpdir();
+    const proc = Bun.spawn({
+      cmd: [
+        SANDBOX_COMMAND,
+        "--ro-bind",
+        "/",
+        "/",
+        "--overlay-src",
+        probe,
+        "--tmp-overlay",
+        probe,
+        "--unshare-user",
+        "--",
+        "true",
+      ],
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    overlayProbe = proc.exited.then((code) => code === 0);
+  }
+  return overlayProbe;
+}
+
+export async function sandbox(
   policy: SandboxPolicy,
   command = SANDBOX_COMMAND,
-  limited = hasLimits(),
-): string[] {
-  if (!limited) {
+  limited: Awaitable<boolean> = hasLimits(),
+): Promise<string[]> {
+  if (!(await limited)) {
     return [command, ...sandboxArgs(policy)];
   }
   return [...limitArgs(policy), command, ...sandboxArgs(policy)];
@@ -158,6 +186,22 @@ export function expandAll(targets: string[]): string[] {
   return [...new Set(targets.map(expandHome))];
 }
 
-export function overlays(targets: string[]): string[] {
-  return expandAll(targets).filter((target) => fs.existsSync(target));
+export async function overlays(
+  targets: string[],
+  overlaid: Awaitable<boolean> = hasOverlay(),
+): Promise<string[]> {
+  if (!(await overlaid)) {
+    return [];
+  }
+  const expanded = expandAll(targets);
+  const existing: string[] = [];
+  for (const target of expanded) {
+    try {
+      await fs.access(target);
+      existing.push(target);
+    } catch {
+      // the target is not on disk
+    }
+  }
+  return existing;
 }

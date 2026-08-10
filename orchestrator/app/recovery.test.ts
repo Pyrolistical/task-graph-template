@@ -55,7 +55,7 @@ function aRig(tasks: TaskMeta[]) {
 }
 
 describe("Feature: reaping claims whose process is gone", () => {
-  test("a claim held by a dead process is released", () => {
+  test("a claim held by a dead process is released", async () => {
     // Given a task claimed by an agent whose process has exited
     const task = aTask({
       claimed_by: "pi-fake-fake-1",
@@ -64,13 +64,13 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, store } = aRig([task]);
 
     // When the reaper runs over the graph
-    recover.reap(new Map([[task.id, task]]));
+    await recover.reap(new Map([[task.id, task]]));
 
     // Then the claim is cleared, putting the task back in the queue where it stands
     expect(store.released).toEqual(["000042"]);
   });
 
-  test("a claim held by a live process is left alone", () => {
+  test("a claim held by a live process is left alone", async () => {
     // Given a task claimed by an agent that is still running
     const task = aTask({
       claimed_by: "pi-fake-fake-1",
@@ -79,13 +79,13 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, store } = aRig([task]);
 
     // When the reaper runs over the graph
-    recover.reap(new Map([[task.id, task]]));
+    await recover.reap(new Map([[task.id, task]]));
 
     // Then nothing is released, because the agent is still working
     expect(store.released).toEqual([]);
   });
 
-  test("a slot whose own process is alive shields its task from the reaper", () => {
+  test("a slot whose own process is alive shields its task from the reaper", async () => {
     // Given a task whose recorded pid is gone
     const task = aTask({
       claimed_by: "pi-fake-fake-1",
@@ -99,13 +99,42 @@ describe("Feature: reaping claims whose process is gone", () => {
     runner.process = aSession({ kind: "none" }, true);
 
     // When the reaper runs over the graph
-    recover.reap(new Map([[task.id, task]]));
+    await recover.reap(new Map([[task.id, task]]));
 
     // Then the claim is left alone, because the agent is still running
     expect(store.released).toEqual([]);
   });
 
-  test("a slot still holding a dead process does not shield its task", () => {
+  test("a slot that still holds a dead process is left to the settler", async () => {
+    // Given a task whose recorded pid is gone
+    const task = aTask({
+      claimed_by: "pi-fake-fake-1",
+      claimed_pid: DEAD_PID,
+      workspace: {
+        branch: "task/000042",
+        worktree: "/runtime/000042/worktree",
+        slot: "pi-fake-fake-1",
+        session: null,
+      },
+    });
+    const { recover, pool, store, workspaces } = aRig([task]);
+    workspaces.present.add("/runtime/000042/worktree");
+
+    // Given the slot holding it kept the process that has already exited
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.taskId = task.id;
+    runner.process = aSession({ kind: "none" }, false);
+
+    // When the reaper runs over the graph
+    await recover.reap(new Map([[task.id, task]]));
+
+    // Then it drops neither the claim nor the harvest onto the settler's turn
+    expect(store.released).toEqual([]);
+    expect(workspaces.harvested).toEqual([]);
+  });
+
+  test("a slot the settler has released stops shielding its task", async () => {
     // Given a task whose recorded pid is gone
     const task = aTask({
       claimed_by: "pi-fake-fake-1",
@@ -113,21 +142,22 @@ describe("Feature: reaping claims whose process is gone", () => {
     });
     const { recover, pool, store } = aRig([task]);
 
-    // Given the slot holding it kept a process that has already exited
+    // Given the settler has finished with the slot and handed it back
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
     runner.taskId = task.id;
     runner.process = aSession({ kind: "none" }, false);
+    pool.release("pi-fake-fake-1");
 
     // When the reaper runs over the graph
-    recover.reap(new Map([[task.id, task]]));
+    await recover.reap(new Map([[task.id, task]]));
 
     // Then the claim is released and the slot goes back to idle
     expect(store.released).toEqual(["000042"]);
     expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 
-  test("the work a reaped agent committed is harvested onto its branch", () => {
+  test("the work a reaped agent committed is harvested onto its branch", async () => {
     // Given a dead agent's task with a workspace still on disk
     const task = aTask({
       claimed_by: "pi-fake-fake-1",
@@ -143,7 +173,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     workspaces.present.add("/runtime/000042/worktree");
 
     // When the reaper runs over the graph
-    recover.reap(new Map([[task.id, task]]));
+    await recover.reap(new Map([[task.id, task]]));
 
     // Then the commits in the worktree are harvested before the claim is dropped
     expect(workspaces.harvested).toEqual(["/runtime/000042/worktree"]);
@@ -151,7 +181,7 @@ describe("Feature: reaping claims whose process is gone", () => {
 });
 
 describe("Feature: picking the pool back up after a restart", () => {
-  test("a slot whose pid is still alive is left running", () => {
+  test("a slot whose pid is still alive is left running", async () => {
     // Given a published view naming a slot that is still running a task
     const { recover, pool, publisher, log } = aRig([]);
     publisher.rows = [
@@ -167,7 +197,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     ];
 
     // When the server reattaches to what the last one left behind
-    recover.reattach();
+    await recover.reattach();
 
     // Then the slot is taken as busy on that task rather than dispatched again
     const row = at(pool.rows(), 0);
@@ -178,7 +208,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     ]);
   });
 
-  test("a slot whose pid is gone is left idle for the scheduler", () => {
+  test("a slot whose pid is gone is left idle for the scheduler", async () => {
     // Given a published view naming a slot whose process has since exited
     const { recover, pool, publisher } = aRig([]);
     publisher.rows = [
@@ -192,18 +222,18 @@ describe("Feature: picking the pool back up after a restart", () => {
     ];
 
     // When the server reattaches to what the last one left behind
-    recover.reattach();
+    await recover.reattach();
 
     // Then the slot reads idle, so the scheduler may use it again
     expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 
-  test("no view on disk leaves every slot idle", () => {
+  test("no view on disk leaves every slot idle", async () => {
     // Given a first start, with no published view to read
     const { recover, pool } = aRig([]);
 
     // When the server reattaches to the pool it left behind
-    recover.reattach();
+    await recover.reattach();
 
     // Then the whole pool is idle
     expect(pool.rows().map((row) => row.state)).toEqual(["IDLE"]);
@@ -211,7 +241,7 @@ describe("Feature: picking the pool back up after a restart", () => {
 });
 
 describe("Feature: recloning a workspace that went missing", () => {
-  test("a task whose worktree is gone is recloned from its branch", () => {
+  test("a task whose worktree is gone is recloned from its branch", async () => {
     // Given a task whose worktree is gone but whose branch survives
     const task = aTask({
       workspace: {
@@ -225,13 +255,13 @@ describe("Feature: recloning a workspace that went missing", () => {
     workspaces.branches.add("task/000042");
 
     // When the server recovers its workspaces
-    recover.reclone();
+    await recover.reclone();
 
     // Then the worktree is recloned, so the work is not lost
     expect(workspaces.created).toEqual(["/runtime/000042/worktree"]);
   });
 
-  test("a task that lost both its worktree and its branch is only reported", () => {
+  test("a task that lost both its worktree and its branch is only reported", async () => {
     // Given a task whose worktree and branch are both gone
     const task = aTask({
       workspace: {
@@ -244,7 +274,7 @@ describe("Feature: recloning a workspace that went missing", () => {
     const { recover, workspaces, log } = aRig([task]);
 
     // When the server recovers its workspaces
-    recover.reclone();
+    await recover.reclone();
 
     // Then nothing is recloned, and the loss is written to the log
     expect(workspaces.created).toEqual([]);
@@ -253,7 +283,7 @@ describe("Feature: recloning a workspace that went missing", () => {
     ]);
   });
 
-  test("a task whose worktree is still there is left alone", () => {
+  test("a task whose worktree is still there is left alone", async () => {
     // Given a task whose worktree is where it was left
     const task = aTask({
       workspace: {
@@ -267,7 +297,7 @@ describe("Feature: recloning a workspace that went missing", () => {
     workspaces.present.add("/runtime/000042/worktree");
 
     // When the server recovers its workspaces
-    recover.reclone();
+    await recover.reclone();
 
     // Then nothing is recloned over it
     expect(workspaces.created).toEqual([]);

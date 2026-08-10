@@ -1,5 +1,7 @@
+import type { Awaitable } from "../domain/awaitable.ts";
+
 export async function eventually(
-  done: () => boolean | Promise<boolean>,
+  done: () => Awaitable<boolean>,
   what: string,
   tries = 200,
 ): Promise<void> {

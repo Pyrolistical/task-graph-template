@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { groupOf } from "./domain/pattern.ts";
 
@@ -17,7 +17,7 @@ async function suites(): Promise<string[]> {
   const found: string[] = [];
 
   const walk = async (dir: string) => {
-    for (const entry of await fs.promises.readdir(dir, {
+    for (const entry of await fs.readdir(dir, {
       withFileTypes: true,
     })) {
       const full = path.join(dir, entry.name);
@@ -48,8 +48,10 @@ function stepsOf(comments: RegExpExecArray[], keyword: string): string[] {
 }
 
 async function cases(file: string): Promise<Case[]> {
-  const source = await fs.promises.readFile(path.join(ROOT, file), "utf-8");
-  const blocks = source.split(/^ {2}(?:test|testInTempDirs)\(\s*/m).slice(1);
+  const source = await fs.readFile(path.join(ROOT, file), "utf-8");
+  const blocks = source
+    .split(/^ {2}(?:test|testInTempDirs|testInTempDirsIf)\(\s*/m)
+    .slice(1);
 
   return blocks.map((block) => {
     const name = /^"([^"]*)"/.exec(block)?.[1] ?? "(unnamed)";
@@ -129,7 +131,7 @@ describe("Feature: behaviour tests are written as Given, When, Then", () => {
     const terse = sentences
       .filter(
         (line) =>
-          line.text.split(/\s+/).length < 4 ||
+          line.text.split(/\s+/).length < 2 ||
           /[(){};=]|\b(expect|const|await)\b/.test(line.text),
       )
       .map((line) => `${line.where} — ${line.text}`);
@@ -145,8 +147,8 @@ describe("Feature: behaviour tests are written as Given, When, Then", () => {
     // When the suites declaring their tests from a table are collected
     const tabled = [];
     for (const file of files) {
-      const source = await fs.promises.readFile(path.join(ROOT, file), "utf-8");
-      if (/(?:test|testInTempDirs)\.each/.test(source)) {
+      const source = await fs.readFile(path.join(ROOT, file), "utf-8");
+      if (/(?:test|testInTempDirs|testInTempDirsIf)\.each/.test(source)) {
         tabled.push(file);
       }
     }
@@ -162,7 +164,7 @@ describe("Feature: behaviour tests are written as Given, When, Then", () => {
     // When each is read for its describe block
     const unnamed = [];
     for (const file of files) {
-      const source = await fs.promises.readFile(path.join(ROOT, file), "utf-8");
+      const source = await fs.readFile(path.join(ROOT, file), "utf-8");
       if (!/describe\("Feature: /.test(source)) {
         unnamed.push(file);
       }

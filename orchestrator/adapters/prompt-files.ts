@@ -1,5 +1,7 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
+import { hasCode } from "../domain/errors.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
 import { type FragmentVars, render } from "../domain/fragment.ts";
@@ -13,22 +15,37 @@ export class PromptFiles {
   private readonly dirs: string[];
   private readonly cached = new Map<string, CachedFile>();
 
-  constructor(orchestratorDir: string, overridesDir: string | null = null) {
-    this.dirs =
+  private constructor(dirs: string[]) {
+    this.dirs = dirs;
+  }
+
+  static async open(
+    orchestratorDir: string,
+    overridesDir: string | null = null,
+  ): Promise<PromptFiles> {
+    const dirs =
       overridesDir === null
         ? [orchestratorDir]
         : [overridesDir, orchestratorDir];
-    this.reload();
+    const prompts = new PromptFiles(dirs);
+    await prompts.reload();
+    return prompts;
   }
 
-  reload(): string[] {
+  async reload(): Promise<string[]> {
     this.cached.clear();
     for (const dir of this.dirs) {
       const sub = path.join(dir, "prompts");
-      if (!fs.existsSync(sub)) {
+      let entries: Dirent[];
+      try {
+        entries = await fs.readdir(sub, { withFileTypes: true });
+      } catch (err) {
+        if (!hasCode(err, "ENOENT")) {
+          throw err;
+        }
         continue;
       }
-      for (const entry of fs.readdirSync(sub, { withFileTypes: true })) {
+      for (const entry of entries) {
         if (!entry.isFile() || !entry.name.endsWith(".md")) {
           continue;
         }
@@ -39,7 +56,7 @@ export class PromptFiles {
         const filePath = path.join(sub, entry.name);
         this.cached.set(name, {
           path: filePath,
-          contents: fs.readFileSync(filePath, "utf-8"),
+          contents: await fs.readFile(filePath, "utf-8"),
         });
       }
     }

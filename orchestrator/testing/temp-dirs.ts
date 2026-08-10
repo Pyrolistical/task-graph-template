@@ -1,26 +1,40 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "bun:test";
+import { type Awaitable } from "../domain/awaitable.ts";
+
+const STALE_MS = 60 * 60 * 1000;
 
 export const TEST_ROOT = path.join(os.tmpdir(), "task-graph-server-test");
 
-await fs.promises.rm(TEST_ROOT, { recursive: true, force: true });
-await fs.promises.mkdir(TEST_ROOT, { recursive: true });
+await fs.mkdir(TEST_ROOT, { recursive: true });
+for (const name of await fs.readdir(TEST_ROOT)) {
+  const entry = path.join(TEST_ROOT, name);
+  let stats;
+  try {
+    stats = await fs.stat(entry);
+  } catch {
+    continue;
+  }
+  if (Date.now() - stats.mtimeMs > STALE_MS) {
+    await fs.rm(entry, { recursive: true, force: true });
+  }
+}
 
 process.env.TASK_GRAPH_TASKS_ROOT = path.join(TEST_ROOT, "task-graph-root");
 
 const live: string[] = [];
 
 export async function tempDir(prefix: string): Promise<string> {
-  const dir = await fs.promises.mkdtemp(path.join(TEST_ROOT, prefix));
+  const dir = await fs.mkdtemp(path.join(TEST_ROOT, prefix));
   live.push(dir);
   return dir;
 }
 
 export async function withTasksRoot<T>(
   root: string,
-  fn: () => T | Promise<T>,
+  fn: () => Awaitable<T>,
 ): Promise<T> {
   const previous = process.env.TASK_GRAPH_TASKS_ROOT;
   process.env.TASK_GRAPH_TASKS_ROOT = root;
@@ -36,7 +50,7 @@ export async function withTasksRoot<T>(
 }
 
 function inTempDirs<Args extends unknown[]>(
-  fn: (...args: Args) => void | Promise<void>,
+  fn: (...args: Args) => Awaitable<void>,
 ): (...args: Args) => Promise<void> {
   return async (...args: Args) => {
     const mark = live.length;
@@ -47,15 +61,24 @@ function inTempDirs<Args extends unknown[]>(
       throw err;
     }
     for (const dir of live.splice(mark)) {
-      await fs.promises.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, { recursive: true, force: true });
     }
   };
 }
 
 export function testInTempDirs(
   name: string,
-  fn: () => void | Promise<void>,
+  fn: () => Awaitable<void>,
   timeout?: number,
 ): void {
   test(name, inTempDirs(fn), timeout);
+}
+
+export function testInTempDirsIf(
+  name: string,
+  supported: boolean,
+  fn: () => Awaitable<void>,
+  timeout?: number,
+): void {
+  test.skipIf(!supported)(name, inTempDirs(fn), timeout);
 }

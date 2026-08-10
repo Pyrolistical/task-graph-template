@@ -11,6 +11,8 @@ import {
   runOf,
 } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
+import { orNull } from "../domain/awaitable.ts";
+import { Queue } from "../domain/queue.ts";
 import { diffAssignment, restored } from "../domain/assignment.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
@@ -29,6 +31,7 @@ export const MODEL_LOADING_MS = 5000;
 export class Settler {
   constructor(
     private readonly graph: TaskGraph,
+    private readonly edits: Queue,
     private readonly pool: Pool,
     private readonly assignments: Assignments,
     private readonly reviews: Reviews,
@@ -38,8 +41,8 @@ export class Settler {
     private readonly base: string,
   ) {}
 
-  nudge(taskId: TaskId, state: ClaimState): string {
-    const findings = this.reviews.findings(taskId);
+  async nudge(taskId: TaskId, state: ClaimState): Promise<string> {
+    const findings = await this.reviews.findings(taskId);
     if (findings.length === 0) {
       return this.prompts.fragment(state);
     }
@@ -66,29 +69,29 @@ export class Settler {
     await run.process.stream.settled();
 
     if (!run.process.alive) {
-      this.publisher.log(
+      await this.publisher.log(
         `${runner.slot.name} on ${run.taskId}: the process exited without settling: ${run.process.stream.state.failure}`,
       );
-      this.pool.finish(runner);
+      await this.pool.finish(runner);
       return;
     }
 
     runner.state = "SETTLED";
     const stopReason = run.process.stream.state.stopReason;
 
-    const closing = await run.process.lastAssistantText().catch(() => null);
+    const closing = await orNull(run.process.lastAssistantText());
     if (closing !== null) {
-      this.publisher.log(
+      await this.publisher.log(
         `${runner.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
       );
     }
 
-    await this.apply(run, decideSettle(this.observe(run)));
+    await this.apply(run, decideSettle(await this.observe(run)));
   }
 
-  private observe(run: Run): Settlement {
+  private async observe(run: Run): Promise<Settlement> {
     const stage = STAGE_OF[run.state];
-    const live = this.assignments.read(run.taskId);
+    const live = await this.assignments.read(run.taskId);
 
     return {
       state: run.state,
@@ -100,7 +103,7 @@ export class Settler {
       worktree:
         stage.guard === "none"
           ? { dirty: [], commits: 0 }
-          : this.workspaces.status(run.checkout.worktree, this.base),
+          : await this.workspaces.status(run.checkout.worktree, this.base),
       base: this.base,
     };
   }
@@ -111,7 +114,7 @@ export class Settler {
     for (const intent of intents) {
       switch (intent.kind) {
         case "abandon": {
-          this.pool.finish(runner);
+          await this.pool.finish(runner);
           return;
         }
         case "back-off": {
@@ -119,11 +122,11 @@ export class Settler {
           return;
         }
         case "restore": {
-          this.assignments.write(
+          await this.assignments.write(
             taskId,
             restored(
               run.checkout.dispatched,
-              this.assignments.read(taskId),
+              await this.assignments.read(taskId),
               intent.section,
             ),
           );
@@ -136,27 +139,46 @@ export class Settler {
         }
         case "feedback": {
           runner.backoff = BACKOFF_START_MS;
-          run.process.close();
-          this.graph.feedback(taskId, intent.findings, "server");
-          this.pool.finish(runner);
+          await this.edits.submit(() => this.sendBack(run, intent.findings));
           return;
         }
         case "submit": {
           runner.backoff = BACKOFF_START_MS;
-          const live = this.assignments.read(taskId);
-          run.process.close();
-          this.reviews.clearFindings(taskId);
-          this.graph.transition(
-            taskId,
-            "submit",
-            intent.body ? { body: live } : {},
-            runner.slot.name,
-          );
-          this.pool.finish(runner);
+          const live = intent.body ? await this.assignments.read(taskId) : null;
+          await this.edits.submit(() => this.accept(run, live));
           return;
         }
       }
     }
+  }
+
+  private async sendBack(run: Run, findings: string[]): Promise<void> {
+    run.process.close();
+    await this.graph.feedback(run.taskId, findings, "server");
+    await this.pool.finish(run.runner);
+  }
+
+  private async accept(run: Run, body: string | null): Promise<void> {
+    run.process.close();
+    await this.reviews.clearFindings(run.taskId);
+    await this.graph.transition(
+      run.taskId,
+      "submit",
+      body === null ? {} : { body },
+      run.runner.slot.name,
+    );
+    await this.pool.finish(run.runner);
+  }
+
+  private async park(run: Run, reason: string): Promise<void> {
+    run.process.close();
+    await this.graph.transition(
+      run.taskId,
+      "hold",
+      { reason },
+      run.runner.slot.name,
+    );
+    await this.pool.finish(run.runner);
   }
 
   async compacted(runner: Runner): Promise<void> {
@@ -166,7 +188,7 @@ export class Settler {
     }
 
     if (runner.results.length > 0) {
-      this.publisher.log(
+      await this.publisher.log(
         `${runner.slot.name} on ${run.taskId} compacted after its result: left alone to settle`,
       );
       return;
@@ -175,14 +197,14 @@ export class Settler {
     const resetting = runner.role !== "worker";
 
     if (resetting) {
-      this.workspaces.resetTo(run.checkout.worktree, run.checkout.head);
+      await this.workspaces.resetTo(run.checkout.worktree, run.checkout.head);
     }
 
-    this.publisher.log(
+    await this.publisher.log(
       `${runner.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
     );
 
-    await run.process.steer(this.nudge(run.taskId, run.state));
+    await run.process.steer(await this.nudge(run.taskId, run.state));
   }
 
   private async backOff(run: Run): Promise<void> {
@@ -203,19 +225,19 @@ export class Settler {
       runner.backoff = Math.min(runner.backoff * 2, BACKOFF_CAP_MS);
     }
 
-    this.publisher.log(
+    await this.publisher.log(
       `${runner.slot.name} waiting ${delay}ms on ${loading ? "model loading" : "provider error"}: ${message}`,
     );
 
     await Bun.sleep(delay);
     if (!run.process.alive) {
-      this.pool.finish(runner);
+      await this.pool.finish(runner);
       return;
     }
 
     runner.state = "BUSY";
     runner.retry = null;
-    await this.prompt(run, this.nudge(run.taskId, run.state));
+    await this.prompt(run, await this.nudge(run.taskId, run.state));
     this.watch(runner);
   }
 
@@ -229,24 +251,17 @@ export class Settler {
     const issue = ISSUES[name];
     const used = runner.issues.get(name) ?? 0;
 
-    this.publisher.log(
+    await this.publisher.log(
       `${runner.slot.name} on ${taskId}: ${name} (${used}/${issue.attempts} retried)${detail === "" ? "" : `: ${detail}`}`,
     );
 
     if (used >= issue.attempts) {
-      run.process.close();
-      this.graph.transition(
-        taskId,
-        "hold",
-        { reason: issue.held(detail) },
-        runner.slot.name,
-      );
-      this.pool.finish(runner);
+      await this.edits.submit(() => this.park(run, issue.held(detail)));
       return;
     }
 
     if (!run.process.alive) {
-      this.pool.finish(runner);
+      await this.pool.finish(runner);
       return;
     }
 

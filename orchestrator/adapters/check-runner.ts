@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import type { TaskId } from "../domain/task.ts";
 import {
   type CheckResult,
@@ -19,7 +19,7 @@ export class CheckRunner {
     return [...this.running.values()].some((check) => check.task_id === taskId);
   }
 
-  start(
+  async start(
     taskId: TaskId,
     index: number,
     command: string,
@@ -28,8 +28,6 @@ export class CheckRunner {
     launch: string[] = [],
   ): Promise<CheckResult> {
     const key = `${taskId}:${index}`;
-    fs.writeFileSync(logPath, "", "utf-8");
-
     const proc = Bun.spawn([...launch, "bash", "-lc", command], {
       cwd,
       stdout: "pipe",
@@ -45,15 +43,15 @@ export class CheckRunner {
       log: logPath,
     });
 
-    return (async (): Promise<CheckResult> => {
+    try {
+      await fs.writeFile(logPath, "", "utf-8");
       const [stdout, stderr, code] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
         proc.exited,
       ]);
       const output = `${stdout}${stderr}`;
-      fs.writeFileSync(logPath, output, "utf-8");
-      this.running.delete(key);
+      await fs.writeFile(logPath, output, "utf-8");
       return {
         task_id: taskId,
         index,
@@ -62,6 +60,8 @@ export class CheckRunner {
         log: logPath,
         tail: tailOf(output),
       };
-    })();
+    } finally {
+      this.running.delete(key);
+    }
   }
 }

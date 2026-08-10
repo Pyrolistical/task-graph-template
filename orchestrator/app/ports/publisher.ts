@@ -1,4 +1,5 @@
 import type { SlotRow } from "../../domain/agents.ts";
+import type { Awaitable } from "../../domain/awaitable.ts";
 import type { RunningCheck } from "../../domain/checks.ts";
 import type { TaskRow } from "../../domain/graph.ts";
 import type { InboxRow } from "../../policy/inbox.ts";
@@ -26,8 +27,8 @@ export const VIEW_NAMES = [
 export type ViewName = (typeof VIEW_NAMES)[number];
 
 export interface Publisher {
-  publish(views: Views): void;
-  read(name: ViewName): string;
-  lastSlots(): SlotRow[] | null;
-  log(line: string): void;
+  publish(views: Views): Awaitable<void>;
+  read(name: ViewName): Awaitable<string>;
+  lastSlots(): Awaitable<SlotRow[] | null>;
+  log(line: string): Awaitable<void>;
 }

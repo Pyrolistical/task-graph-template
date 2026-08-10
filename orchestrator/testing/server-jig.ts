@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import {
   type TaskMeta,
   type Workspace,
@@ -6,6 +6,7 @@ import {
   requireSession,
   requireWorkspace,
 } from "../domain/task.ts";
+import type { Awaitable } from "../domain/awaitable.ts";
 import { present } from "./present.ts";
 import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
@@ -27,11 +28,11 @@ const RIGS = new WeakMap<Server, Rig>();
 export async function startServer(
   options: Parameters<typeof wire>[0],
 ): Promise<Server> {
-  const server = await wire(options).start();
+  const server = await (await wire(options)).start();
   const orchestratorDir = options.orchestratorDir ?? ORCHESTRATOR_DIR;
   RIGS.set(server, {
-    runtime: new Runtime(options.repo, options.serverRoot),
-    prompts: new PromptFiles(
+    runtime: await Runtime.open(options.repo, options.serverRoot),
+    prompts: await PromptFiles.open(
       orchestratorDir,
       options.overridesDir ?? options.tasksDir ?? null,
     ),
@@ -55,16 +56,16 @@ export function promptsOf(server: Server): PromptFiles {
   return rigOf(server).prompts;
 }
 
-export function transitionsOf(server: Server): TransitionLog {
-  return new TransitionLog(pathsOf(server).transitionLog);
+export function transitionsOf(server: Server): Promise<TransitionLog> {
+  return TransitionLog.open(pathsOf(server).transitionLog);
 }
 
-export function runtimeOf(fixture: Fixture): Runtime {
-  return new Runtime(fixture.repo, fixture.serverRoot);
+export function runtimeOf(fixture: Fixture): Promise<Runtime> {
+  return Runtime.open(fixture.repo, fixture.serverRoot);
 }
 
-export function filesOf(fixture: Fixture): TaskFiles {
-  return new TaskFiles(runtimeOf(fixture));
+export async function filesOf(fixture: Fixture): Promise<TaskFiles> {
+  return new TaskFiles(await runtimeOf(fixture));
 }
 
 export function serverFor(fixture: Fixture): Promise<Server> {
@@ -86,9 +87,9 @@ export async function editTaskFile(
   edit: (meta: TaskMeta) => void,
 ): Promise<void> {
   const filePath = activeTaskPath(fixture.tasksDir, id);
-  const { meta, body } = readTaskFile(filePath);
+  const { meta, body } = await readTaskFile(filePath);
   edit(meta);
-  await fs.promises.writeFile(filePath, rebuildDocument(meta, body));
+  await fs.writeFile(filePath, rebuildDocument(meta, body));
 }
 
 export async function settle(server: Server, ticks = 6): Promise<void> {
@@ -100,7 +101,7 @@ export async function settle(server: Server, ticks = 6): Promise<void> {
 
 export async function until(
   server: Server,
-  done: () => boolean | Promise<boolean>,
+  done: () => Awaitable<boolean>,
   ticks = 12,
 ): Promise<void> {
   for (let i = 0; i < ticks && !(await done()); i++) {
@@ -109,14 +110,14 @@ export async function until(
   }
   if (!(await done())) {
     throw new Error(
-      `the server never reached the expected state in ${ticks} ticks\n${await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")}`,
+      `the server never reached the expected state in ${ticks} ticks\n${await fs.readFile(pathsOf(server).serverLog, "utf-8")}`,
     );
   }
 }
 
 export async function ticksUntil(
   server: Server,
-  done: () => boolean | Promise<boolean>,
+  done: () => Awaitable<boolean>,
   ticks = 40,
 ): Promise<void> {
   for (let i = 0; i < ticks && !(await done()); i++) {
@@ -125,7 +126,7 @@ export async function ticksUntil(
   }
   if (!(await done())) {
     throw new Error(
-      `the server never reached the expected state in ${ticks} ticks\n${await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")}`,
+      `the server never reached the expected state in ${ticks} ticks\n${await fs.readFile(pathsOf(server).serverLog, "utf-8")}`,
     );
   }
 }
@@ -136,9 +137,9 @@ export async function walkTo(
   state: string,
   ticks = 12,
 ): Promise<void> {
-  server.setSchedulerEnabled(true);
+  await server.setSchedulerEnabled(true);
   await reaches(server, id, state, ticks);
-  server.setSchedulerEnabled(false);
+  await server.setSchedulerEnabled(false);
 }
 
 export async function settleTo(
@@ -153,19 +154,19 @@ export async function settleTo(
 
 export async function settleUntil(
   server: Server,
-  done: () => boolean,
+  done: () => Awaitable<boolean>,
   ticks = 12,
 ): Promise<void> {
-  server.setSchedulerEnabled(true);
+  await server.setSchedulerEnabled(true);
   await until(server, done, ticks);
-  server.setSchedulerEnabled(false);
+  await server.setSchedulerEnabled(false);
   await server.drain();
 }
 
 export async function runOnce(server: Server): Promise<void> {
-  server.setSchedulerEnabled(true);
+  await server.setSchedulerEnabled(true);
   await server.tick();
-  server.setSchedulerEnabled(false);
+  await server.setSchedulerEnabled(false);
   await server.drain();
 }
 
@@ -186,18 +187,18 @@ export async function reaches(
   state: string,
   ticks = 12,
 ): Promise<void> {
-  await until(server, () => stateOf(server, id) === state, ticks);
+  await until(server, async () => (await stateOf(server, id)) === state, ticks);
 }
 
 export async function compactionsOf(
   server: Server,
   id: string,
 ): Promise<number | null> {
-  if (!(await fs.promises.exists(pathsOf(server).slotsView))) {
+  if (!(await fs.exists(pathsOf(server).slotsView))) {
     return null;
   }
   const view = JSON.parse(
-    await fs.promises.readFile(pathsOf(server).slotsView, "utf-8"),
+    await fs.readFile(pathsOf(server).slotsView, "utf-8"),
   );
   const busy = view.slots.find(
     (agent: { task_id: string | null }) => agent.task_id === id,
@@ -205,31 +206,38 @@ export async function compactionsOf(
   return busy?.compactions ?? null;
 }
 
-export function taskOf(server: Server, id: string): TaskMeta {
-  return present(server.tasks().get(id), `task "${id}" in the graph`);
+export async function taskOf(server: Server, id: string): Promise<TaskMeta> {
+  const tasks = await server.tasks();
+  return present(tasks.get(id), `task "${id}" in the graph`);
 }
 
-export function workspaceOf(server: Server, id: string): Workspace {
-  return requireWorkspace(taskOf(server, id));
+export async function workspaceOf(
+  server: Server,
+  id: string,
+): Promise<Workspace> {
+  return requireWorkspace(await taskOf(server, id));
 }
 
-export function sessionOf(server: Server, id: string): string {
-  const task = taskOf(server, id);
+export async function sessionOf(server: Server, id: string): Promise<string> {
+  const task = await taskOf(server, id);
   return requireSession(task, requireWorkspace(task));
 }
 
-export function stateOf(server: Server, id: string): string {
-  return server.tasks().get(id)?.state ?? "CLOSED";
+export async function stateOf(server: Server, id: string): Promise<string> {
+  return (await server.tasks()).get(id)?.state ?? "CLOSED";
 }
 
-export function holderOf(server: Server, id: string): string | null {
-  return server.tasks().get(id)?.claimed_by ?? null;
+export async function holderOf(
+  server: Server,
+  id: string,
+): Promise<string | null> {
+  return (await server.tasks()).get(id)?.claimed_by ?? null;
 }
 
 export async function claimed(server: Server, id: string): Promise<void> {
-  await until(server, () => holderOf(server, id) !== null);
+  await until(server, async () => (await holderOf(server, id)) !== null);
 }
 
 export async function unclaimed(server: Server, id: string): Promise<void> {
-  await until(server, () => holderOf(server, id) === null);
+  await until(server, async () => (await holderOf(server, id)) === null);
 }

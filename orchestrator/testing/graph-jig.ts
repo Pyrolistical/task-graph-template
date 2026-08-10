@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { tempDir } from "./temp-dirs.ts";
 import { present } from "./present.ts";
@@ -35,12 +35,12 @@ export const TASK_STORE_PATH = path.join(
 
 export async function makeTasksDir(): Promise<string> {
   const dir = await tempDir("task-graph-");
-  await fs.promises.writeFile(nextTaskIdPath(dir), "1\n");
+  await fs.writeFile(nextTaskIdPath(dir), "1\n");
   return dir;
 }
 
 export async function bodyOf(filePath: string): Promise<string> {
-  return splitDocument(await fs.promises.readFile(filePath, "utf-8")).body;
+  return splitDocument(await fs.readFile(filePath, "utf-8")).body;
 }
 
 export async function deadPid(): Promise<number> {
@@ -74,15 +74,15 @@ export async function writeTask(
   overrides: Partial<TaskMeta>,
 ): Promise<string> {
   const meta = baseMeta(overrides);
-  await fs.promises.writeFile(
+  await fs.writeFile(
     activeTaskPath(dir, meta.id),
     rebuildDocument(meta, "\n\n# Goal\n"),
   );
 
-  const highest = (await fs.promises.readdir(dir))
+  const highest = (await fs.readdir(dir))
     .filter((f) => /^\d{6}\.md$/.test(f))
     .reduce((max, f) => Math.max(max, Number.parseInt(f, 10)), 0);
-  await fs.promises.writeFile(nextTaskIdPath(dir), `${highest + 1}\n`);
+  await fs.writeFile(nextTaskIdPath(dir), `${highest + 1}\n`);
 
   return meta.id;
 }
@@ -93,9 +93,9 @@ export async function editTask(
   edit: (meta: TaskMeta) => void,
 ): Promise<void> {
   const filePath = activeTaskPath(dir, id);
-  const { meta, body } = readTaskFile(filePath);
+  const { meta, body } = await readTaskFile(filePath);
   edit(meta);
-  await fs.promises.writeFile(filePath, rebuildDocument(meta, body));
+  await fs.writeFile(filePath, rebuildDocument(meta, body));
 }
 
 export async function addDeps(
@@ -132,31 +132,31 @@ export function run(
   id: string,
   name: TransitionName,
   ...extra: string[]
-) {
+): Promise<TransitionResult> {
   return applyTransition(dir, id, name, shape(name, extra));
 }
 
-export function claim(
+export async function claim(
   dir: string,
   id: string,
   slotName: string,
   pid: number = process.pid,
   workspace: Omit<ClaimArgs, "slotName" | "pid"> = {},
-): void {
-  takeClaim(dir, id, { slotName, pid, ...workspace });
+): Promise<void> {
+  await takeClaim(dir, id, { slotName, pid, ...workspace });
 }
 
-export function unclaim(dir: string, id: string): void {
-  clearClaim(dir, id);
+export async function unclaim(dir: string, id: string): Promise<void> {
+  await clearClaim(dir, id);
 }
 
-export function metaOf(dir: string, id: string) {
-  return readTaskFile(activeTaskPath(dir, id)).meta;
+export async function metaOf(dir: string, id: string): Promise<TaskMeta> {
+  return (await readTaskFile(activeTaskPath(dir, id))).meta;
 }
 
-export function enteredAt(dir: string, id: string): number {
+export async function enteredAt(dir: string, id: string): Promise<number> {
   return Date.parse(
-    present(metaOf(dir, id).state_entered, `a state_entered stamp on `),
+    present((await metaOf(dir, id)).state_entered, `a state_entered stamp on `),
   );
 }
 
@@ -164,94 +164,105 @@ export async function newTask(
   title = "a task",
 ): Promise<{ dir: string; id: string }> {
   const dir = await makeTasksDir();
-  return { dir, id: createTask(dir, ORCHESTRATOR_DIR, title).id };
+  return {
+    dir,
+    id: (await createTask(dir, ORCHESTRATOR_DIR, title)).id,
+  };
 }
 
 export async function newTasks(
   count: number,
 ): Promise<{ dir: string; ids: string[] }> {
   const dir = await makeTasksDir();
-  const ids = Array.from(
-    { length: count },
-    (_, i) => createTask(dir, ORCHESTRATOR_DIR, `task ${i}`).id,
+  const created = await Promise.all(
+    Array.from({ length: count }, (_, i) =>
+      createTask(dir, ORCHESTRATOR_DIR, `task ${i}`),
+    ),
   );
-  return { dir, ids };
+  return { dir, ids: created.map((task) => task.id) };
 }
 
 export async function toDesign(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await newTask();
-  run(dir, id, "submit");
+  await run(dir, id, "submit");
   return { dir, id };
 }
 
 export async function toDesignReview(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toDesign();
-  claim(dir, id, "designer");
-  run(dir, id, "submit");
-  claim(dir, id, "design-reviewer");
+  await claim(dir, id, "designer");
+  await run(dir, id, "submit");
+  await claim(dir, id, "design-reviewer");
   return { dir, id };
 }
 
 export async function toPlan(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toDesignReview();
-  run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
+  await run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
 export async function toPlanReview(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toPlan();
-  claim(dir, id, "planner");
-  run(dir, id, "submit");
-  claim(dir, id, "plan-reviewer");
+  await claim(dir, id, "planner");
+  await run(dir, id, "submit");
+  await claim(dir, id, "plan-reviewer");
   return { dir, id };
 }
 
 export async function planThrough(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toPlanReview();
-  run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
+  await run(dir, id, "submit", await bodyOf(activeTaskPath(dir, id)));
   return { dir, id };
 }
 
 export async function toWorking(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await planThrough();
-  claim(dir, id, "agent-1");
+  await claim(dir, id, "agent-1");
   return { dir, id };
 }
 
 export async function toChecking(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toWorking();
-  run(dir, id, "submit");
+  await run(dir, id, "submit");
   return { dir, id };
 }
 
 export async function toAgentReview(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toChecking();
-  run(dir, id, "pass");
-  claim(dir, id, "reviewer");
+  await run(dir, id, "pass");
+  await claim(dir, id, "reviewer");
   return { dir, id };
 }
 
 export async function toManagerReview(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await toAgentReview();
-  run(dir, id, "submit");
+  await run(dir, id, "submit");
   return { dir, id };
 }
 
-export function closeTask(dir: string, id: string) {
-  run(dir, id, "submit");
-  claim(dir, id, "d");
-  run(dir, id, "submit");
-  claim(dir, id, "dr");
-  run(dir, id, "submit");
-  claim(dir, id, "p");
-  run(dir, id, "submit");
-  claim(dir, id, "pr");
-  run(dir, id, "submit");
-  claim(dir, id, "a");
-  run(dir, id, "submit");
-  run(dir, id, "pass");
-  claim(dir, id, "r");
-  run(dir, id, "submit");
+export async function toClosing(dir: string, id: string): Promise<void> {
+  await run(dir, id, "submit");
+  await claim(dir, id, "d");
+  await run(dir, id, "submit");
+  await claim(dir, id, "dr");
+  await run(dir, id, "submit");
+  await claim(dir, id, "p");
+  await run(dir, id, "submit");
+  await claim(dir, id, "pr");
+  await run(dir, id, "submit");
+  await claim(dir, id, "a");
+  await run(dir, id, "submit");
+  await run(dir, id, "pass");
+  await claim(dir, id, "r");
+  await run(dir, id, "submit");
+}
+
+export async function closeTask(
+  dir: string,
+  id: string,
+): Promise<TransitionResult> {
+  await toClosing(dir, id);
   return run(dir, id, "submit");
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Awaitable } from "../../domain/awaitable.ts";
 import { ALL_STATES } from "../../domain/state-machine.ts";
 
 export const TransitionEntry = z.strictObject({
@@ -15,6 +16,9 @@ export type TransitionEntry = z.infer<typeof TransitionEntry>;
 
 export interface Transitions {
   readonly cursor: number;
-  read(): TransitionEntry[];
-  append(entry: Omit<TransitionEntry, "seq" | "at">): void;
+  read(): Awaitable<TransitionEntry[]>;
+  append(
+    entry: Omit<TransitionEntry, "seq" | "at">,
+  ): Awaitable<TransitionEntry>;
+  close(): Awaitable<void>;
 }

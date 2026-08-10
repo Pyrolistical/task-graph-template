@@ -1,3 +1,4 @@
+import type { Awaitable } from "../../domain/awaitable.ts";
 import type { Role } from "../../domain/state-machine.ts";
 import type { TaskId } from "../../domain/task.ts";
 
@@ -20,9 +21,10 @@ export interface Paths {
   sessionDir(id: TaskId, role: Role): string;
   checkLog(id: TaskId, index: number): string;
   messagesDir(id: TaskId): string;
-  prepare(id: TaskId): void;
-  discard(id: TaskId): void;
-  log(line: string): void;
-  takeLock(): void;
-  clearLock(): void;
+  prepare(id: TaskId): Awaitable<void>;
+  discard(id: TaskId): Awaitable<void>;
+  log(line: string): Awaitable<void>;
+  takeLock(): Awaitable<void>;
+  clearLock(): Awaitable<void>;
+  close(): Awaitable<void>;
 }

@@ -138,6 +138,11 @@ export const SlotsView = z.looseObject({
   slots: z.array(SlotRow),
 });
 
+export const SlotsViewOfAnyServer = z.looseObject({
+  agents_file: z.string(),
+  slots: z.array(SlotRow.strip()),
+});
+
 export function idleRow(slot: Slot, enabled = true): SlotRow {
   return {
     name: slot.name,

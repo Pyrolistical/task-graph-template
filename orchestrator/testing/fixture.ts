@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { z } from "zod";
 import path from "node:path";
 import {
@@ -6,7 +6,6 @@ import {
   nextTaskIdPath,
   readTaskFile,
   requireTaskFile,
-  withLock,
   writeTaskFile,
 } from "../adapters/task-store.ts";
 import { applyTransition } from "../adapters/task-documents.ts";
@@ -367,10 +366,10 @@ for await (const chunk of Bun.stdin.stream()) {
 
 async function messagesIn(sessionDir: string, name: string): Promise<string[]> {
   const filePath = path.join(sessionDir, name);
-  if (!(await fs.promises.exists(filePath))) {
+  if (!(await fs.exists(filePath))) {
     return [];
   }
-  return (await fs.promises.readFile(filePath, "utf-8"))
+  return (await fs.readFile(filePath, "utf-8"))
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => z.string().parse(JSON.parse(line)));
@@ -405,20 +404,20 @@ export async function makeFixture(slots = 1): Promise<Fixture> {
   const orchestratorDir = await tempDir("orchestrator-src-");
   const overridesDir = path.join(repo, "orchestrator");
 
-  await fs.promises.mkdir(tasksDir);
-  await fs.promises.writeFile(nextTaskIdPath(tasksDir), "1\n");
+  await fs.mkdir(tasksDir);
+  await fs.writeFile(nextTaskIdPath(tasksDir), "1\n");
 
-  await fs.promises.cp(
+  await fs.cp(
     path.join(REPO_ROOT, "orchestrator", "prompts"),
     path.join(orchestratorDir, "prompts"),
     { recursive: true },
   );
-  await fs.promises.copyFile(
+  await fs.copyFile(
     path.join(REPO_ROOT, "orchestrator", "template.md"),
     path.join(orchestratorDir, "template.md"),
   );
   const agentsPath = path.join(repo, "agents.json");
-  await fs.promises.writeFile(
+  await fs.writeFile(
     agentsPath,
     JSON.stringify({
       agents: [{ type: "pi", provider: "fake", model: "fake", slots }],
@@ -426,17 +425,17 @@ export async function makeFixture(slots = 1): Promise<Fixture> {
   );
 
   const piCommand = path.join(repo, "fake-pi.ts");
-  await fs.promises.writeFile(piCommand, FAKE_PI, { mode: 0o755 });
+  await fs.writeFile(piCommand, FAKE_PI, { mode: 0o755 });
 
   const planPath = path.join(repo, "plan.json");
-  await fs.promises.writeFile(planPath, "{}");
+  await fs.writeFile(planPath, "{}");
   process.env.FAKE_PI_PLAN = planPath;
 
-  gitOrThrow(repo, ["init", "-q", "-b", "master"]);
-  gitOrThrow(repo, ["config", "user.email", "orchestrator@example.com"]);
-  gitOrThrow(repo, ["config", "user.name", "orchestrator"]);
-  gitOrThrow(repo, ["add", "-A"]);
-  gitOrThrow(repo, ["commit", "-q", "-m", "initial"]);
+  await gitOrThrow(repo, ["init", "-q", "-b", "master"]);
+  await gitOrThrow(repo, ["config", "user.email", "orchestrator@example.com"]);
+  await gitOrThrow(repo, ["config", "user.name", "orchestrator"]);
+  await gitOrThrow(repo, ["add", "-A"]);
+  await gitOrThrow(repo, ["commit", "-q", "-m", "initial"]);
 
   return {
     repo,
@@ -456,71 +455,87 @@ export async function writeOverride(
   contents: string,
 ): Promise<void> {
   const file = path.join(fixture.overridesDir, name);
-  await fs.promises.mkdir(path.dirname(file), { recursive: true });
-  await fs.promises.writeFile(file, contents, "utf-8");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, contents, "utf-8");
 }
 
 export async function setPlan(fixture: Fixture, plan: Plan): Promise<void> {
-  await fs.promises.writeFile(fixture.planPath, JSON.stringify(plan));
+  await fs.writeFile(fixture.planPath, JSON.stringify(plan));
   process.env.FAKE_PI_PLAN = fixture.planPath;
 }
 
-export function unplannedTask(
+export async function unplannedTask(
   fixture: Fixture,
   title: string,
   checks: string[] = [],
-): string {
-  const { id } = createTask(fixture.tasksDir, fixture.orchestratorDir, title);
+): Promise<string> {
+  const { id } = await createTask(
+    fixture.tasksDir,
+    fixture.orchestratorDir,
+    title,
+  );
   if (checks.length > 0) {
-    withLock(fixture.tasksDir, () => {
-      const filePath = requireTaskFile(id, fixture.tasksDir);
-      const { meta, body } = readTaskFile(filePath);
-      meta.checks = [...checks];
-      writeTaskFile(filePath, meta, body);
-    });
+    const filePath = await requireTaskFile(id, fixture.tasksDir);
+    const { meta, body } = await readTaskFile(filePath);
+    meta.checks = [...checks];
+    await writeTaskFile(filePath, meta, body);
   }
-  applyTransition(fixture.tasksDir, id, "submit", {});
-  gitOrThrow(fixture.repo, ["add", "-A"]);
-  gitOrThrow(fixture.repo, ["commit", "-q", "-m", `add task ${id}`]);
+  await applyTransition(fixture.tasksDir, id, "submit", {});
+  await gitOrThrow(fixture.repo, ["add", "-A"]);
+  await gitOrThrow(fixture.repo, ["commit", "-q", "-m", `add task ${id}`]);
   return id;
 }
 
-export function readyTask(
+export async function readyTask(
   fixture: Fixture,
   title: string,
   checks: string[] = [],
-): string {
-  const id = unplannedTask(fixture, title, checks);
-  takeClaim(fixture.tasksDir, id, { slotName: "designer", pid: process.pid });
-  applyTransition(fixture.tasksDir, id, "submit", {});
-  takeClaim(fixture.tasksDir, id, {
+): Promise<string> {
+  const id = await unplannedTask(fixture, title, checks);
+  await takeClaim(fixture.tasksDir, id, {
+    slotName: "designer",
+    pid: process.pid,
+  });
+  await applyTransition(fixture.tasksDir, id, "submit", {});
+  await takeClaim(fixture.tasksDir, id, {
     slotName: "design-reviewer",
     pid: process.pid,
   });
-  const designed = readTaskFile(requireTaskFile(id, fixture.tasksDir)).body;
-  applyTransition(fixture.tasksDir, id, "submit", { body: designed });
-  takeClaim(fixture.tasksDir, id, { slotName: "planner", pid: process.pid });
-  applyTransition(fixture.tasksDir, id, "submit", {});
-  takeClaim(fixture.tasksDir, id, {
+  const designed = (
+    await readTaskFile(await requireTaskFile(id, fixture.tasksDir))
+  ).body;
+  await applyTransition(fixture.tasksDir, id, "submit", { body: designed });
+  await takeClaim(fixture.tasksDir, id, {
+    slotName: "planner",
+    pid: process.pid,
+  });
+  await applyTransition(fixture.tasksDir, id, "submit", {});
+  await takeClaim(fixture.tasksDir, id, {
     slotName: "plan-reviewer",
     pid: process.pid,
   });
-  const body = readTaskFile(requireTaskFile(id, fixture.tasksDir)).body;
-  applyTransition(fixture.tasksDir, id, "submit", { body });
+  const body = (await readTaskFile(await requireTaskFile(id, fixture.tasksDir)))
+    .body;
+  await applyTransition(fixture.tasksDir, id, "submit", { body });
   return id;
 }
 
-export function setBody(fixture: Fixture, id: string, body: string): void {
-  withLock(fixture.tasksDir, () => {
-    const filePath = requireTaskFile(id, fixture.tasksDir);
-    const { meta } = readTaskFile(filePath);
-    writeTaskFile(filePath, meta, body);
-  });
+export async function setBody(
+  fixture: Fixture,
+  id: string,
+  body: string,
+): Promise<void> {
+  const filePath = await requireTaskFile(id, fixture.tasksDir);
+  const { meta } = await readTaskFile(filePath);
+  await writeTaskFile(filePath, meta, body);
 }
 
-export function commitGraph(fixture: Fixture, message: string): void {
-  gitOrThrow(fixture.repo, ["add", "-A"]);
-  if (git(fixture.repo, ["diff", "--cached", "--quiet"]).code !== 0) {
-    gitOrThrow(fixture.repo, ["commit", "-q", "-m", message]);
+export async function commitGraph(
+  fixture: Fixture,
+  message: string,
+): Promise<void> {
+  await gitOrThrow(fixture.repo, ["add", "-A"]);
+  if ((await git(fixture.repo, ["diff", "--cached", "--quiet"])).code !== 0) {
+    await gitOrThrow(fixture.repo, ["commit", "-q", "-m", message]);
   }
 }

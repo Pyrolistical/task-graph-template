@@ -1,4 +1,5 @@
 import type { Slot } from "../../domain/agents.ts";
+import type { Awaitable } from "../../domain/awaitable.ts";
 import type { StreamState } from "../../domain/protocol.ts";
 import type { Sample } from "../../domain/rates.ts";
 import type { ResultCall } from "../../domain/results.ts";
@@ -16,26 +17,26 @@ export interface AgentSpec {
 export interface AgentProcess {
   readonly pid: number;
   readonly alive: boolean;
-  readonly stream: { readonly state: StreamState; settled(): Promise<void> };
-  newSession(): Promise<string>;
-  switchSession(path: string): Promise<void>;
-  prompt(message: string): Promise<void>;
-  steer(message: string): Promise<void>;
+  readonly stream: { readonly state: StreamState; settled(): Awaitable<void> };
+  newSession(): Awaitable<string>;
+  switchSession(path: string): Awaitable<void>;
+  prompt(message: string): Awaitable<void>;
+  steer(message: string): Awaitable<void>;
   abort(): void;
   abortBash(): void;
-  stats(): Promise<{ tokens: number | null; contextPercent: number | null }>;
-  lastAssistantText(): Promise<string | null>;
+  stats(): Awaitable<{ tokens: number | null; contextPercent: number | null }>;
+  lastAssistantText(): Awaitable<string | null>;
   close(): void;
   kill(): void;
 }
 
 export interface Agents {
   slots(): Slot[];
-  hasSession(path: string): boolean;
+  hasSession(path: string): Awaitable<boolean>;
   spawn(
     spec: AgentSpec,
     onUsage: (sample: Sample) => void,
     onCompaction: () => void,
     onResult: (call: ResultCall) => void,
-  ): AgentProcess;
+  ): Awaitable<AgentProcess>;
 }

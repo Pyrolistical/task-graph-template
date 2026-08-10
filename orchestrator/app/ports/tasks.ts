@@ -1,3 +1,4 @@
+import type { Awaitable } from "../../domain/awaitable.ts";
 import type {
   TransitionArgs,
   TransitionName,
@@ -19,16 +20,21 @@ export interface CreatedTask {
 }
 
 export interface Tasks {
-  list(): { tasks: Map<TaskId, TaskMeta>; problems: Map<string, string> };
-  read(id: TaskId): TaskMeta | null;
-  body(id: TaskId): string;
-  create(title: string): CreatedTask;
-  writeBody(id: TaskId, body: string): string;
+  list(): Awaitable<{
+    tasks: Map<TaskId, TaskMeta>;
+    problems: Map<string, string>;
+  }>;
+  read(id: TaskId): Awaitable<TaskMeta | null>;
+  body(id: TaskId): Awaitable<string>;
+  create(title: string): Awaitable<CreatedTask>;
+  writeBody(id: TaskId, body: string): Awaitable<string>;
   apply(
     id: TaskId,
     name: TransitionName,
     args: TransitionArgs,
-  ): TransitionResult;
-  claim(id: TaskId, args: ClaimArgs): void;
-  releaseClaim(id: TaskId): void;
+  ): Awaitable<TransitionResult>;
+  claim(id: TaskId, args: ClaimArgs): Awaitable<void>;
+  releaseClaim(id: TaskId): Awaitable<void>;
+  takeLock(): Awaitable<void>;
+  clearLock(): Awaitable<void>;
 }

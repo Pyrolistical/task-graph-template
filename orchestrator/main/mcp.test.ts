@@ -31,18 +31,22 @@ import {
   serverFor,
 } from "../testing/server-jig.ts";
 import type { Server } from "../app/server.ts";
-import { boot, build } from "../../mcp.ts";
+import { type Ticking, boot, build, startTicking } from "../../mcp.ts";
 import { at } from "../testing/present.ts";
 
 const openClients: Client[] = [];
 const openServers: Server[] = [];
+const openTickers: Ticking[] = [];
 
 afterEach(async () => {
   for (const client of openClients.splice(0)) {
     await client.close().catch(() => {});
   }
+  for (const ticking of openTickers.splice(0)) {
+    await ticking.stop();
+  }
   for (const server of openServers.splice(0)) {
-    server.shutdown();
+    await server.shutdown();
   }
 });
 
@@ -65,6 +69,7 @@ async function connect(fixture: Fixture) {
   });
   if (started.server !== null) {
     openServers.push(started.server);
+    openTickers.push(startTicking(started.server));
   }
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -198,19 +203,19 @@ describe("Feature: the tool surface the manager works through", () => {
       // Given a task that has reached the manager for review
       const fixture = await makeFixture();
       const id = await readyTask(fixture, "A task");
-      takeClaim(fixture.tasksDir, id, {
+      await takeClaim(fixture.tasksDir, id, {
         slotName: "manager",
         pid: process.pid,
       });
-      applyTransition(fixture.tasksDir, id, "submit", {
-        body: readTaskFile(activeTaskPath(fixture.tasksDir, id)).body,
+      await applyTransition(fixture.tasksDir, id, "submit", {
+        body: (await readTaskFile(activeTaskPath(fixture.tasksDir, id))).body,
       });
-      applyTransition(fixture.tasksDir, id, "pass", {});
-      takeClaim(fixture.tasksDir, id, {
+      await applyTransition(fixture.tasksDir, id, "pass", {});
+      await takeClaim(fixture.tasksDir, id, {
         slotName: "manager",
         pid: process.pid,
       });
-      applyTransition(fixture.tasksDir, id, "submit", {});
+      await applyTransition(fixture.tasksDir, id, "submit", {});
       const client = await connect(fixture);
 
       // When the manager sends it back with a finding
@@ -221,12 +226,13 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Then the task goes back to work with the finding written into its body
       expect(textOf(result)).toContain('"WORK"');
-      const body = readTaskFile(activeTaskPath(fixture.tasksDir, id)).body;
+      const body = (await readTaskFile(activeTaskPath(fixture.tasksDir, id)))
+        .body;
       expect(body).toContain("# Review findings");
       expect(body).toContain("- the null case is untested");
 
       // Then the finding is also left where the next dispatch will read it
-      const found = filesOf(fixture).findings(id);
+      const found = await (await filesOf(fixture)).findings(id);
       expect(found).toEqual(["the null case is untested"]);
 
       await client.close();
@@ -479,7 +485,8 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(textOf(refused)).toContain("dependency cycle");
       expect(textOf(refused)).toContain(second.id);
       expect(
-        readTaskFile(activeTaskPath(fixture.tasksDir, first.id)).meta.state,
+        (await readTaskFile(activeTaskPath(fixture.tasksDir, first.id))).meta
+          .state,
       ).toBe("NEW");
 
       await client.close();
@@ -507,9 +514,9 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // Given work that has been reviewed and is waiting on the manager
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
-      server.shutdown();
+      await server.shutdown();
       const client = await connect(fixture);
 
       // When the manager accepts it

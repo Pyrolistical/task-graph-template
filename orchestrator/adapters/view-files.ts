@@ -1,32 +1,33 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import type { Publisher, ViewName, Views } from "../app/ports/publisher.ts";
-import { type SlotRow, SlotsView } from "../domain/agents.ts";
+import { type SlotRow, SlotsViewOfAnyServer } from "../domain/agents.ts";
 import { parse } from "../domain/schema.ts";
-import { Runtime, viewJson, writeAtomic } from "./runtime.ts";
+import { exists, writeAtomic } from "./files.ts";
+import { Runtime, viewJson } from "./runtime.ts";
 
 export class ViewFiles implements Publisher {
   constructor(private readonly runtime: Runtime) {}
 
-  publish(views: Views): void {
-    writeAtomic(
+  async publish(views: Views): Promise<void> {
+    await writeAtomic(
       this.runtime.slotsView,
       viewJson(views.seq, "slots", views.slots, {
         agents_file: views.agentsFile,
       }),
     );
-    writeAtomic(
+    await writeAtomic(
       this.runtime.checksView,
       viewJson(views.seq, "checks", views.checks),
     );
-    writeAtomic(
+    await writeAtomic(
       this.runtime.tasksView,
       viewJson(views.seq, "tasks", views.tasks),
     );
-    writeAtomic(
+    await writeAtomic(
       this.runtime.inboxView,
       viewJson(views.seq, "inbox", views.inbox),
     );
-    writeAtomic(
+    await writeAtomic(
       this.runtime.queueView,
       viewJson(views.seq, "queue", views.queue, {
         scheduling: views.scheduling,
@@ -34,25 +35,25 @@ export class ViewFiles implements Publisher {
     );
   }
 
-  read(name: ViewName): string {
+  async read(name: ViewName): Promise<string> {
     const filePath = this.runtime.view(name);
-    return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "{}";
+    return (await exists(filePath)) ? fs.readFile(filePath, "utf-8") : "{}";
   }
 
-  lastSlots(): SlotRow[] | null {
-    if (!fs.existsSync(this.runtime.slotsView)) {
+  async lastSlots(): Promise<SlotRow[] | null> {
+    if (!(await exists(this.runtime.slotsView))) {
       return null;
     }
     const view = parse(
-      SlotsView,
-      JSON.parse(fs.readFileSync(this.runtime.slotsView, "utf-8")),
+      SlotsViewOfAnyServer,
+      JSON.parse(await fs.readFile(this.runtime.slotsView, "utf-8")),
       "slots view",
       this.runtime.slotsView,
     );
     return view.slots;
   }
 
-  log(line: string): void {
-    this.runtime.log(line);
+  log(line: string): Promise<void> {
+    return this.runtime.log(line);
   }
 }

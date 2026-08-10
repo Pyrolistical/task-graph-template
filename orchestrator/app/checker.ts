@@ -1,18 +1,29 @@
 import type { Checks } from "./ports/checks.ts";
 import type { Messages } from "./ports/messages.ts";
 import type { Prompts } from "./ports/prompts.ts";
+import type { Publisher } from "./ports/publisher.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
+import { messageOf, uncaught } from "../domain/errors.ts";
+import { Queue } from "../domain/queue.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
+
+type CheckFailure = {
+  command: string;
+  exit_code: string;
+  output: string;
+};
 
 export class Checker {
   private readonly pending = new Map<TaskId, Promise<void>>();
 
   constructor(
     private readonly graph: TaskGraph,
+    private readonly edits: Queue,
     private readonly checks: Checks,
     private readonly messages: Messages,
     private readonly prompts: Prompts,
+    private readonly publisher: Publisher,
     private readonly repo: string,
   ) {}
 
@@ -23,9 +34,16 @@ export class Checker {
       }
       this.pending.set(
         id,
-        this.runAll(id).finally(() => {
-          this.pending.delete(id);
-        }),
+        this.runAll(id)
+          .catch((err: unknown) =>
+            this.publisher.log(
+              `the checks for ${id} could not run: ${messageOf(err)}`,
+            ),
+          )
+          .finally(() => {
+            this.pending.delete(id);
+          })
+          .catch(uncaught),
       );
     }
   }
@@ -39,7 +57,7 @@ export class Checker {
   }
 
   isRunning(taskId: TaskId): boolean {
-    return this.checks.isRunning(taskId);
+    return this.pending.has(taskId) || this.checks.isRunning(taskId);
   }
 
   settled(): Promise<unknown> {
@@ -56,13 +74,12 @@ export class Checker {
   }
 
   private async runAll(taskId: TaskId): Promise<void> {
-    const task = this.graph.read(taskId);
+    const task = await this.graph.read(taskId);
     if (task === null) {
       throw new Error(`task "${taskId}" vanished before its checks could run`);
     }
     const worktree = task.workspace?.worktree ?? this.repo;
-    const failures: { command: string; exit_code: string; output: string }[] =
-      [];
+    const failures: CheckFailure[] = [];
 
     for (const [index, command] of task.checks.entries()) {
       const result = await this.run(taskId, index, command, worktree);
@@ -76,14 +93,23 @@ export class Checker {
     }
 
     if (failures.length === 0) {
-      this.graph.transition(taskId, "pass", {}, "server");
+      await this.edits.submit(() =>
+        this.graph.transition(taskId, "pass", {}, "server"),
+      );
       return;
     }
-    this.messages.queue(
+    await this.edits.submit(() => this.sendBack(taskId, failures));
+  }
+
+  private async sendBack(
+    taskId: TaskId,
+    failures: CheckFailure[],
+  ): Promise<void> {
+    await this.messages.queue(
       taskId,
       "WORK",
       this.prompts.fragment("check-failed", { failures }),
     );
-    this.graph.transition(taskId, "fail", {}, "server");
+    await this.graph.transition(taskId, "fail", {}, "server");
   }
 }

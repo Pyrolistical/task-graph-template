@@ -46,25 +46,25 @@ describe("Feature: the pool of agent slots", () => {
     expect(row.state).toBe("DISABLED");
   });
 
-  test("disabling an agent takes its slots out of the free list", () => {
+  test("disabling an agent takes its slots out of the free list", async () => {
     // Given a pool with one idle slot
     const { pool } = aPool();
     expect(pool.freeSlots()).toHaveLength(1);
 
     // When the agent behind it is disabled
-    pool.setAgentEnabled("pi-fake-fake", false);
+    await pool.setAgentEnabled("pi-fake-fake", false);
 
     // Then nothing is left for the scheduler to dispatch to
     expect(pool.freeSlots()).toEqual([]);
   });
 
-  test("enabling an agent puts its slots back in the free list", () => {
+  test("enabling an agent puts its slots back in the free list", async () => {
     // Given a pool whose only agent has been disabled
     const { pool } = aPool();
-    pool.setAgentEnabled("pi-fake-fake", false);
+    await pool.setAgentEnabled("pi-fake-fake", false);
 
     // When the agent is enabled again
-    pool.setAgentEnabled("pi-fake-fake", true);
+    await pool.setAgentEnabled("pi-fake-fake", true);
 
     // Then its slot is dispatchable once more
     expect(pool.freeSlots().map((slot) => slot.name)).toEqual([
@@ -85,7 +85,7 @@ describe("Feature: the pool of agent slots", () => {
 });
 
 describe("Feature: aborting the tool call an agent is inside", () => {
-  test("a slot running a bash call has that call aborted", () => {
+  test("a slot running a bash call has that call aborted", async () => {
     // Given a slot whose agent is inside a bash tool call
     const { pool, log } = aPool();
     const runner = pool.runner("pi-fake-fake-1");
@@ -98,7 +98,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     });
 
     // When the slot is aborted
-    pool.abortSlot("pi-fake-fake-1");
+    await pool.abortSlot("pi-fake-fake-1");
 
     // Then the pool records that it killed the command the agent was running
     expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
@@ -197,7 +197,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
 });
 
 describe("Feature: releasing a slot when its work ends", () => {
-  test("finishing a runner harvests its worktree and returns the slot to idle", () => {
+  test("finishing a runner harvests its worktree and returns the slot to idle", async () => {
     // Given a slot busy on a task in its own worktree
     const { pool, harvested, workspaces } = aPool();
     workspaces.present.add("/tmp/000042/worktree");
@@ -213,7 +213,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     runner.process = aSession({ kind: "none" });
 
     // When the runner is finished with
-    pool.finish(runner);
+    await pool.finish(runner);
 
     // Then the commits in its worktree are harvested onto its branch
     expect(harvested).toEqual(["/tmp/000042/worktree"]);
@@ -240,6 +240,40 @@ describe("Feature: releasing a slot when its work ends", () => {
     ]);
 
     // Then the slot is released rather than left holding a broken run
+    expect(at(pool.rows(), 0).state).toBe("IDLE");
+  });
+
+  test("a slot is released only once its process is confirmed dead", async () => {
+    // Given a pool whose process check waits to be answered
+    const workspaces = new FakeWorkspaces();
+    const publisher = new FakePublisher();
+    let confirm: (dead: boolean) => void = () => {};
+    const pool = new Pool(
+      fakeAgents([aSlot()]),
+      workspaces,
+      publisher,
+      () =>
+        new Promise<boolean>((resolve) => {
+          confirm = resolve;
+        }),
+    );
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.taskId = "000042";
+    runner.process = aSession({ kind: "none" });
+
+    // When the work the pool is tracking fails, before the process check answers
+    pool.track(runner, Promise.reject(new Error("the provider hung up")));
+    const released = pool.settled();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    // Then the failure is still settling until the process check answers
+    expect(pool.inflight).toBe(1);
+    expect(at(pool.rows(), 0).state).toBe("BUSY");
+
+    // The process check answers, and only then does the slot go idle
+    confirm(true);
+    await released;
     expect(at(pool.rows(), 0).state).toBe("IDLE");
   });
 

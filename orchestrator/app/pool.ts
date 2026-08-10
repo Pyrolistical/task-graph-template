@@ -8,7 +8,9 @@ import {
   type Retry,
   idleRow,
 } from "../domain/agents.ts";
+import { type Awaitable, orNull } from "../domain/awaitable.ts";
 import { abortable } from "../domain/activity.ts";
+import { messageOf, uncaught } from "../domain/errors.ts";
 import { type IssueName } from "../domain/issues.ts";
 import { Rates } from "../domain/rates.ts";
 import type { ResultCall } from "../domain/results.ts";
@@ -99,7 +101,7 @@ export class Pool {
     private readonly agents: Agents,
     private readonly workspaces: Workspaces,
     private readonly publisher: Publisher,
-    private readonly alive: (pid: number) => boolean,
+    private readonly alive: (pid: number) => Awaitable<boolean>,
   ) {
     this.slots = agents.slots();
     for (const slot of this.slots) {
@@ -134,12 +136,12 @@ export class Pool {
   busyTasks(): Set<TaskId | null> {
     return new Set(
       this.runners()
-        .filter((runner) => runner.process?.alive === true)
+        .filter((runner) => runner.process !== null)
         .map((runner) => runner.taskId),
     );
   }
 
-  hasSession(path: string): boolean {
+  hasSession(path: string): Awaitable<boolean> {
     return this.agents.hasSession(path);
   }
 
@@ -147,7 +149,7 @@ export class Pool {
     return [...new Set(this.runners().map((runner) => runner.slot.agent))];
   }
 
-  setAgentEnabled(agent: string, enabled: boolean): SlotRow[] {
+  async setAgentEnabled(agent: string, enabled: boolean): Promise<SlotRow[]> {
     if (!this.agentNames().includes(agent)) {
       throw new Error(
         `no agent named "${agent}"; the pool has ${this.agentNames().join(", ")}`,
@@ -163,7 +165,7 @@ export class Pool {
     const rows = this.rows().filter((row) => row.agent === agent);
     const draining = rows.filter((row) => row.state !== "DISABLED").length;
 
-    this.publisher.log(
+    await this.publisher.log(
       enabled
         ? `agent ${agent} enabled: ${rows.length} slots dispatchable`
         : `agent ${agent} disabled: ${draining} of ${rows.length} slots still running`,
@@ -172,7 +174,7 @@ export class Pool {
     return rows;
   }
 
-  abortSlot(name: string): SlotRow {
+  async abortSlot(name: string): Promise<SlotRow> {
     const runner = this.byName.get(name);
     if (runner === undefined) {
       throw new Error(
@@ -190,7 +192,7 @@ export class Pool {
     }
 
     runner.process.abortBash();
-    this.publisher.log(`${name} aborted bash: ${activity.target}`);
+    await this.publisher.log(`${name} aborted bash: ${activity.target}`);
 
     return this.rowOf(runner);
   }
@@ -199,7 +201,7 @@ export class Pool {
     runner: Runner,
     spec: Omit<AgentSpec, "slot">,
     compacted: (runner: Runner) => Promise<void>,
-  ): AgentProcess {
+  ): Awaitable<AgentProcess> {
     return this.agents.spawn(
       { ...spec, slot: runner.slot },
       (sample) => {
@@ -228,15 +230,16 @@ export class Pool {
   track(runner: Runner, work: Promise<void>): void {
     const taskId = runner.taskId;
     const settling = work
-      .catch((err: Error) => {
-        this.publisher.log(
-          `${runner.slot.name} on ${taskId} failed: ${err.message}`,
+      .catch(async (err: unknown) => {
+        await this.publisher.log(
+          `${runner.slot.name} on ${taskId} failed: ${messageOf(err)}`,
         );
-        this.stop(runner);
+        await this.stop(runner);
       })
       .finally(() => {
         this.tracked.delete(settling);
-      });
+      })
+      .catch(uncaught);
     this.tracked.add(settling);
   }
 
@@ -248,28 +251,33 @@ export class Pool {
     return Promise.all([...this.tracked]);
   }
 
-  harvest(workspace: { branch: string; worktree: string } | null): void {
-    if (workspace === null || !this.workspaces.exists(workspace.worktree)) {
+  async harvest(
+    workspace: { branch: string; worktree: string } | null,
+  ): Promise<void> {
+    if (
+      workspace === null ||
+      !(await this.workspaces.exists(workspace.worktree))
+    ) {
       return;
     }
-    this.workspaces.harvest(workspace.worktree, workspace.branch);
+    await this.workspaces.harvest(workspace.worktree, workspace.branch);
   }
 
-  stop(runner: Runner): void {
+  async stop(runner: Runner): Promise<void> {
     const process = runner.process;
     if (process !== null) {
       process.close();
-      if (this.alive(process.pid)) {
+      if (await this.alive(process.pid)) {
         process.kill();
       }
     }
     this.release(runner.slot.name);
   }
 
-  finish(runner: Runner): void {
+  async finish(runner: Runner): Promise<void> {
     const { checkout } = runner;
-    this.stop(runner);
-    this.harvest(checkout);
+    await this.stop(runner);
+    await this.harvest(checkout);
   }
 
   release(name: string): void {
@@ -309,7 +317,7 @@ export class Pool {
         if (runner.process === null || !runner.process.alive) {
           return;
         }
-        const stats = await runner.process.stats().catch(() => null);
+        const stats = await orNull(runner.process.stats());
         if (stats === null) {
           return;
         }

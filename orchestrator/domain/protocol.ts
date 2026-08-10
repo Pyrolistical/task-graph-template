@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type Activity, toolCall, toolTarget } from "./activity.ts";
+import type { Awaitable } from "./awaitable.ts";
 import { type ResultCall, isResultTool } from "./results.ts";
 import type { Sample } from "./rates.ts";
 
@@ -252,9 +253,9 @@ export class PiStream {
     this.waiting.delete(id);
   }
 
-  settled(): Promise<void> {
+  settled(): Awaitable<void> {
     if (this.state.settled) {
-      return Promise.resolve();
+      return;
     }
     return new Promise((resolve) => {
       this.settleWaiters.push(resolve);

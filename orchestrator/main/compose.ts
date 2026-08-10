@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { Dispatcher } from "../app/dispatcher.ts";
 import { Lander } from "../app/lander.ts";
@@ -8,6 +8,7 @@ import { Checker } from "../app/checker.ts";
 import { Server, type ServerConfig } from "../app/server.ts";
 import { Settler } from "../app/settler.ts";
 import { TaskGraph } from "../app/task-graph.ts";
+import { Queue } from "../domain/queue.ts";
 import { branchName } from "../domain/workspace.ts";
 import { loadAgents } from "../adapters/agent-pool.ts";
 import { CommandFile } from "../adapters/command.ts";
@@ -24,9 +25,10 @@ import {
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
   hasLimits,
+  hasOverlay,
 } from "../adapters/sandbox.ts";
 import { SandboxedChecks } from "../adapters/sandboxed-checks.ts";
-import { isProcessAlive } from "../adapters/task-store.ts";
+import { isProcessAlive } from "../adapters/processes.ts";
 import { TaskDocuments } from "../adapters/task-documents.ts";
 import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
@@ -46,15 +48,15 @@ export interface WiringOptions {
   base?: string;
 }
 
-export function wire(options: WiringOptions): Server {
+export async function wire(options: WiringOptions): Promise<Server> {
   const repo = path.resolve(options.repo);
-  if (!git.isRepo(repo)) {
+  if (!(await git.isRepo(repo))) {
     throw new Error(`${repo} is not a git repository`);
   }
 
   const tasksDir = options.tasksDir ?? defaultTasksDir(repo);
   if (options.tasksDir === undefined) {
-    fs.cpSync(path.join(ORCHESTRATOR_DIR, "..", "tasks"), tasksDir, {
+    await fs.cp(path.join(ORCHESTRATOR_DIR, "..", "tasks"), tasksDir, {
       recursive: true,
       force: false,
     });
@@ -66,21 +68,27 @@ export function wire(options: WiringOptions): Server {
     repo,
     tasksDir,
     agentsPath: options.agentsPath ?? defaultAgentsPath(tasksDir),
-    base: options.base ?? git.defaultBranch(repo),
+    base: options.base ?? (await git.defaultBranch(repo)),
     promptDirs: {
       orchestrator: path.join(orchestratorDir, "prompts"),
       overrides: path.join(overridesDir, "prompts"),
     },
   };
 
-  const runtime = new Runtime(repo, options.serverRoot);
+  const runtime = await Runtime.open(repo, options.serverRoot);
   const piCommand = options.piCommand ?? "pi";
   const sandboxCommand = options.sandboxCommand ?? SANDBOX_COMMAND;
-  const slots = loadAgents(config.agentsPath);
+  const slots = await loadAgents(config.agentsPath);
 
-  if (!hasLimits()) {
+  if (!(await hasLimits())) {
     console.warn(
       `no cgroup limits available: ${LIMIT_COMMAND} --user --scope failed, sandboxes run without MemoryMax/TasksMax`,
+    );
+  }
+
+  if (!(await hasOverlay())) {
+    console.warn(
+      `no overlay mounts available: ${SANDBOX_COMMAND} --tmp-overlay failed, sandboxes read the paths they would have overlaid instead of writing to a copy`,
     );
   }
 
@@ -99,15 +107,17 @@ export function wire(options: WiringOptions): Server {
     sandboxCommand,
   );
 
-  const prompts = new PromptFiles(orchestratorDir, overridesDir);
+  const prompts = await PromptFiles.open(orchestratorDir, overridesDir);
 
   const files = new TaskFiles(runtime);
 
-  const transitions = new TransitionLog(runtime.transitionLog);
+  const transitions = await TransitionLog.open(runtime.transitionLog);
 
   const publisher = new ViewFiles(runtime);
 
   const commands = new CommandFile(runtime);
+
+  const edits = new Queue();
 
   const graph = new TaskGraph(
     tasks,
@@ -120,6 +130,7 @@ export function wire(options: WiringOptions): Server {
   const pool = new Pool(agents, workspaces, publisher, isProcessAlive);
   const settler = new Settler(
     graph,
+    edits,
     pool,
     files,
     files,
@@ -139,7 +150,15 @@ export function wire(options: WiringOptions): Server {
     publisher,
     config.base,
   );
-  const checker = new Checker(graph, checks, files, prompts, repo);
+  const checker = new Checker(
+    graph,
+    edits,
+    checks,
+    files,
+    prompts,
+    publisher,
+    repo,
+  );
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
   const recovery = new Recovery(
     graph,
@@ -153,6 +172,7 @@ export function wire(options: WiringOptions): Server {
 
   return new Server(
     config,
+    edits,
     graph,
     pool,
     dispatcher,

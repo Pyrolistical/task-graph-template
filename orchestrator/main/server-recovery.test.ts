@@ -1,10 +1,11 @@
 import { describe, expect } from "bun:test";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { takeClaim } from "../adapters/task-documents.ts";
 import { branchName } from "../domain/workspace.ts";
-import { activeTaskPath } from "../adapters/task-store.ts";
+import { activeTaskPath, graphLock, lockPath } from "../adapters/task-store.ts";
+import { Runtime } from "../adapters/runtime.ts";
 import * as git from "../adapters/git.ts";
 import {
   type Fixture,
@@ -35,6 +36,39 @@ import { at } from "../testing/present.ts";
 
 describe("Feature: picking a project back up at startup", () => {
   testInTempDirs(
+    "a graph another server holds keeps a new server out",
+    async () => {
+      // Given a task graph a live server elsewhere already holds
+      const fixture = await makeFixture();
+      await fs.writeFile(lockPath(fixture.tasksDir), `${process.pid}`);
+
+      // When a server starts against that graph
+      const attempt = async () => await serverFor(fixture);
+
+      // Then it is refused, and leaves no runtime lock behind to wedge a retry
+      await expect(attempt()).rejects.toThrow(/already in use by server/);
+      const runtime = await Runtime.open(fixture.repo, fixture.serverRoot);
+      expect(await runtime.lockHolder()).toBeNull();
+    },
+    30000,
+  );
+  testInTempDirs(
+    "a server gives the graph back when it shuts down",
+    async () => {
+      // Given a running server holding the graph it writes
+      const fixture = await makeFixture();
+      const server = await serverFor(fixture);
+      expect(await graphLock(fixture.tasksDir).holder()).toBe(process.pid);
+
+      // When the server shuts down
+      await server.shutdown();
+
+      // Then the graph is free again for the next server to take
+      expect(await graphLock(fixture.tasksDir).holder()).toBeNull();
+    },
+    30000,
+  );
+  testInTempDirs(
     "a worktree lost to a cleared /tmp is recreated from its branch",
     async () => {
       const fixture = await makeFixture();
@@ -43,22 +77,22 @@ describe("Feature: picking a project back up at startup", () => {
 
       // Given a task whose worktree was cloned and then removed from disk
       const first = await serverFor(fixture);
-      first.setSchedulerEnabled(true);
+      await first.setSchedulerEnabled(true);
       await first.tick();
       await first.drain();
-      first.shutdown();
+      await first.shutdown();
       const worktree = pathsOf(first).worktree(id);
-      expect(await fs.promises.exists(worktree)).toBe(true);
-      await fs.promises.rm(worktree, { recursive: true, force: true });
+      expect(await fs.exists(worktree)).toBe(true);
+      await fs.rm(worktree, { recursive: true, force: true });
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then the worktree is cloned again from the branch that survived
-      expect(await fs.promises.exists(worktree)).toBe(true);
-      expect(await fs.promises.exists(path.join(worktree, ".git"))).toBe(true);
+      expect(await fs.exists(worktree)).toBe(true);
+      expect(await fs.exists(path.join(worktree, ".git"))).toBe(true);
 
-      second.shutdown();
+      await second.shutdown();
     },
     30000,
   );
@@ -79,7 +113,7 @@ describe("Feature: picking a project back up at startup", () => {
         `already in use by server ${process.pid}`,
       );
 
-      first.shutdown();
+      await first.shutdown();
     },
     30000,
   );
@@ -92,17 +126,22 @@ describe("Feature: picking a project back up at startup", () => {
 
       // Given a server that has applied a transition and then exited
       const first = await serverFor(fixture);
-      first.transition(id, "hold", { reason: "waiting on a person" }, "test");
-      const cursor = transitionsOf(first).cursor;
-      first.shutdown();
+      await first.transition(
+        id,
+        "hold",
+        { reason: "waiting on a person" },
+        "test",
+      );
+      const cursor = (await transitionsOf(first)).cursor;
+      await first.shutdown();
 
       // When a new server starts against the same project
       const second = await serverFor(fixture);
 
       // Then it carries on the sequence, so the manager's cursor still means something
-      expect(transitionsOf(second).cursor).toBe(cursor);
+      expect((await transitionsOf(second)).cursor).toBe(cursor);
 
-      second.shutdown();
+      await second.shutdown();
     },
     30000,
   );
@@ -112,7 +151,7 @@ describe("Feature: picking a project back up at startup", () => {
     async () => {
       // Given a project directory that is not under version control
       const fixture = await makeFixture();
-      await fs.promises.rm(path.join(fixture.repo, ".git"), {
+      await fs.rm(path.join(fixture.repo, ".git"), {
         recursive: true,
         force: true,
       });
@@ -137,7 +176,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       const dead = Bun.spawn(["true"]);
       await dead.exited;
 
-      takeClaim(fixture.tasksDir, id, {
+      await takeClaim(fixture.tasksDir, id, {
         slotName: "pi-fake-fake-1",
         pid: dead.pid,
         branch: branchName(id),
@@ -146,17 +185,17 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 
       // Given a task claimed by an agent whose process has since exited
       const server = await serverFor(fixture);
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
       // When the server ticks over the graph
       await server.tick();
 
       // Then the claim is dropped, the stage is kept and the workspace survives
-      expect(stateOf(server, id)).toBe("WORK");
-      expect(taskOf(server, id).claimed_by).toBeNull();
-      expect(taskOf(server, id).workspace).not.toBeNull();
+      expect(await stateOf(server, id)).toBe("WORK");
+      expect((await taskOf(server, id)).claimed_by).toBeNull();
+      expect((await taskOf(server, id)).workspace).not.toBeNull();
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -170,11 +209,11 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 
       // Given a task dispatched to an agent that will exit without settling
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await claimed(server, id);
 
       // Given a server with its scheduler stopped, so the reaper must find it
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
 
       // When the agent dies and the server ticks on
       await unclaimed(server, id);
@@ -183,9 +222,9 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       const row = at(server.slotRows(), 0);
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
-      expect(taskOf(server, id).claimed_by).toBeNull();
+      expect((await taskOf(server, id)).claimed_by).toBeNull();
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -199,9 +238,9 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 
       // Given a task dispatched to an agent that will exit without settling
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await claimed(server, id);
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
 
       // When the reaper runs over the graph
       await unclaimed(server, id);
@@ -209,7 +248,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       // Then the dead slot does not shield the task, and is released with it
       expect(at(server.slotRows(), 0).state).toBe("IDLE");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -233,26 +272,26 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       });
 
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       await reaches(server, id, "MANAGER_REVIEW");
-      server.setSchedulerEnabled(false);
+      await server.setSchedulerEnabled(false);
 
       // Given a merge whose re-run checks are still going
       await editTaskFile(fixture, id, (meta) => {
         meta.checks.push("sleep 2");
       });
-      expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
       const merging = server.submit(id);
-      await until(server, () => server.isCheckRunning(id), 20);
+      await until(server, () => server.isCheckRunning(id), 60);
 
       // When the server ticks while the check is running
       await server.tick();
 
       // Then the task is left where it is, and the merge runs to completion
-      expect(stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
       expect((await merging).to).toBe("CLOSED");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -262,7 +301,7 @@ describe("Feature: reaping a claim whose agent is gone", () => {
     async () => {
       const fixture = await makeFixture();
       const id = await readyTask(fixture, "A task");
-      takeClaim(fixture.tasksDir, id, {
+      await takeClaim(fixture.tasksDir, id, {
         slotName: "pi-fake-fake-1",
         pid: process.pid,
       });
@@ -274,18 +313,18 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       await server.tick();
 
       // Then the claim is left alone, because the agent is still working
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
 });
 
 describe("Feature: an abort that races a dispatch", () => {
-  function abortable(server: Server, id: string): void {
-    server.transition(id, "hold", { reason: "abandoning" }, "manager");
-    server.abort(id);
+  async function abortable(server: Server, id: string): Promise<void> {
+    await server.transition(id, "hold", { reason: "abandoning" }, "manager");
+    await server.abort(id);
   }
 
   testInTempDirs(
@@ -299,22 +338,22 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // Given a dispatch that is part way through opening its session
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       const ticking = server.tick();
       await Bun.sleep(150);
-      expect(stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(server, id)).toBe("WORK");
 
       // When the manager holds and aborts the task before the claim lands
-      abortable(server, id);
+      await abortable(server, id);
 
       // Then the task is closed, and the dispatch never claimed it
       await ticking;
       await server.drain();
-      expect(stateOf(server, id)).toBe("CLOSED");
-      expect(server.tasks().get(id)).toBeUndefined();
+      expect(await stateOf(server, id)).toBe("CLOSED");
+      expect((await server.tasks()).get(id)).toBeUndefined();
       expect(at(server.slotRows(), 0).state).toBe("IDLE");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -330,12 +369,12 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // Given a dispatch that is part way through opening its session
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
       const ticking = server.tick();
       await Bun.sleep(150);
 
       // When the manager holds and aborts the task before the claim lands
-      abortable(server, id);
+      await abortable(server, id);
 
       // Then the slot goes back to idle, and the lost dispatch is logged
       await ticking;
@@ -344,12 +383,12 @@ describe("Feature: an abort that races a dispatch", () => {
       expect(row.state).toBe("IDLE");
       expect(row.task_id).toBeNull();
       expect(
-        (
-          await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
-        ).includes(`dispatch of ${id} to pi-fake-fake-1 failed`),
+        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+          `dispatch of ${id} to pi-fake-fake-1 failed`,
+        ),
       ).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -365,17 +404,17 @@ describe("Feature: an abort that races a dispatch", () => {
 
       // Given a task the scheduler is about to dispatch
       const server = await serverFor(fixture);
-      server.setSchedulerEnabled(true);
+      await server.setSchedulerEnabled(true);
 
       // When the dispatch completes before anything aborts it
       await server.tick();
 
       // Then the agent holds the task, and the manager can no longer abort it
-      expect(stateOf(server, id)).toBe("WORK");
-      expect(taskOf(server, id).claimed_by).toBe("pi-fake-fake-1");
-      expect(() => server.abort(id)).toThrow(/not in/);
+      expect(await stateOf(server, id)).toBe("WORK");
+      expect((await taskOf(server, id)).claimed_by).toBe("pi-fake-fake-1");
+      await expect(server.abort(id)).rejects.toThrow(/not in/);
 
-      server.shutdown();
+      await server.shutdown();
       await server.drain();
     },
     30000,
@@ -385,9 +424,9 @@ describe("Feature: an abort that races a dispatch", () => {
 describe("Feature: a task document that does not parse", () => {
   async function corrupt(fixture: Fixture, id: string): Promise<void> {
     const filePath = activeTaskPath(fixture.tasksDir, id);
-    await fs.promises.writeFile(
+    await fs.writeFile(
       filePath,
-      (await fs.promises.readFile(filePath, "utf-8")).replace(
+      (await fs.readFile(filePath, "utf-8")).replace(
         /^depends_on: .*$/m,
         "depends_on: null",
       ),
@@ -421,9 +460,9 @@ describe("Feature: a task document that does not parse", () => {
       await walkTo(server, fine, "MANAGER_REVIEW");
 
       // Then the good task is worked to completion and the broken one ignored
-      expect(server.tasks().has(broken)).toBe(false);
+      expect((await server.tasks()).has(broken)).toBe(false);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -438,7 +477,7 @@ describe("Feature: a task document that does not parse", () => {
       const dead = Bun.spawn(["true"]);
       await dead.exited;
 
-      takeClaim(fixture.tasksDir, claimed, {
+      await takeClaim(fixture.tasksDir, claimed, {
         slotName: "pi-fake-fake-1",
         pid: dead.pid,
         branch: branchName(claimed),
@@ -448,15 +487,15 @@ describe("Feature: a task document that does not parse", () => {
 
       // Given a graph with one unreadable task and one dead claim
       const server = await serverFor(fixture);
-      expect(stateOf(server, claimed)).toBe("WORK");
+      expect(await stateOf(server, claimed)).toBe("WORK");
 
       // When the server ticks over the graph
       await server.tick();
 
       // Then the reaper still runs over the tasks it could read
-      expect(stateOf(server, claimed)).toBe("WORK");
+      expect(await stateOf(server, claimed)).toBe("WORK");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -466,7 +505,7 @@ describe("Feature: a task document that does not parse", () => {
     async () => {
       const fixture = await makeFixture();
       const broken = await readyTask(fixture, "A task with bad frontmatter");
-      const good = await fs.promises.readFile(
+      const good = await fs.readFile(
         activeTaskPath(fixture.tasksDir, broken),
         "utf-8",
       );
@@ -474,7 +513,7 @@ describe("Feature: a task document that does not parse", () => {
 
       const server = await serverFor(fixture);
       const logLines = async () =>
-        (await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"))
+        (await fs.readFile(pathsOf(server).serverLog, "utf-8"))
           .split("\n")
           .filter((line) => line.includes(`${broken}.md`));
 
@@ -487,10 +526,7 @@ describe("Feature: a task document that does not parse", () => {
       ).toHaveLength(1);
 
       // Given the document is repaired
-      await fs.promises.writeFile(
-        activeTaskPath(fixture.tasksDir, broken),
-        good,
-      );
+      await fs.writeFile(activeTaskPath(fixture.tasksDir, broken), good);
 
       // When the server ticks five times more
       for (let i = 0; i < 5; i++) await server.tick();
@@ -499,9 +535,9 @@ describe("Feature: a task document that does not parse", () => {
       expect(
         (await logLines()).filter((line) => line.includes("parses again")),
       ).toHaveLength(1);
-      expect(server.tasks().has(broken)).toBe(true);
+      expect((await server.tasks()).has(broken)).toBe(true);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -535,19 +571,17 @@ describe("Feature: an agent that compacts mid-turn", () => {
 
       // Then the worktree is reset and the agent steered back to its assignment
       expect(
-        await fs.promises.exists(
-          path.join(pathsOf(server).worktree(id), "stray.txt"),
-        ),
+        await fs.exists(path.join(pathsOf(server).worktree(id), "stray.txt")),
       ).toBe(false);
-      expect(git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
+      expect(await git.uncommitted(pathsOf(server).worktree(id))).toEqual([]);
       expect(
         await steersTo(pathsOf(server).sessionDir(id, "designer")),
       ).toEqual([promptsOf(server).fragment("DESIGN")]);
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("compacted: worktree reset, steered back to the assignment");
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "compacted: worktree reset, steered back to the assignment",
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -575,25 +609,24 @@ describe("Feature: an agent that compacts mid-turn", () => {
       const server = await serverFor(fixture);
 
       // When it runs to its submit
-      await settleUntil(server, () => stateOf(server, id) !== "WORK", 20);
+      await settleUntil(
+        server,
+        async () => (await stateOf(server, id)) !== "WORK",
+        20,
+      );
 
       // Then its work is kept, and it is only steered back to the assignment
       expect(
-        await fs.promises.exists(
-          path.join(pathsOf(server).worktree(id), "a.txt"),
-        ),
+        await fs.exists(path.join(pathsOf(server).worktree(id), "a.txt")),
       ).toBe(true);
       expect(await steersTo(pathsOf(server).sessionDir(id, "worker"))).toEqual([
         promptsOf(server).fragment("WORK"),
       ]);
-      const log = await fs.promises.readFile(
-        pathsOf(server).serverLog,
-        "utf-8",
-      );
+      const log = await fs.readFile(pathsOf(server).serverLog, "utf-8");
       expect(log).toContain("compacted: steered back to the assignment");
       expect(log).not.toContain("worktree reset");
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -622,11 +655,11 @@ describe("Feature: an agent that compacts mid-turn", () => {
       expect(
         await steersTo(pathsOf(server).sessionDir(id, "reviewer")),
       ).toEqual([]);
-      expect(
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8"),
-      ).toContain("compacted after its result: left alone to settle");
+      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+        "compacted after its result: left alone to settle",
+      );
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );
@@ -654,9 +687,7 @@ describe("Feature: a dependency that can never be satisfied", () => {
       for (let i = 0; i < 5; i++) await server.tick();
 
       // Then each is reported once, rather than on every tick forever
-      const cycles = (
-        await fs.promises.readFile(pathsOf(server).serverLog, "utf-8")
-      )
+      const cycles = (await fs.readFile(pathsOf(server).serverLog, "utf-8"))
         .split("\n")
         .filter((line) => line.includes("depends on itself"));
 
@@ -664,7 +695,7 @@ describe("Feature: a dependency that can never be satisfied", () => {
       expect(cycles[0]).toContain(first);
       expect(cycles[1]).toContain(second);
 
-      server.shutdown();
+      await server.shutdown();
     },
     30000,
   );

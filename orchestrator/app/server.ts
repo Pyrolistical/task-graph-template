@@ -13,6 +13,8 @@ import { Recovery } from "./recovery.ts";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Command } from "../domain/command.ts";
+import { Latch } from "../domain/latch.ts";
+import { Queue } from "../domain/queue.ts";
 import type { SlotRow } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import type {
@@ -34,11 +36,11 @@ export interface ServerConfig {
 export class Server implements Manager {
   private watcher: { close(): void } | null = null;
   private scheduling = false;
-  private dispatching = false;
   private failure: string | null = null;
 
   constructor(
     readonly config: ServerConfig,
+    private readonly queue: Queue,
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
     private readonly dispatcher: Dispatcher,
@@ -56,8 +58,16 @@ export class Server implements Manager {
     return this.checker.isRunning(taskId);
   }
 
-  view(name: ViewName): string {
-    return this.publisher.read(name);
+  get pending(): Latch {
+    return this.queue.pending;
+  }
+
+  enqueue<T>(work: () => Promise<T>): Promise<T> {
+    return this.queue.submit(work);
+  }
+
+  async view(name: ViewName): Promise<string> {
+    return await this.publisher.read(name);
   }
 
   pathReport(): PathReport {
@@ -82,28 +92,34 @@ export class Server implements Manager {
   }
 
   async start(): Promise<Server> {
-    this.paths.takeLock();
-    this.publisher.log(
-      `starting against ${this.config.repo} (base ${this.config.base})`,
-    );
-    for (const filePath of this.prompts.cachedFiles()) {
-      this.publisher.log(`cached ${filePath}`);
-    }
-    this.recovery.reclone();
-    this.recovery.reattach();
-    this.listen();
-    this.graph.rememberMostRecent();
+    await this.paths.takeLock();
+    try {
+      await this.graph.takeLock();
+      await this.publisher.log(
+        `starting against ${this.config.repo} (base ${this.config.base})`,
+      );
+      for (const filePath of this.prompts.cachedFiles()) {
+        await this.publisher.log(`cached ${filePath}`);
+      }
+      await this.recovery.reclone();
+      await this.recovery.reattach();
+      await this.listen();
+      await this.graph.rememberMostRecent();
 
-    await this.writeViews();
-    return this;
+      await this.writeViews();
+      return this;
+    } catch (err) {
+      await this.release();
+      throw err;
+    }
   }
 
-  tasks(): Map<TaskId, TaskMeta> {
+  tasks(): Promise<Map<TaskId, TaskMeta>> {
     return this.graph.list();
   }
 
-  claim(taskId: TaskId, args: ClaimArgs): void {
-    this.graph.claim(taskId, args);
+  async claim(taskId: TaskId, args: ClaimArgs): Promise<void> {
+    await this.graph.claim(taskId, args);
   }
 
   transition(
@@ -111,17 +127,21 @@ export class Server implements Manager {
     name: TransitionName,
     args: TransitionArgs,
     by: string,
-  ): TransitionResult {
+  ): Promise<TransitionResult> {
     return this.graph.transition(taskId, name, args, by);
   }
 
-  feedback(taskId: TaskId, findings: string[], by: string): TransitionResult {
+  feedback(
+    taskId: TaskId,
+    findings: string[],
+    by: string,
+  ): Promise<TransitionResult> {
     return this.graph.feedback(taskId, findings, by);
   }
 
-  createTask(title: string): CreatedTask {
-    const created = this.graph.create(title);
-    this.transitions.append({
+  async createTask(title: string): Promise<CreatedTask> {
+    const created = await this.graph.create(title);
+    await this.transitions.append({
       task_id: created.id,
       transition: "create",
       from: "NEW",
@@ -131,12 +151,12 @@ export class Server implements Manager {
     return created;
   }
 
-  writeBody(taskId: TaskId, body: string): string {
-    return this.graph.writeBody(taskId, body);
+  async writeBody(taskId: TaskId, body: string): Promise<string> {
+    return await this.graph.writeBody(taskId, body);
   }
 
-  submit(taskId: TaskId): Promise<TransitionResult> {
-    const tasks = this.tasks();
+  async submit(taskId: TaskId): Promise<TransitionResult> {
+    const tasks = await this.tasks();
     if (tasks.get(taskId)?.state === "MANAGER_REVIEW") {
       return this.lander.merge(taskId);
     }
@@ -145,25 +165,25 @@ export class Server implements Manager {
         `task "${taskId}" is part of a dependency cycle through ${tasks.get(taskId)?.depends_on.join(", ")}; it could never unblock`,
       );
     }
-    return Promise.resolve(this.transition(taskId, "submit", {}, "manager"));
+    return this.transition(taskId, "submit", {}, "manager");
   }
 
-  hold(taskId: TaskId, reason: string): TransitionResult {
+  hold(taskId: TaskId, reason: string): Promise<TransitionResult> {
     return this.transition(taskId, "hold", { reason }, "manager");
   }
 
-  resume(taskId: TaskId): TransitionResult {
+  resume(taskId: TaskId): Promise<TransitionResult> {
     return this.transition(taskId, "resume", {}, "manager");
   }
 
-  abort(taskId: TaskId): TransitionResult {
+  abort(taskId: TaskId): Promise<TransitionResult> {
     return this.lander.abort(taskId);
   }
 
-  reloadPrompts(): string[] {
-    const paths = this.prompts.reload();
+  async reloadPrompts(): Promise<string[]> {
+    const paths = await this.prompts.reload();
     for (const filePath of paths) {
-      this.publisher.log(`cached ${filePath}`);
+      await this.publisher.log(`cached ${filePath}`);
     }
     return paths;
   }
@@ -172,30 +192,30 @@ export class Server implements Manager {
     return this.failure;
   }
 
-  fail(message: string): void {
+  async fail(message: string): Promise<void> {
     this.failure = message;
-    this.publisher.log(message);
+    await this.publisher.log(message);
   }
 
   get schedulerEnabled(): boolean {
     return this.scheduling;
   }
 
-  setSchedulerEnabled(enabled: boolean): void {
+  async setSchedulerEnabled(enabled: boolean): Promise<void> {
     if (enabled && this.pool.slots.length === 0) {
       throw new Error(
         `no agents to dispatch to; add one to ${this.config.agentsPath}`,
       );
     }
     this.scheduling = enabled;
-    this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
+    await this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
   }
 
-  setAgentEnabled(agent: string, enabled: boolean): SlotRow[] {
+  setAgentEnabled(agent: string, enabled: boolean): Promise<SlotRow[]> {
     return this.pool.setAgentEnabled(agent, enabled);
   }
 
-  abortSlot(name: string): SlotRow {
+  abortSlot(name: string): Promise<SlotRow> {
     return this.pool.abortSlot(name);
   }
 
@@ -208,33 +228,37 @@ export class Server implements Manager {
   }
 
   async tick(): Promise<void> {
-    await this.checker.settled();
-    const snapshot = this.graph.snapshot();
-    this.recovery.reap(snapshot.tasks);
+    await this.queue.drain();
+    const snapshot = await this.graph.snapshot();
+    await this.recovery.reap(snapshot.tasks);
     this.checker.start(snapshot.tasks);
-    if (this.scheduling && !this.dispatching) {
-      this.dispatching = true;
-      try {
-        await this.dispatcher.run(snapshot);
-      } finally {
-        this.dispatching = false;
-      }
+    if (this.scheduling) {
+      await this.dispatcher.run(snapshot);
     }
     await this.writeViews();
   }
 
   async drain(): Promise<void> {
-    while (this.pool.inflight > 0 || this.checker.inflight > 0) {
-      await Promise.all([this.pool.settled(), this.checker.settled()]);
+    for (;;) {
+      await this.queue.drain();
+      if (this.pool.inflight === 0 && this.checker.inflight === 0) {
+        return;
+      }
+      const done: AbortController = new AbortController();
+      await Promise.race([
+        Promise.all([this.pool.settled(), this.checker.settled()]),
+        this.queue.pending.wait(done.signal),
+      ]);
+      done.abort();
     }
   }
 
   async writeViews(): Promise<void> {
     await this.pool.readStats();
 
-    const snapshot = this.graph.snapshot();
+    const snapshot = await this.graph.snapshot();
 
-    this.publisher.publish({
+    await this.publisher.publish({
       seq: this.transitions.cursor,
       agentsFile: this.config.agentsPath,
       slots: this.pool.rows(),
@@ -243,53 +267,73 @@ export class Server implements Manager {
       inbox: inbox(snapshot.tasks, snapshot.blocking),
       queue: candidates(
         snapshot.tasks,
-        this.dispatcher.resumable(snapshot.tasks),
+        await this.dispatcher.resumable(snapshot.tasks),
         snapshot.blocking,
       ),
       scheduling: this.scheduling,
     });
   }
 
-  private listen(): void {
-    const stale = this.commands.take();
+  private async listen(): Promise<void> {
+    const stale = await this.commands.take();
     if (stale !== null) {
-      this.applyCommand(stale);
+      await this.applyCommand(stale);
     }
-    this.watcher = this.commands.watch((command) => {
-      this.applyCommand(command);
-    });
-  }
-
-  private applyCommand(command: Command): void {
-    this.publisher.log(`console: ${JSON.stringify(command)}`);
-    try {
-      if (command.command === "scheduler") {
-        this.setSchedulerEnabled(command.enabled);
-      } else if (command.command === "slot_abort") {
-        this.abortSlot(command.slot);
-      } else {
-        this.setAgentEnabled(command.agent, command.enabled);
-      }
-    } catch (err) {
-      this.publisher.log(`console command refused: ${messageOf(err)}`);
-      return;
-    }
-    void this.writeViews().catch((err: Error) => {
-      this.fail(`writing the views failed: ${err.message}`);
-    });
-  }
-
-  detach(): void {
-    this.watcher?.close();
-    this.paths.clearLock();
-    this.publisher.log(
-      "manager exited; agents left running, views left on disk",
+    this.watcher = this.commands.watch(
+      (command) => this.enqueue(() => this.applyCommand(command)),
+      (err) => this.fail(`the console channel failed: ${messageOf(err)}`),
     );
   }
 
-  shutdown(): void {
-    this.watcher?.close();
-    this.paths.clearLock();
+  private async applyCommand(command: Command): Promise<void> {
+    await this.publisher.log(`console: ${JSON.stringify(command)}`);
+    try {
+      if (command.command === "scheduler") {
+        await this.setSchedulerEnabled(command.enabled);
+      } else if (command.command === "slot_abort") {
+        await this.abortSlot(command.slot);
+      } else {
+        await this.setAgentEnabled(command.agent, command.enabled);
+      }
+    } catch (err) {
+      await this.publisher.log(`console command refused: ${messageOf(err)}`);
+      return;
+    }
+    try {
+      await this.writeViews();
+    } catch (err) {
+      await this.fail(`writing the views failed: ${messageOf(err)}`);
+    }
+  }
+
+  async detach(): Promise<void> {
+    this.stopTaking();
+    await this.release();
+    await this.publisher.log(
+      "manager exited; agents left running, views left on disk",
+    );
+    await this.close();
+  }
+
+  async shutdown(): Promise<void> {
+    this.stopTaking();
+    await this.release();
     this.pool.shutdown();
+    await this.close();
+  }
+
+  private stopTaking(): void {
+    this.watcher?.close();
+    this.queue.close();
+  }
+
+  private async release(): Promise<void> {
+    await this.paths.clearLock();
+    await this.graph.clearLock();
+  }
+
+  private async close(): Promise<void> {
+    await this.transitions.close();
+    await this.paths.close();
   }
 }

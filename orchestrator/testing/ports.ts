@@ -1,5 +1,6 @@
 import type { AgentProcess, Agents } from "../app/ports/agents.ts";
 import type { Assignments } from "../app/ports/assignments.ts";
+import type { Checks } from "../app/ports/checks.ts";
 import type { Messages } from "../app/ports/messages.ts";
 import type { Paths } from "../app/ports/paths.ts";
 import type { Prompts } from "../app/ports/prompts.ts";
@@ -10,6 +11,7 @@ import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
 import type { Workspaces } from "../app/ports/workspaces.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
+import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
 import type {
   Role,
@@ -18,6 +20,11 @@ import type {
   TransitionResult,
 } from "../domain/state-machine.ts";
 import type { FragmentVars } from "../domain/fragment.ts";
+
+export async function yielded<T>(value: T): Promise<T> {
+  await Promise.resolve();
+  return value;
+}
 
 export function aSlot(overrides: Partial<Slot> = {}): Slot {
   return {
@@ -74,23 +81,23 @@ export function aSession(
           return new Promise<void>(() => {});
         }
         settles += 1;
-        return Promise.resolve();
+        return yielded(undefined);
       },
     },
-    newSession: () => Promise.resolve("a-session"),
-    switchSession: () => Promise.resolve(),
+    newSession: () => yielded("a-session"),
+    switchSession: () => yielded(undefined),
     prompt: (message: string) => {
       prompts.push(message);
-      return Promise.resolve();
+      return yielded(undefined);
     },
     steer: (message: string) => {
       prompts.push(message);
-      return Promise.resolve();
+      return yielded(undefined);
     },
     abort: () => {},
     abortBash: () => {},
-    stats: () => Promise.resolve({ tokens: null, contextPercent: null }),
-    lastAssistantText: () => Promise.resolve(null),
+    stats: () => yielded({ tokens: null, contextPercent: null }),
+    lastAssistantText: () => yielded(null),
     close: () => {},
     kill: () => {},
   };
@@ -101,24 +108,28 @@ export class FakePublisher implements Publisher {
   rows: SlotRow[] | null = null;
   published: Views | null = null;
 
-  publish(views: Views): void {
+  publish(views: Views): Promise<void> {
     this.published = views;
+    return yielded(undefined);
   }
 
-  read(name: ViewName): string {
+  read(name: ViewName): Promise<string> {
     const views = this.published;
     if (views === null) {
-      return "{}";
+      return yielded("{}");
     }
-    return `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, null, 2)}\n`;
+    return yielded(
+      `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, null, 2)}\n`,
+    );
   }
 
-  lastSlots(): SlotRow[] | null {
-    return this.rows;
+  lastSlots(): Promise<SlotRow[] | null> {
+    return yielded(this.rows);
   }
 
-  log(line: string): void {
+  log(line: string): Promise<void> {
     this.lines.push(line);
+    return yielded(undefined);
   }
 }
 
@@ -128,27 +139,30 @@ export class FakeTasks implements Tasks {
 
   constructor(private readonly tasks: Map<TaskId, TaskMeta>) {}
 
-  list(): { tasks: Map<TaskId, TaskMeta>; problems: Map<string, string> } {
-    return { tasks: this.tasks, problems: new Map() };
+  list(): Promise<{
+    tasks: Map<TaskId, TaskMeta>;
+    problems: Map<string, string>;
+  }> {
+    return yielded({ tasks: this.tasks, problems: new Map<string, string>() });
   }
 
-  read(id: TaskId): TaskMeta | null {
-    return this.tasks.get(id) ?? null;
+  read(id: TaskId): Promise<TaskMeta | null> {
+    return yielded(this.tasks.get(id) ?? null);
   }
 
-  body(id: TaskId): string {
-    return this.bodies.get(id) ?? "the goal\n";
+  body(id: TaskId): Promise<string> {
+    return yielded(this.bodies.get(id) ?? "the goal\n");
   }
 
-  create(title: string): CreatedTask {
+  create(title: string): Promise<CreatedTask> {
     const id = formatId(this.tasks.size + 1);
     this.tasks.set(id, { ...aTask(), id, title, state: "NEW" });
-    return { id, filePath: `/tasks/${id}.md` };
+    return yielded({ id, filePath: `/tasks/${id}.md` });
   }
 
-  writeBody(id: TaskId, body: string): string {
+  writeBody(id: TaskId, body: string): Promise<string> {
     this.bodies.set(id, body);
-    return `/tasks/${id}.md`;
+    return yielded(`/tasks/${id}.md`);
   }
 
   readonly applied: { id: TaskId; name: string; args: TransitionArgs }[] = [];
@@ -157,26 +171,38 @@ export class FakeTasks implements Tasks {
     id: TaskId,
     name: TransitionName,
     args: TransitionArgs,
-  ): TransitionResult {
+  ): Promise<TransitionResult> {
     this.applied.push({ id, name, args });
-    return {
+    const result: TransitionResult = {
       taskId: id,
       from: "WORK",
       to: "HELD_WORK",
       unblocked: [],
       dependentsUpdated: [],
     };
+    return yielded(result);
   }
 
-  claim(): void {}
+  claim(): Promise<void> {
+    return yielded(undefined);
+  }
 
-  releaseClaim(id: TaskId): void {
+  takeLock(): Promise<void> {
+    return yielded(undefined);
+  }
+
+  clearLock(): Promise<void> {
+    return yielded(undefined);
+  }
+
+  releaseClaim(id: TaskId): Promise<void> {
     this.released.push(id);
     const task = this.tasks.get(id);
     if (task !== undefined) {
       task.claimed_by = null;
       task.claimed_pid = null;
     }
+    return yielded(undefined);
   }
 }
 
@@ -186,55 +212,71 @@ export class FakeWorkspaces implements Workspaces {
   present = new Set<string>();
   branches = new Set<string>();
 
-  create(branch: string, worktree: string): void {
+  create(branch: string, worktree: string, _base: string): Promise<void> {
     this.created.push(worktree);
     this.present.add(worktree);
+    return yielded(undefined);
   }
 
-  remove(worktree: string): void {
+  remove(worktree: string): Promise<void> {
     this.present.delete(worktree);
+    return yielded(undefined);
   }
 
-  exists(worktree: string): boolean {
-    return this.present.has(worktree);
+  exists(worktree: string): Promise<boolean> {
+    return yielded(this.present.has(worktree));
   }
 
-  branchExists(branch: string): boolean {
-    return this.branches.has(branch);
+  branchExists(branch: string): Promise<boolean> {
+    return yielded(this.branches.has(branch));
   }
 
-  deleteBranch(branch: string): void {
+  deleteBranch(branch: string): Promise<void> {
     this.branches.delete(branch);
+    return yielded(undefined);
   }
 
-  head(): string {
-    return "0000000";
+  head(_worktree: string): Promise<string> {
+    return yielded("0000000");
   }
 
-  resetTo(): void {}
-
-  status(): { dirty: string[]; commits: number } {
-    return { dirty: [], commits: 0 };
+  resetTo(_worktree: string, _commit: string): Promise<void> {
+    return yielded(undefined);
   }
 
-  harvest(worktree: string): void {
+  status(
+    _worktree: string,
+    _base: string,
+  ): Promise<{ dirty: string[]; commits: number }> {
+    return yielded({ dirty: [], commits: 0 });
+  }
+
+  harvest(worktree: string, _branch: string): Promise<void> {
     this.harvested.push(worktree);
+    return yielded(undefined);
   }
 
-  syncBase(): void {}
-
-  rebase(): { code: number; stderr: string } {
-    return { code: 0, stderr: "" };
+  syncBase(_worktree: string, _base: string): Promise<void> {
+    return yielded(undefined);
   }
 
-  abortRebase(): void {}
-
-  fastForward(): { code: number; stderr: string } {
-    return { code: 0, stderr: "" };
+  rebase(
+    _worktree: string,
+    _base: string,
+  ): Promise<{ code: number; stderr: string }> {
+    return yielded({ code: 0, stderr: "" });
   }
 
-  isAncestor(): boolean {
-    return false;
+  abortRebase(_worktree: string): Promise<void> {
+    return yielded(undefined);
+  }
+
+  fastForward(_branch: string): Promise<{ code: number; stderr: string }> {
+    return yielded({ code: 0, stderr: "" });
+  }
+
+  isAncestor(_ref: string, _of: string): Promise<boolean> {
+    return yielded(false);
   }
 }
 
@@ -245,16 +287,22 @@ export class FakeTransitions implements Transitions {
     return this.entries.length;
   }
 
-  read(): TransitionEntry[] {
-    return this.entries;
+  read(): Promise<TransitionEntry[]> {
+    return yielded(this.entries);
   }
 
-  append(entry: Omit<TransitionEntry, "seq" | "at">): void {
-    this.entries.push({
+  append(entry: Omit<TransitionEntry, "seq" | "at">): Promise<TransitionEntry> {
+    const full: TransitionEntry = {
       ...entry,
       seq: this.entries.length + 1,
       at: "2026-07-29T00:00:00Z",
-    });
+    };
+    this.entries.push(full);
+    return yielded(full);
+  }
+
+  close(): Promise<void> {
+    return yielded(undefined);
   }
 }
 
@@ -263,43 +311,75 @@ export class FakeTaskFiles implements Messages, Reviews {
   private readonly found = new Map<TaskId, string[]>();
   private readonly rejections = new Map<TaskId, number>();
 
-  queue(taskId: TaskId, state: string, message: string): void {
+  queue(taskId: TaskId, state: string, message: string): Promise<void> {
     this.messages.set(`${taskId}/${state}`, message);
+    return yielded(undefined);
   }
 
-  drain(taskId: TaskId, state: string): string {
+  drain(taskId: TaskId, state: string): Promise<string> {
     const key = `${taskId}/${state}`;
     const message = this.messages.get(key) ?? "";
     this.messages.delete(key);
-    return message;
+    return yielded(message);
   }
 
-  queued(taskId: TaskId, state: string): boolean {
-    return this.messages.has(`${taskId}/${state}`);
+  queued(taskId: TaskId, state: string): Promise<boolean> {
+    return yielded(this.messages.has(`${taskId}/${state}`));
   }
 
-  findings(taskId: TaskId): string[] {
-    return this.found.get(taskId) ?? [];
+  findings(taskId: TaskId): Promise<string[]> {
+    return yielded(this.found.get(taskId) ?? []);
   }
 
-  setFindings(taskId: TaskId, findings: string[]): void {
+  setFindings(taskId: TaskId, findings: string[]): Promise<void> {
     this.found.set(taskId, findings);
+    return yielded(undefined);
   }
 
-  clearFindings(taskId: TaskId): void {
+  clearFindings(taskId: TaskId): Promise<void> {
     this.found.delete(taskId);
+    return yielded(undefined);
   }
 
-  failures(taskId: TaskId): number {
-    return this.rejections.get(taskId) ?? 0;
+  failures(taskId: TaskId): Promise<number> {
+    return yielded(this.rejections.get(taskId) ?? 0);
   }
 
-  setFailures(taskId: TaskId, failures: number): void {
+  setFailures(taskId: TaskId, failures: number): Promise<void> {
     this.rejections.set(taskId, failures);
+    return yielded(undefined);
   }
 
-  clearFailures(taskId: TaskId): void {
+  clearFailures(taskId: TaskId): Promise<void> {
     this.rejections.delete(taskId);
+    return yielded(undefined);
+  }
+}
+
+export class FakeChecks implements Checks {
+  readonly view: RunningCheck[] = [];
+  readonly ran: string[] = [];
+  codes: number[] = [];
+
+  isRunning(_taskId: TaskId): boolean {
+    return false;
+  }
+
+  run(
+    taskId: TaskId,
+    index: number,
+    command: string,
+    worktree: string,
+  ): Promise<CheckResult> {
+    this.ran.push(`${taskId}:${index}:${command} in ${worktree}`);
+    return yielded({
+      task_id: taskId,
+      index,
+      command,
+      code: this.codes[index] ?? 0,
+      log: `/runtime/${taskId}/check-${index}.log`,
+      tail: "",
+    });
   }
 }
 
@@ -307,20 +387,22 @@ export class FakeAssignments implements Assignments {
   private readonly contents = new Map<TaskId, string>();
   readonly rotated: TaskId[] = [];
 
-  read(taskId: TaskId): string {
-    return this.contents.get(taskId) ?? "";
+  read(taskId: TaskId): Promise<string> {
+    return yielded(this.contents.get(taskId) ?? "");
   }
 
-  write(taskId: TaskId, contents: string): void {
+  write(taskId: TaskId, contents: string): Promise<void> {
     this.contents.set(taskId, contents);
+    return yielded(undefined);
   }
 
-  exists(taskId: TaskId): boolean {
-    return this.contents.has(taskId);
+  exists(taskId: TaskId): Promise<boolean> {
+    return yielded(this.contents.has(taskId));
   }
 
-  rotate(taskId: TaskId): void {
+  rotate(taskId: TaskId): Promise<void> {
     this.rotated.push(taskId);
+    return yielded(undefined);
   }
 }
 
@@ -375,21 +457,32 @@ export class FakePaths implements Paths {
     return `/runtime/${id}/messages`;
   }
 
-  prepare(id: TaskId): void {
+  prepare(id: TaskId): Promise<void> {
     this.prepared.push(id);
+    return yielded(undefined);
   }
 
-  discard(id: TaskId): void {
+  discard(id: TaskId): Promise<void> {
     this.discarded.push(id);
+    return yielded(undefined);
   }
 
-  log(line: string): void {
+  log(line: string): Promise<void> {
     this.lines.push(line);
+    return yielded(undefined);
   }
 
-  takeLock(): void {}
+  takeLock(): Promise<void> {
+    return yielded(undefined);
+  }
 
-  clearLock(): void {}
+  clearLock(): Promise<void> {
+    return yielded(undefined);
+  }
+
+  close(): Promise<void> {
+    return yielded(undefined);
+  }
 }
 
 export function fakePaths(): Paths {
@@ -402,13 +495,13 @@ export function fakeAgents(
 ): Agents {
   return {
     slots: () => slots,
-    hasSession: () => true,
-    spawn: () => session(),
+    hasSession: (_path: string) => yielded(true),
+    spawn: () => yielded(session()),
   };
 }
 
 export class FakePrompts implements Prompts {
-  fragment(name: string): string {
+  fragment(name: string, _vars: FragmentVars = {}): string {
     return `prompt:${name}`;
   }
 
@@ -416,8 +509,8 @@ export class FakePrompts implements Prompts {
     return `issue:${name}:${state}:${JSON.stringify(vars)}`;
   }
 
-  reload(): string[] {
-    return [];
+  reload(): Promise<string[]> {
+    return yielded([]);
   }
 
   cachedFiles(): string[] {

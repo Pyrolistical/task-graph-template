@@ -25,7 +25,7 @@ export class SandboxedChecks implements Checks {
     return this.runner.isRunning(taskId);
   }
 
-  run(
+  async run(
     taskId: TaskId,
     index: number,
     command: string,
@@ -37,12 +37,12 @@ export class SandboxedChecks implements Checks {
       command,
       worktree,
       this.paths.checkLog(taskId, index),
-      sandbox(
+      await sandbox(
         {
           cwd: worktree,
           writable: [worktree],
           readable: [this.repo],
-          overlay: overlays(checkWrite(this.slots)),
+          overlay: await overlays(checkWrite(this.slots)),
           oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
         },
         this.sandboxCommand,

@@ -1,9 +1,10 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { z } from "zod";
 import type { ViewName } from "../app/ports/publisher.ts";
+import type { Awaitable } from "../domain/awaitable.ts";
 import { SlotsView } from "../domain/agents.ts";
 import { ChecksView } from "../domain/checks.ts";
-import { messageOf } from "../domain/errors.ts";
+import { hasCode, messageOf } from "../domain/errors.ts";
 import { TasksView } from "../domain/graph.ts";
 import { parse } from "../domain/schema.ts";
 import { type Sample, push, tokensPerSecond } from "../domain/rates.ts";
@@ -36,11 +37,13 @@ import {
 } from "../policy/console.ts";
 import { hitAt, keys, mouse, within } from "../policy/keys.ts";
 import { QueueView } from "../policy/scheduler.ts";
-import { writeCommand } from "./command.ts";
+import { type Command, writeCommand } from "./command.ts";
+import { ExclusiveLock } from "../domain/exclusive-lock.ts";
+import { Paced } from "./paced.ts";
+import { exists } from "./files.ts";
 import { Runtime } from "./runtime.ts";
 
 export const TICK_MS = 1000;
-export const FRAME_MS = 16;
 
 const ALT_SCREEN_ON = "\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h";
 const ALT_SCREEN_OFF = "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l";
@@ -56,43 +59,66 @@ export class SessionTail {
   private ino = 0;
   private pending = "";
   private decoder = new TextDecoder();
+  private readonly reading = new ExclusiveLock<fs.FileHandle | null>(null);
 
   constructor(filePath: string) {
     this.path = filePath;
   }
 
-  read(): Entry[] {
-    if (!fs.existsSync(this.path)) {
-      return this.entries;
-    }
+  close(): Promise<void> {
+    return this.reading.acquire(async ([handle, set]) => {
+      if (handle !== null) {
+        await handle.close();
+        set(null);
+      }
+    });
+  }
 
-    const stats = fs.statSync(this.path);
-    if (stats.ino !== this.ino || stats.size < this.offset) {
-      this.ino = stats.ino;
-      this.offset = 0;
-      this.pending = "";
-      this.decoder = new TextDecoder();
-      this.entries.length = 0;
-      this.samples.length = 0;
-    }
-    if (this.offset === stats.size) {
-      return this.entries;
-    }
+  read(): Promise<Entry[]> {
+    return this.reading.acquire(async ([handle, set]) => {
+      let current = handle;
+      const stats = await fs.stat(this.path).catch((err: unknown) => {
+        if (!hasCode(err, "ENOENT")) {
+          throw err;
+        }
+        return null;
+      });
 
-    const handle = fs.openSync(this.path, "r");
-    try {
+      if (current !== null && stats?.ino !== this.ino) {
+        await current.close();
+        current = null;
+        set(null);
+      }
+      if (stats === null) {
+        return this.entries;
+      }
+      if (stats.ino !== this.ino || stats.size < this.offset) {
+        this.rewind(stats.ino);
+      }
+      if (this.offset === stats.size) {
+        return this.entries;
+      }
+
+      current ??= await fs.open(this.path, "r");
+      set(current);
+
       while (this.offset < stats.size) {
         const buffer = Buffer.allocUnsafe(
           Math.min(READ_CHUNK, stats.size - this.offset),
         );
-        const read = fs.readSync(handle, buffer, 0, buffer.length, this.offset);
-        if (read === 0) {
+        const { bytesRead } = await current.read(
+          buffer,
+          0,
+          buffer.length,
+          this.offset,
+        );
+        if (bytesRead === 0) {
           break;
         }
-        this.offset += read;
+        this.offset += bytesRead;
         const text =
           this.pending +
-          this.decoder.decode(buffer.subarray(0, read), { stream: true });
+          this.decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
         const lines = text.split("\n");
         this.pending = lines.pop() ?? "";
         for (const line of lines) {
@@ -115,11 +141,17 @@ export class SessionTail {
           }
         }
       }
-    } finally {
-      fs.closeSync(handle);
-    }
+      return this.entries;
+    });
+  }
 
-    return this.entries;
+  private rewind(ino: number): void {
+    this.ino = ino;
+    this.offset = 0;
+    this.pending = "";
+    this.decoder = new TextDecoder();
+    this.entries.length = 0;
+    this.samples.length = 0;
   }
 }
 
@@ -127,7 +159,7 @@ export class Sessions {
   private readonly tails = new Map<string, SessionTail>();
   private readonly wrapped = new Map<string, PaneLines>();
 
-  entries(sessionPath: string | null): Entry[] {
+  entries(sessionPath: string | null): Awaitable<Entry[]> {
     if (sessionPath === null) {
       return [];
     }
@@ -158,11 +190,12 @@ export class Sessions {
     return tokensPerSecond(tail.samples, nowMs);
   }
 
-  keep(sessionPaths: Set<string>): void {
-    for (const sessionPath of this.tails.keys()) {
+  async keep(sessionPaths: Set<string>): Promise<void> {
+    for (const [sessionPath, tail] of [...this.tails]) {
       if (!sessionPaths.has(sessionPath)) {
         this.tails.delete(sessionPath);
         this.wrapped.delete(sessionPath);
+        await tail.close();
       }
     }
   }
@@ -178,61 +211,64 @@ export class Sessions {
   }
 }
 
-function readEnvelope<T>(
+async function readEnvelope<T>(
   schema: z.ZodType<T>,
   filePath: string,
   what: ViewName,
-): T {
+): Promise<T> {
   return parse(
     schema,
-    JSON.parse(fs.readFileSync(filePath, "utf-8")),
+    JSON.parse(await fs.readFile(filePath, "utf-8")),
     `${what} view`,
     filePath,
   );
 }
 
-export function readView(runtime: Runtime): ConsoleView {
-  if (!fs.existsSync(runtime.slotsView)) {
+export async function readView(runtime: Runtime): Promise<ConsoleView> {
+  if (!(await exists(runtime.slotsView))) {
     throw new Error(`console: no server state at ${runtime.root}`);
   }
 
-  const slots = readEnvelope(SlotsView, runtime.slotsView, "slots");
-  const queue = readEnvelope(QueueView, runtime.queueView, "queue");
+  const slots = await readEnvelope(SlotsView, runtime.slotsView, "slots");
+  const queue = await readEnvelope(QueueView, runtime.queueView, "queue");
 
   return {
     agentsFile: slots.agents_file,
     slots: slots.slots,
-    tasks: readEnvelope(TasksView, runtime.tasksView, "tasks").tasks,
-    checks: readEnvelope(ChecksView, runtime.checksView, "checks").checks,
+    tasks: (await readEnvelope(TasksView, runtime.tasksView, "tasks")).tasks,
+    checks: (await readEnvelope(ChecksView, runtime.checksView, "checks"))
+      .checks,
     queue: queue.queue,
     scheduling: queue.scheduling,
   };
 }
 
-export function frame(
+export async function frame(
   runtime: Runtime,
   sessions: Sessions,
   layout: Layout,
   collapsed = false,
-): Frame {
-  const view = readView(runtime);
+): Promise<Frame> {
+  const view = await readView(runtime);
   const all = panes(view);
   const running = all.filter((pane) => pane.slot.enabled);
   const shown = collapsed && running.length > 0 ? running : all;
-  const cells = shown.map((pane) => {
-    const session = pane.slot.session;
-    sessions.entries(session);
-    return {
-      pane,
-      rate: sessions.rate(session, layout.nowMs),
-      lines: (width: number) => sessions.lines(session, width),
-    };
-  });
+  const cells = await Promise.all(
+    shown.map(async (pane) => {
+      const session = pane.slot.session;
+      await sessions.entries(session);
+      return {
+        pane,
+        rate: sessions.rate(session, layout.nowMs),
+        lines: (width: number) => sessions.lines(session, width),
+      };
+    }),
+  );
 
-  sessions.keep(
+  await sessions.keep(
     new Set(
-      cells
-        .map(({ pane }) => pane.slot.session)
+      all
+        .map((pane) => pane.slot.session)
         .filter((session): session is string => session !== null),
     ),
   );
@@ -246,22 +282,22 @@ export function frame(
   return { ...rendered, hits: [...queue.hits, ...rendered.hits] };
 }
 
-export function frameOrError(
+export async function frameOrError(
   runtime: Runtime,
   sessions: Sessions,
   layout: Layout,
   collapsed = false,
-): Frame {
+): Promise<Frame> {
   try {
-    return frame(runtime, sessions, layout, collapsed);
+    return await frame(runtime, sessions, layout, collapsed);
   } catch (err) {
     return errorFrame(messageOf(err), layout);
   }
 }
 
-export function main(repo: string): void {
-  const runtime: Runtime = new Runtime(repo);
-  if (!fs.existsSync(runtime.slotsView)) {
+export async function main(repo: string): Promise<void> {
+  const runtime: Runtime = await Runtime.open(repo);
+  if (!(await exists(runtime.slotsView))) {
     throw new Error(`console: no server state at ${runtime.root}`);
   }
   if (!process.stdout.isTTY) {
@@ -273,28 +309,31 @@ export function main(repo: string): void {
   let hits: Hit[] = [];
   let bottoms: number[] = [];
   let news: Region | null = null;
-  let scheduled = false;
   let collapsed = false;
+  const outbox: Command[] = [];
+  const paced: Paced = new Paced(TICK_MS);
+  const schedule = () => {
+    paced.schedule();
+  };
 
   const restore = () => {
-    clearInterval(timer);
+    paced.stop();
     process.stdout.write(ALT_SCREEN_OFF);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
     }
   };
 
-  const draw = () => {
+  const draw = async () => {
     const columns = process.stdout.columns ?? 80;
     const rows = process.stdout.rows ?? 24;
     const layout: Layout = { columns, rows, nowMs: Date.now(), scroll };
-    let result: Frame;
-    try {
-      result = frameOrError(runtime, sessions, layout, collapsed);
-    } catch (err) {
-      restore();
-      throw err;
-    }
+    const result: Frame = await frameOrError(
+      runtime,
+      sessions,
+      layout,
+      collapsed,
+    );
     bottoms = result.bases;
     hits = result.hits;
     news = result.news;
@@ -303,25 +342,13 @@ export function main(repo: string): void {
     );
   };
 
-  const schedule = () => {
-    if (scheduled) {
-      return;
-    }
-    scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      draw();
-    }, FRAME_MS);
-  };
-
   const quit = () => {
     restore();
     process.exit(0);
   };
 
   process.stdout.write(ALT_SCREEN_ON);
-  const timer = setInterval(draw, TICK_MS);
-  process.stdout.on("resize", draw);
+  process.stdout.on("resize", schedule);
 
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
@@ -399,7 +426,7 @@ export function main(repo: string): void {
                 scroll.bases = null;
                 break;
               }
-              writeCommand(runtime, command);
+              outbox.push(command);
             } else {
               continue;
             }
@@ -416,5 +443,15 @@ export function main(repo: string): void {
 
   process.on("SIGINT", quit);
   process.on("SIGTERM", quit);
-  draw();
+
+  try {
+    await paced.run(async () => {
+      for (const command of outbox.splice(0)) {
+        await writeCommand(runtime, command);
+      }
+      await draw();
+    });
+  } finally {
+    restore();
+  }
 }

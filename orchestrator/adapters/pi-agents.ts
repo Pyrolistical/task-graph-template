@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import type { AgentProcess, AgentSpec, Agents } from "../app/ports/agents.ts";
 import type { Paths } from "../app/ports/paths.ts";
@@ -7,6 +6,7 @@ import type { Sample } from "../domain/rates.ts";
 import type { ResultCall } from "../domain/results.ts";
 import { STAGE_OF } from "../domain/state-machine.ts";
 import { agentWrite } from "./agent-pool.ts";
+import { exists } from "./files.ts";
 import { PiProcess } from "./pi-process.ts";
 import { AGENT_OOM_SCORE_ADJUST, overlays, sandbox } from "./sandbox.ts";
 
@@ -24,17 +24,17 @@ export class PiAgents implements Agents {
     return this.pool;
   }
 
-  hasSession(sessionPath: string): boolean {
-    return fs.existsSync(sessionPath);
+  hasSession(sessionPath: string): Promise<boolean> {
+    return exists(sessionPath);
   }
 
-  spawn(
+  async spawn(
     spec: AgentSpec,
     onUsage: (sample: Sample) => void,
     onCompaction: () => void,
     onResult: (call: ResultCall) => void,
-  ): AgentProcess {
-    return new PiProcess(
+  ): Promise<AgentProcess> {
+    return PiProcess.open(
       {
         provider: spec.slot.provider,
         model: spec.slot.model,
@@ -47,12 +47,12 @@ export class PiAgents implements Agents {
         ),
       },
       this.piCommand,
-      sandbox(
+      await sandbox(
         {
           cwd: spec.cwd,
           writable: [this.paths.taskRoot(spec.taskId)],
           readable: [this.repo, this.orchestratorDir],
-          overlay: overlays(agentWrite(spec.slot)),
+          overlay: await overlays(agentWrite(spec.slot)),
           oomScoreAdjust: AGENT_OOM_SCORE_ADJUST,
         },
         this.sandboxCommand,

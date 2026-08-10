@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { type Slot, parseAgents } from "../domain/agents.ts";
 import { DEFAULT_WRITE, PI_HOME, expandAll } from "./sandbox.ts";
 
@@ -18,6 +18,6 @@ export function parsePool(raw: unknown, source = "agents.json"): Slot[] {
   return parseAgents(raw, source, DEFAULT_WRITE);
 }
 
-export function loadAgents(filePath: string): Slot[] {
-  return parsePool(JSON.parse(fs.readFileSync(filePath, "utf-8")), filePath);
+export async function loadAgents(filePath: string): Promise<Slot[]> {
+  return parsePool(JSON.parse(await fs.readFile(filePath, "utf-8")), filePath);
 }
