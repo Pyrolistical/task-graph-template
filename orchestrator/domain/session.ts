@@ -37,7 +37,7 @@ function entry(
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function firstLine(text: string): string {
@@ -94,11 +94,11 @@ function number(value: unknown): number {
 
 function messageEntries(record: Record<string, unknown>): {
   entries: Entry[];
-  usage: Usage | null;
+  usage?: Usage;
 } {
   const message = record.message;
   if (!isObject(message)) {
-    return { entries: [], usage: null };
+    return { entries: [], usage: undefined };
   }
 
   const at = stamp(record);
@@ -108,7 +108,7 @@ function messageEntries(record: Record<string, unknown>): {
     const text = contentText(message.content);
     return {
       entries: text === "" ? [] : [entry(at, "user", text)],
-      usage: null,
+      usage: undefined,
     };
   }
 
@@ -117,7 +117,7 @@ function messageEntries(record: Record<string, unknown>): {
     if (message.isError) {
       return {
         entries: [entry(at, "error", firstLine(text), true)],
-        usage: null,
+        usage: undefined,
       };
     }
     const lines = countLines(text);
@@ -125,12 +125,12 @@ function messageEntries(record: Record<string, unknown>): {
       entries: [
         entry(at, "result", lines > 1 ? `${lines} lines` : firstLine(text)),
       ],
-      usage: null,
+      usage: undefined,
     };
   }
 
   if (role !== "assistant") {
-    return { entries: [], usage: null };
+    return { entries: [], usage: undefined };
   }
 
   const entries: Entry[] = [];
@@ -159,7 +159,7 @@ function messageEntries(record: Record<string, unknown>): {
 
   const usage = message.usage;
   if (!isObject(usage)) {
-    return { entries, usage: null };
+    return { entries, usage: undefined };
   }
 
   return {
@@ -174,47 +174,47 @@ function messageEntries(record: Record<string, unknown>): {
 
 export function recordEntries(record: Record<string, unknown>): {
   entries: Entry[];
-  usage: Usage | null;
+  usage?: Usage;
 } {
   const at = stamp(record);
   switch (record.type) {
     case "session": {
       return {
         entries: [entry(at, "session", `cwd ${record.cwd ?? "?"}`)],
-        usage: null,
+        usage: undefined,
       };
     }
     case "model_change": {
       return {
         entries: [entry(at, "model", `${record.provider}/${record.modelId}`)],
-        usage: null,
+        usage: undefined,
       };
     }
     case "thinking_level_change": {
       return {
         entries: [entry(at, "model", `thinking ${record.thinkingLevel}`)],
-        usage: null,
+        usage: undefined,
       };
     }
     case "message": {
       return messageEntries(record);
     }
     default: {
-      return { entries: [], usage: null };
+      return { entries: [], usage: undefined };
     }
   }
 }
 
 export function appendEntries(
   entries: Entry[],
-  result: { entries: Entry[]; usage: Usage | null },
+  result: { entries: Entry[]; usage?: Usage },
 ): void {
   for (const next of result.entries) {
     const last = entries[entries.length - 1];
     if (
       next.label === "model" &&
       next.text.startsWith("thinking ") &&
-      last !== undefined &&
+      last &&
       last.label === "model"
     ) {
       last.text = `${last.text} ${next.text}`;

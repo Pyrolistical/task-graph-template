@@ -196,7 +196,7 @@ describe("Feature: knowing when an agent's turn is over", () => {
       }),
     );
     // Then the turn has no outcome yet, because only the agent ends a turn
-    expect(stream.state.stopReason).toBeNull();
+    expect(stream.state.stopReason).toBeUndefined();
   });
   testInTempDirs(
     "only an assistant message that spent tokens is measured",
@@ -516,7 +516,7 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     for (let i = 0; i < LOOP_LIMIT - 1; i++) {
       stream.feed(build);
     }
-    expect(stream.state.looping).toBeNull();
+    expect(stream.state.looping).toBeUndefined();
     // When it runs the same command once more
     stream.feed(build);
     // Then the server is told which command the agent is stuck on
@@ -532,7 +532,7 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     // When the original command is repeated again, up to one short of the limit
     for (let i = 0; i < LOOP_LIMIT - 1; i++) stream.feed(bashCall("zig build"));
     // Then it is not a loop, because the count starts over at any difference
-    expect(stream.state.looping).toBeNull();
+    expect(stream.state.looping).toBeUndefined();
   });
   testInTempDirs("the same command spread across turns is not a loop", () => {
     // Given three turns, each repeating one command below the limit
@@ -541,7 +541,7 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     // When all three turns run
     spreadAcrossTurns(stream, build);
     // Then nothing is a loop, because a loop is repetition within one turn
-    expect(stream.state.looping).toBeNull();
+    expect(stream.state.looping).toBeUndefined();
   });
   testInTempDirs("a fresh prompt gives the agent a clean turn", () => {
     // Given a turn the agent has looped in
@@ -549,11 +549,11 @@ describe("Feature: noticing an agent that has stopped making progress", () => {
     for (let i = 0; i < LOOP_LIMIT; i++) {
       stream.feed(bashCall("zig build"));
     }
-    expect(stream.state.looping).not.toBeNull();
+    expect(stream.state.looping).not.toBeUndefined();
     // When the agent is prompted again
     stream.starting();
     // Then the loop is forgotten, so the nudge is judged on its own turn
-    expect(stream.state.looping).toBeNull();
+    expect(stream.state.looping).toBeUndefined();
   });
 });
 describe("Feature: how an agent is spawned", () => {

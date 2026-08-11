@@ -34,7 +34,7 @@ import {
 
 describe("Feature: the views the console and the manager read", () => {
   testInTempDirs(
-    "an idle slot is a row of nulls, never a missing row",
+    "an idle slot is a row with no task in it, never a missing row",
     async () => {
       // Given a pool of two slots the scheduler has dispatched nothing to
       const fixture = await makeFixture(2);
@@ -47,7 +47,7 @@ describe("Feature: the views the console and the manager read", () => {
       const view = await readView(await runtimeOf(fixture));
       expect(view.slots).toHaveLength(2);
       expect(at(view.slots, 0).state).toBe("IDLE");
-      expect(at(view.slots, 0).task_id).toBeNull();
+      expect(at(view.slots, 0).task_id).toBeUndefined();
       expect(at(view.slots, 1).name).toBe("pi-fake-fake-2");
 
       await server.shutdown();
@@ -375,7 +375,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       );
       expect(row.state).toBe("CLOSED");
       expect(row.title).toBe("A task");
-      expect(row.claimed_by).toBeNull();
+      expect(row.claimed_by).toBeUndefined();
 
       await server.shutdown();
     },
@@ -660,7 +660,7 @@ describe("Feature: turning an agent off and on", () => {
       await server.drain();
       await settle(server);
       expect(at(server.slotRows(), 0).state).toBe("DISABLED");
-      expect(at(server.slotRows(), 0).task_id).toBeNull();
+      expect(at(server.slotRows(), 0).task_id).toBeUndefined();
       expect(await stateOf(server, id)).toBe("WORK_REVIEW");
 
       await server.shutdown();

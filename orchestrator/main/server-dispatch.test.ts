@@ -186,7 +186,7 @@ describe("Feature: measuring how fast an agent writes", () => {
 
       // Then the agent that ran has a measured rate and an idle one has none
       expect(server.rateOf("pi-fake-fake")).toBeGreaterThan(0);
-      expect(server.rateOf("pi-other-other")).toBeNull();
+      expect(server.rateOf("pi-other-other")).toBeUndefined();
 
       await server.shutdown();
     },
@@ -1159,7 +1159,7 @@ describe("Feature: handing a task to an agent", () => {
       await server.setSchedulerEnabled(false);
 
       // Then the claim is released once the work is done
-      expect((await taskOf(server, id)).claimed_by).toBeNull();
+      expect((await taskOf(server, id)).claimed_by).toBeUndefined();
 
       await server.shutdown();
     },

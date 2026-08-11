@@ -152,17 +152,17 @@ describe("Feature: what a reviewer sends back to the worker", () => {
           WORK: [
             {
               submit: true,
-              notes: "I skipped the null case",
+              notes: "I skipped the undefined case",
               commit: { path: "a.txt", contents: "a" },
             },
             {
               submit: true,
-              notes: "I covered the null case",
+              notes: "I covered the undefined case",
               commit: { path: "b.txt", contents: "b" },
             },
           ],
           WORK_REVIEW: [
-            { submit: true, findings: ["the null case is untested"] },
+            { submit: true, findings: ["the undefined case is untested"] },
             { submit: true },
           ],
         },
@@ -327,7 +327,7 @@ describe("Feature: a review that fails twice", () => {
       expect(task.held_reason).toBe(
         "failed 2 rounds of WORK_REVIEW with:\n- finding two",
       );
-      expect(task.claimed_by).toBeNull();
+      expect(task.claimed_by).toBeUndefined();
 
       // Then only the first round's findings reached the body
       const body = await bodyOf(activeTaskPath(fixture.tasksDir, id));
@@ -607,7 +607,7 @@ describe("Feature: a submit with nothing committed behind it", () => {
       expect(task.held_reason).toBe(
         "the agent submitted work it never committed: nothing is committed on the branch",
       );
-      expect(task.claimed_by).toBeNull();
+      expect(task.claimed_by).toBeUndefined();
       expect(
         await promptsTo(pathsOf(server).sessionDir(id, "worker")),
       ).toHaveLength(5);
@@ -646,7 +646,7 @@ describe("Feature: an agent that stops short of finishing", () => {
       const task = await taskOf(server, id);
       expect(task.state).toBe("HELD_WORK");
       expect(task.held_reason).toBe("the staging database is unreachable");
-      expect(task.claimed_by).toBeNull();
+      expect(task.claimed_by).toBeUndefined();
 
       const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);

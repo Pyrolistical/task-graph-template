@@ -79,7 +79,6 @@ Five snapshots, one per question a reader asks.
       "rank": "MANAGER_REVIEW",
       "blocking": 3,
       "open_todos": 0,
-      "held_reason": null,
       "branch": "task/000042",
       "waiting_since": "2026-07-29T02:11:44.002Z"
     }
@@ -132,9 +131,9 @@ Five snapshots, one per question a reader asks.
 ```
 
 - `state` is one of `IDLE`, `DISABLED`, `SPAWNING`, `BUSY`, `WAITING`, `ABORTING`, `SETTLED` — the [agent state machine](agents.md#the-agent-state-machine)
-- an idle slot is a row with nulls, never a missing row; the pool is fixed at load and the view shows all of it
+- an idle slot is a row with no task in it, never a missing row; the pool is fixed at load and the view shows all of it
 - `enabled` is the agent's toggle, not the slot's: false on every slot of a disabled agent, including the ones still finishing a task, which read as `BUSY` with `enabled` false until released
-- `retry` is null unless the slot is backing off, when it carries the time of the next attempt and how many have been made
+- `retry` is absent unless the slot is backing off, when it carries the time of the next attempt and how many have been made
 - `tokens` and `context_percent` come from `get_session_stats`
 - what a turn cost in dollars is not tracked — it is a provider fact that says nothing about whether the work is progressing, and the two numbers that do (context left, what the agent is doing right now) are already here
 
@@ -179,7 +178,6 @@ The graph, flattened for reading.
       "depends_on": ["000007"],
       "blocking": 3,
       "claimed_by": "pi-anthropic-claude-sonnet-4-5-1",
-      "held_reason": null,
       "worktree": "/tmp/task-graph-server/-home-model-task-graph-template/000042/worktree"
     }
   ]
@@ -208,8 +206,7 @@ What the dispatcher would hand out next, in the order it would hand it out, plus
       "state": "WORK",
       "role": "worker",
       "blocking": 3,
-      "prefer_slot": "pi-anthropic-claude-sonnet-4-5-1",
-      "session": null
+      "prefer_slot": "pi-anthropic-claude-sonnet-4-5-1"
     }
   ]
 }
@@ -269,7 +266,7 @@ on every applied transition:
 
 - no agent is ever dispatched against that task again, and the branch is either in `master` or thrown away
 - so the sessions, the rotated assignments and the check logs go at that moment, rather than sitting in `/tmp` until a hundred other tasks have pushed the id off the recent list
-- the row survives — `tasks.json` still shows it as `CLOSED` out of the in-memory archive, with `worktree` null — but nothing on disk backs it
+- the row survives — `tasks.json` still shows it as `CLOSED` out of the in-memory archive, with `worktree` absent — but nothing on disk backs it
 
 The retention sweep is the second half of the same rule:
 

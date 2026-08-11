@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { keysOf } from "./lookup.ts";
-import { parse } from "./schema.ts";
+import { maybe, parse } from "./schema.ts";
 import { ALL_STATES } from "./state-machine.ts";
 
 export type TaskId = string;
@@ -30,7 +30,7 @@ const Workspace = z.strictObject({
   branch: nonEmpty,
   worktree: nonEmpty,
   slot: nonEmpty,
-  session: nonEmpty.nullable(),
+  session: maybe(nonEmpty),
 });
 
 export type Workspace = z.infer<typeof Workspace>;
@@ -44,17 +44,17 @@ const TaskFields = z.strictObject({
     error: (issue) =>
       `must be one of ${ALL_STATES.join(", ")}, got ${JSON.stringify(issue.input)}`,
   }),
-  state_entered: timestamp.nullable(),
+  state_entered: maybe(timestamp),
   depends_on: z.array(taskId),
-  claimed_by: nonEmpty.nullable(),
-  claimed_pid: z.int().nullable(),
-  held_reason: nonEmpty.nullable(),
-  workspace: Workspace.nullable(),
+  claimed_by: maybe(nonEmpty),
+  claimed_pid: maybe(z.int()),
+  held_reason: maybe(nonEmpty),
+  workspace: maybe(Workspace),
   checks: z.array(nonEmpty),
 });
 
 const Meta = TaskFields.refine(
-  (meta) => (meta.claimed_by === null) === (meta.claimed_pid === null),
+  (meta) => !meta.claimed_by === !meta.claimed_pid,
   { error: `"claimed_by" and "claimed_pid" must both be set or both be null` },
 );
 
@@ -63,14 +63,14 @@ export type TaskMeta = z.infer<typeof Meta>;
 export const FIELD_ORDER = keysOf(TaskFields.shape);
 
 export function requireWorkspace(task: TaskMeta): Workspace {
-  if (task.workspace === null) {
+  if (!task.workspace) {
     throw new Error(`task "${task.id}" has no workspace`);
   }
   return task.workspace;
 }
 
 export function requireSession(task: TaskMeta, workspace: Workspace): string {
-  if (workspace.session === null) {
+  if (!workspace.session) {
     throw new Error(`task "${task.id}" has no session to resume`);
   }
   return workspace.session;
@@ -88,7 +88,7 @@ const QUOTED_TEXT_FIELDS = new Set([
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(\n[\s\S]*)?$/;
@@ -110,7 +110,7 @@ export function parseDocument(content: string): {
 } {
   const { frontmatter, body } = splitDocument(content);
   const parsed: unknown = Bun.YAML.parse(frontmatter);
-  if (parsed === null) {
+  if (!parsed) {
     return { raw: {}, body };
   }
   if (!isPlainObject(parsed)) {
@@ -135,7 +135,7 @@ function needsQuoting(value: string): boolean {
 }
 
 function scalar(key: string, value: unknown): string {
-  if (value === null || value === undefined) return "null";
+  if (!value) return `null`;
   if (typeof value === "boolean" || typeof value === "number")
     return String(value);
   const text = String(value);
@@ -165,7 +165,7 @@ export function serializeMeta(meta: TaskMeta): string {
 
     if (key === "workspace") {
       const workspace = meta[key];
-      if (workspace === null) {
+      if (!workspace) {
         lines.push(`${key}: null`);
         continue;
       }

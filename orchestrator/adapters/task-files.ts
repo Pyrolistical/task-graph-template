@@ -30,9 +30,9 @@ export async function attemptOf(historyDir: string): Promise<number> {
 export async function rotate(
   assignmentPath: string,
   historyDir: string,
-): Promise<string | null> {
+): Promise<string | undefined> {
   if (!(await exists(assignmentPath))) {
-    return null;
+    return undefined;
   }
 
   await fs.mkdir(historyDir, { recursive: true });
@@ -95,7 +95,7 @@ export class TaskFiles implements Messages, Reviews, Assignments {
   async setFindings(taskId: TaskId, findings: string[]): Promise<void> {
     await write(
       this.runtime.findings(taskId),
-      `${JSON.stringify(findings, null, 2)}\n`,
+      `${JSON.stringify(findings, undefined, 2)}\n`,
     );
   }
 

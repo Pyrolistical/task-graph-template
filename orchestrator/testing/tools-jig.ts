@@ -138,7 +138,7 @@ interface Counts {
 
 function classify(scenario: Scenario, calls: { tool: string }[]): Verdict {
   const last = calls[calls.length - 1];
-  if (last === undefined) {
+  if (!last) {
     return "missing";
   }
   if (last.tool === scenario.tool) {
@@ -159,10 +159,9 @@ async function trial(
   provider: string,
   model: string,
 ): Promise<{ verdict: Verdict; calls: { tool: string }[] }> {
-  const root =
-    process.env.CLAUDE_JOB_DIR === undefined
-      ? os.tmpdir()
-      : path.join(process.env.CLAUDE_JOB_DIR, "tmp");
+  const root = !process.env.CLAUDE_JOB_DIR
+    ? os.tmpdir()
+    : path.join(process.env.CLAUDE_JOB_DIR, "tmp");
   const sessionDir = path.join(
     root,
     "tools-jig",
@@ -212,7 +211,7 @@ async function trial(
 async function main(): Promise<void> {
   const provider = flag("--provider");
   const model = flag("--model");
-  if (provider === undefined || model === undefined) {
+  if (!provider || !model) {
     console.error(
       "usage: bun orchestrator/tools-jig.ts --provider <provider> --model <model> [--trials N] [--states PLAN,WORK]",
     );

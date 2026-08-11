@@ -28,7 +28,7 @@ describe("Feature: reading back the slots the last server published", () => {
       const rows = await publisher.lastSlots();
 
       // Then there are none, which is how a first start is told apart
-      expect(rows).toBeNull();
+      expect(rows).toBeUndefined();
     },
   );
 
@@ -103,7 +103,7 @@ describe("Feature: reading back the slots the last server published", () => {
             log: "legacy",
             slots: [row],
           },
-          null,
+          undefined,
           2,
         )}\n`,
       );

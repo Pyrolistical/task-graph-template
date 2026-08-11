@@ -134,22 +134,28 @@ async function settleTransition(
   const decided = decide(meta, body, name, args);
 
   meta.state_entered = now;
-  meta.claimed_by = null;
-  meta.claimed_pid = null;
+  meta.claimed_by = undefined;
+  meta.claimed_pid = undefined;
 
   if (decided.kind === "stay") {
     await writeTaskFile(filePath, meta, body);
-    return { taskId, from, to: null, unblocked: [], dependentsUpdated: [] };
+    return {
+      taskId,
+      from,
+      to: undefined,
+      unblocked: [],
+      dependentsUpdated: [],
+    };
   }
 
   const nextBody = decided.body ?? body;
   meta.state = decided.to;
   if (!isHeld(decided.to)) {
-    meta.held_reason = null;
+    meta.held_reason = undefined;
   }
 
   if (decided.to === "CLOSED") {
-    meta.workspace = null;
+    meta.workspace = undefined;
     const closedPath = await closeTaskFile(filePath, tasksDir, meta, nextBody);
     return {
       taskId,
@@ -195,14 +201,11 @@ function requirePid(value: unknown): number {
   return value;
 }
 
-function workSession(
-  meta: TaskMeta,
-  session: string | undefined,
-): string | null {
+function workSession(meta: TaskMeta, session?: string): string | undefined {
   if (meta.state !== "WORK") {
-    return meta.workspace?.session ?? null;
+    return meta.workspace?.session;
   }
-  return session === undefined ? null : session;
+  return session;
 }
 
 export async function takeClaim(
@@ -222,7 +225,7 @@ export async function takeClaim(
       `Task "${taskId}" is in ${meta.state}, which no agent runs. Claimable states: ${CLAIM_STATES.join(", ")}`,
     );
   }
-  if (meta.claimed_by !== null) {
+  if (meta.claimed_by) {
     throw new Error(
       `Task "${taskId}" is already claimed by "${meta.claimed_by}" (PID ${meta.claimed_pid})`,
     );
@@ -231,7 +234,7 @@ export async function takeClaim(
   meta.claimed_by = requireText(args.slotName, "slotName");
   meta.claimed_pid = requirePid(args.pid);
 
-  if (args.branch !== undefined || args.worktree !== undefined) {
+  if (args.branch || args.worktree) {
     const session = workSession(meta, args.session);
     meta.workspace = {
       branch: requireText(args.branch, "branch"),
@@ -255,7 +258,7 @@ export async function clearClaim(
 
   const { meta, body } = await readTaskFile(filePath);
 
-  if (meta.claimed_pid === null) {
+  if (!meta.claimed_pid) {
     throw new Error(
       `Task "${taskId}" is in ${meta.state} with no claim to clear`,
     );
@@ -266,8 +269,8 @@ export async function clearClaim(
     );
   }
 
-  meta.claimed_by = null;
-  meta.claimed_pid = null;
+  meta.claimed_by = undefined;
+  meta.claimed_pid = undefined;
 
   await writeTaskFile(filePath, meta, body);
 }
@@ -282,18 +285,18 @@ export class TaskDocuments implements Tasks {
     return readActiveTasks(this.tasksDir);
   }
 
-  async read(id: TaskId): Promise<TaskMeta | null> {
+  async read(id: TaskId): Promise<TaskMeta | undefined> {
     const filePath = await findTaskFile(id, this.tasksDir);
-    if (filePath === null) {
-      return null;
+    if (!filePath) {
+      return undefined;
     }
     const found = await readTaskFile(filePath).catch((err: unknown) => {
       if (hasCode(err, "ENOENT")) {
-        return null;
+        return undefined;
       }
       throw err;
     });
-    return found === null ? null : found.meta;
+    return found?.meta;
   }
 
   body(id: TaskId): Promise<string> {

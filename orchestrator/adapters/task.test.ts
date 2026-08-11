@@ -137,8 +137,8 @@ describe("Feature: the id a task is known by", () => {
     },
   );
   testInTempDirs("the null YAML reads from a missing id is not an id", () => {
-    // Given the null YAML reads where a document carries no id at all
-    const read = null;
+    // Given no value at all, as a document without an id leaves it
+    const read = undefined;
     // When the candidate is checked
     const isId = isValidId(read);
     // Then it is not an id, because an id is a quoted string
@@ -291,14 +291,17 @@ describe("Feature: reading and writing a task's fields", () => {
     // Then it comes back as the person typed it, still a string
     expect(read).toBe("123");
   });
-  testInTempDirs("a title reading null survives being written and read", () => {
-    // Given the title null, which YAML would otherwise read as nothing
-    const typed = "null";
-    // When it is written into a document and read back
-    const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
-    // Then it comes back as the person typed it, still a string
-    expect(read).toBe("null");
-  });
+  testInTempDirs(
+    "a title YAML would read as nothing survives being written and read",
+    () => {
+      // Given a title YAML would otherwise read as nothing
+      const typed = "~";
+      // When it is written into a document and read back
+      const read = parseTaskMeta(raw(baseMeta({ title: typed }))).title;
+      // Then it comes back as the person typed it, still a string
+      expect(read).toBe("~");
+    },
+  );
   testInTempDirs("a hold reason spanning many lines survives", () => {
     // Given the reason a review failure writes, one bulleted line per finding
     const held_reason = "failed 2 rounds of DESIGN_REVIEW with:\n- one\n- two";
@@ -348,7 +351,9 @@ describe("Feature: reading and writing a task's fields", () => {
     "a task claimed by an agent with no process is refused",
     () => {
       // Given a claim naming the agent a but carrying no process
-      const document = raw(baseMeta({ claimed_by: "a", claimed_pid: null }));
+      const document = raw(
+        baseMeta({ claimed_by: "a", claimed_pid: undefined }),
+      );
       // When it is parsed as a task
       const issues = issuesOf(document);
       // Then it is refused, because a claim without a process cannot be reaped
@@ -357,7 +362,7 @@ describe("Feature: reading and writing a task's fields", () => {
   );
   testInTempDirs("a task holding a process but no agent is refused", () => {
     // Given a claim carrying the process 12 but naming no agent
-    const document = raw(baseMeta({ claimed_by: null, claimed_pid: 12 }));
+    const document = raw(baseMeta({ claimed_by: undefined, claimed_pid: 12 }));
     // When it is parsed as a task
     const issues = issuesOf(document);
     // Then it is refused, because a process nobody owns cannot be reaped
@@ -492,7 +497,7 @@ describe("Feature: creating a task", () => {
       const { meta } = await readTaskFile(filePath);
       expect(meta.title).toBe("First task");
       expect(meta.state).toBe("NEW");
-      expect(meta.state_entered).not.toBeNull();
+      expect(meta.state_entered).not.toBeUndefined();
     },
   );
   testInTempDirs(

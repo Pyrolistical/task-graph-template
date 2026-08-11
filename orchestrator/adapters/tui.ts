@@ -59,7 +59,9 @@ export class SessionTail {
   private ino = 0;
   private pending = "";
   private decoder = new TextDecoder();
-  private readonly reading = new ExclusiveLock<fs.FileHandle | null>(null);
+  private readonly reading = new ExclusiveLock<fs.FileHandle | undefined>(
+    undefined,
+  );
 
   constructor(filePath: string) {
     this.path = filePath;
@@ -67,9 +69,9 @@ export class SessionTail {
 
   close(): Promise<void> {
     return this.reading.acquire(async ([handle, set]) => {
-      if (handle !== null) {
+      if (handle) {
         await handle.close();
-        set(null);
+        set(undefined);
       }
     });
   }
@@ -81,15 +83,14 @@ export class SessionTail {
         if (!hasCode(err, "ENOENT")) {
           throw err;
         }
-        return null;
       });
 
-      if (current !== null && stats?.ino !== this.ino) {
+      if (current && stats?.ino !== this.ino) {
         await current.close();
-        current = null;
-        set(null);
+        current = undefined;
+        set(undefined);
       }
-      if (stats === null) {
+      if (!stats) {
         return this.entries;
       }
       if (stats.ino !== this.ino || stats.size < this.offset) {
@@ -133,7 +134,7 @@ export class SessionTail {
           );
           const result = recordEntries(record);
           appendEntries(this.entries, result);
-          if (result.usage !== null) {
+          if (result.usage) {
             push(this.samples, {
               timestampMs: stamp(record),
               tokens: result.usage.output,
@@ -159,19 +160,19 @@ export class Sessions {
   private readonly tails = new Map<string, SessionTail>();
   private readonly wrapped = new Map<string, PaneLines>();
 
-  entries(sessionPath: string | null): Awaitable<Entry[]> {
-    if (sessionPath === null) {
+  entries(sessionPath?: string): Awaitable<Entry[]> {
+    if (!sessionPath) {
       return [];
     }
     return this.tail(sessionPath).read();
   }
 
-  lines(sessionPath: string | null, width: number): Line[] {
-    if (sessionPath === null) {
+  lines(width: number, sessionPath?: string): Line[] {
+    if (!sessionPath) {
       return [];
     }
     const existing = this.wrapped.get(sessionPath);
-    if (existing !== undefined) {
+    if (existing) {
       return existing.update(this.tail(sessionPath).entries, width);
     }
     const cache: PaneLines = new PaneLines();
@@ -179,13 +180,13 @@ export class Sessions {
     return cache.update(this.tail(sessionPath).entries, width);
   }
 
-  rate(sessionPath: string | null, nowMs: number): number | null {
-    if (sessionPath === null) {
-      return null;
+  rate(nowMs: number, sessionPath?: string): number | undefined {
+    if (!sessionPath) {
+      return undefined;
     }
     const tail = this.tails.get(sessionPath);
-    if (tail === undefined) {
-      return null;
+    if (!tail) {
+      return undefined;
     }
     return tokensPerSecond(tail.samples, nowMs);
   }
@@ -202,7 +203,7 @@ export class Sessions {
 
   private tail(sessionPath: string): SessionTail {
     const existing = this.tails.get(sessionPath);
-    if (existing !== undefined) {
+    if (existing) {
       return existing;
     }
     const tail: SessionTail = new SessionTail(sessionPath);
@@ -259,8 +260,8 @@ export async function frame(
       await sessions.entries(session);
       return {
         pane,
-        rate: sessions.rate(session, layout.nowMs),
-        lines: (width: number) => sessions.lines(session, width),
+        rate: sessions.rate(layout.nowMs, session),
+        lines: (width: number) => sessions.lines(width, session),
       };
     }),
   );
@@ -269,7 +270,7 @@ export async function frame(
     new Set(
       all
         .map((pane) => pane.slot.session)
-        .filter((session): session is string => session !== null),
+        .filter((session): session is string => Boolean(session)),
     ),
   );
 
@@ -305,10 +306,10 @@ export async function main(repo: string): Promise<void> {
   }
 
   const sessions: Sessions = new Sessions();
-  const scroll: Scroll = { bases: null, offsets: [] };
+  const scroll: Scroll = { bases: undefined, offsets: [] };
   let hits: Hit[] = [];
   let bottoms: number[] = [];
-  let news: Region | null = null;
+  let news: Region | undefined = undefined;
   let collapsed = false;
   const outbox: Command[] = [];
   const paced: Paced = new Paced(TICK_MS);
@@ -400,7 +401,7 @@ export async function main(repo: string): Promise<void> {
           }
           default: {
             const event = mouse(key);
-            if (event === null) {
+            if (!event) {
               continue;
             }
             if (event.button === 64) {
@@ -408,22 +409,22 @@ export async function main(repo: string): Promise<void> {
             } else if (event.button === 65) {
               forward(3);
             } else if (event.button === 0 && event.pressed) {
-              if (news !== null && within(news, event)) {
+              if (news && within(news, event)) {
                 scrollBottom(scroll);
                 break;
               }
               const command = hitAt(hits, event);
-              if (command === null) {
+              if (!command) {
                 continue;
               }
               if (command.command === "hide_disabled") {
                 collapsed = true;
-                scroll.bases = null;
+                scroll.bases = undefined;
                 break;
               }
               if (command.command === "show_disabled") {
                 collapsed = false;
-                scroll.bases = null;
+                scroll.bases = undefined;
                 break;
               }
               outbox.push(command);

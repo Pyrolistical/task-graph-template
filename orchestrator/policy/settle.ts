@@ -14,8 +14,8 @@ import type { FragmentVars } from "../domain/fragment.ts";
 export interface Settlement {
   state: ClaimState;
   alive: boolean;
-  stopReason: StopReason | null;
-  looping: string | null;
+  stopReason?: StopReason;
+  looping?: string;
   calls: ResultCall[];
   diff: AssignmentDiff;
   worktree: WorktreeStatus;
@@ -26,7 +26,7 @@ export type Intent =
   | { kind: "abandon" }
   | { kind: "back-off" }
   | { kind: "raise"; issue: IssueName; detail: string; vars: FragmentVars }
-  | { kind: "restore"; section: string | null }
+  | { kind: "restore"; section?: string }
   | { kind: "feedback"; findings: string[] }
   | { kind: "submit"; body: boolean };
 
@@ -37,7 +37,7 @@ export function decideSettle(settled: Settlement): Intent[] {
   if (settled.stopReason === "error") {
     return [{ kind: "back-off" }];
   }
-  if (settled.looping !== null) {
+  if (settled.looping) {
     return [
       {
         kind: "raise",
@@ -52,7 +52,7 @@ export function decideSettle(settled: Settlement): Intent[] {
   }
 
   const last = settled.calls[settled.calls.length - 1];
-  if (settled.stopReason === "length" || last === undefined) {
+  if (settled.stopReason === "length" || !last) {
     return [raise("missing-result")];
   }
 
@@ -63,9 +63,9 @@ export function decideSettle(settled: Settlement): Intent[] {
 
   const stage = STAGE_OF[settled.state];
 
-  if (stage.section === null) {
+  if (!stage.section) {
     if (settled.diff !== "unchanged") {
-      return [{ kind: "restore", section: null }, raise("modified-assignment")];
+      return [{ kind: "restore" }, raise("modified-assignment")];
     }
   } else if (settled.diff === "unchanged") {
     return [raise(stage.missing)];
@@ -77,7 +77,7 @@ export function decideSettle(settled: Settlement): Intent[] {
   }
 
   const broken = worktreeIssue(stage.guard, settled.worktree, settled.base);
-  if (broken !== null) {
+  if (broken) {
     return [raise(broken.name, detailOf(broken), varsOf(broken))];
   }
 

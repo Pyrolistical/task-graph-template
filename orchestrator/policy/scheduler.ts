@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maybe } from "../domain/schema.ts";
 import { tableOf } from "../domain/lookup.ts";
 import { type TaskId, type TaskMeta } from "../domain/task.ts";
 import { type Slot, agentOf } from "../domain/agents.ts";
@@ -14,7 +15,7 @@ import {
 import type { RateOf } from "../domain/rates.ts";
 
 function ranksOf(stage: ClaimStage) {
-  return stage.section === null
+  return !stage.section
     ? ([stage.state] as const)
     : ([`${stage.state}_STARTED`, `${stage.state}_FRESH`] as const);
 }
@@ -32,8 +33,8 @@ export const Candidate = z.strictObject({
   state: z.enum(CLAIM_STATES),
   role: z.enum(ALL_ROLES),
   blocking: z.int(),
-  prefer_slot: z.string().nullable(),
-  session: z.string().nullable(),
+  prefer_slot: maybe(z.string()),
+  session: maybe(z.string()),
 });
 
 export type Candidate = z.infer<typeof Candidate>;
@@ -58,23 +59,21 @@ export function rankLabel(rank: Rank): string {
   return rank === "resume" ? rank : STATE_OF[rank];
 }
 
-function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | null {
-  if (task.claimed_by !== null) {
-    return null;
+function rankOf(task: TaskMeta, resumable: Set<TaskId>): Rank | undefined {
+  if (task.claimed_by) {
+    return undefined;
   }
   if (resumable.has(task.id)) {
     return "resume";
   }
   if (!isClaimState(task.state)) {
-    return null;
+    return undefined;
   }
   const stage = STAGE_OF[task.state];
-  if (stage.section === null) {
+  if (!stage.section) {
     return stage.state;
   }
-  return task.workspace === null
-    ? `${stage.state}_FRESH`
-    : `${stage.state}_STARTED`;
+  return !task.workspace ? `${stage.state}_FRESH` : `${stage.state}_STARTED`;
 }
 
 export function candidates(
@@ -86,7 +85,7 @@ export function candidates(
 
   for (const [id, task] of tasks) {
     const rank = rankOf(task, resumable);
-    if (rank === null) {
+    if (!rank) {
       continue;
     }
     found.push({
@@ -95,8 +94,8 @@ export function candidates(
       state: STATE_OF[rank],
       role: STAGE_OF[STATE_OF[rank]].role,
       blocking: blocking.get(id) ?? 0,
-      prefer_slot: task.workspace?.slot ?? null,
-      session: rank === "resume" ? (task.workspace?.session ?? null) : null,
+      prefer_slot: task.workspace?.slot,
+      session: rank === "resume" ? task.workspace?.session : undefined,
     });
   }
 
@@ -120,22 +119,24 @@ export function pickSlot(
   candidate: Candidate,
   isTop: boolean,
   rate: RateOf,
-): Slot | null {
+): Slot | undefined {
   const eligible = free.filter((slot) => slot.roles.includes(candidate.role));
   if (eligible.length === 0) {
-    return null;
+    return undefined;
   }
-  if (candidate.prefer_slot === null) {
+  if (!candidate.prefer_slot) {
     return fastest(eligible, rate);
   }
 
   const wanted = agentOf(candidate.prefer_slot);
   const same = eligible.find((slot) => agentOf(slot.name) === wanted);
-  if (same !== undefined) {
+  if (same) {
     return same;
   }
 
-  return candidate.rank === "resume" && !isTop ? null : fastest(eligible, rate);
+  return candidate.rank === "resume" && !isTop
+    ? undefined
+    : fastest(eligible, rate);
 }
 
 export interface Dispatch {
@@ -155,7 +156,7 @@ export function schedule(
 
   candidates(tasks, resumable, blocking).forEach((candidate, index) => {
     const slot = pickSlot(remaining, candidate, index === 0, rate);
-    if (slot === null) {
+    if (!slot) {
       return;
     }
     remaining.splice(remaining.indexOf(slot), 1);

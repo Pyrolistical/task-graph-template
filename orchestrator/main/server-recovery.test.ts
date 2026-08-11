@@ -48,7 +48,7 @@ describe("Feature: picking a project back up at startup", () => {
       // Then it is refused, and leaves no runtime lock behind to wedge a retry
       await expect(attempt()).rejects.toThrow(/already in use by server/);
       const runtime = await Runtime.open(fixture.repo, fixture.serverRoot);
-      expect(await runtime.lockHolder()).toBeNull();
+      expect(await runtime.lockHolder()).toBeUndefined();
     },
     30000,
   );
@@ -64,7 +64,7 @@ describe("Feature: picking a project back up at startup", () => {
       await server.shutdown();
 
       // Then the graph is free again for the next server to take
-      expect(await graphLock(fixture.tasksDir).holder()).toBeNull();
+      expect(await graphLock(fixture.tasksDir).holder()).toBeUndefined();
     },
     30000,
   );
@@ -192,8 +192,8 @@ describe("Feature: reaping a claim whose agent is gone", () => {
 
       // Then the claim is dropped, the stage is kept and the workspace survives
       expect(await stateOf(server, id)).toBe("WORK");
-      expect((await taskOf(server, id)).claimed_by).toBeNull();
-      expect((await taskOf(server, id)).workspace).not.toBeNull();
+      expect((await taskOf(server, id)).claimed_by).toBeUndefined();
+      expect((await taskOf(server, id)).workspace).not.toBeUndefined();
 
       await server.shutdown();
     },
@@ -221,8 +221,8 @@ describe("Feature: reaping a claim whose agent is gone", () => {
       // Then the slot is idle and the task is back in the queue where it stood
       const row = at(server.slotRows(), 0);
       expect(row.state).toBe("IDLE");
-      expect(row.task_id).toBeNull();
-      expect((await taskOf(server, id)).claimed_by).toBeNull();
+      expect(row.task_id).toBeUndefined();
+      expect((await taskOf(server, id)).claimed_by).toBeUndefined();
 
       await server.shutdown();
     },
@@ -381,7 +381,7 @@ describe("Feature: an abort that races a dispatch", () => {
       await server.drain();
       const row = at(server.slotRows(), 0);
       expect(row.state).toBe("IDLE");
-      expect(row.task_id).toBeNull();
+      expect(row.task_id).toBeUndefined();
       expect(
         (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
           `dispatch of ${id} to pi-fake-fake-1 failed`,

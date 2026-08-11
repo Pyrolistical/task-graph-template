@@ -114,7 +114,7 @@ describe("Feature: reaping claims whose process is gone", () => {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
         slot: "pi-fake-fake-1",
-        session: null,
+        session: undefined,
       },
     });
     const { recover, pool, store, workspaces } = aRig([task]);
@@ -166,7 +166,7 @@ describe("Feature: reaping claims whose process is gone", () => {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
         slot: "pi-fake-fake-1",
-        session: null,
+        session: undefined,
       },
     });
     const { recover, workspaces } = aRig([task]);
@@ -248,7 +248,7 @@ describe("Feature: recloning a workspace that went missing", () => {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
         slot: "pi-fake-fake-1",
-        session: null,
+        session: undefined,
       },
     });
     const { recover, workspaces } = aRig([task]);
@@ -268,7 +268,7 @@ describe("Feature: recloning a workspace that went missing", () => {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
         slot: "pi-fake-fake-1",
-        session: null,
+        session: undefined,
       },
     });
     const { recover, workspaces, log } = aRig([task]);
@@ -290,7 +290,7 @@ describe("Feature: recloning a workspace that went missing", () => {
         branch: "task/000042",
         worktree: "/runtime/000042/worktree",
         slot: "pi-fake-fake-1",
-        session: null,
+        session: undefined,
       },
     });
     const { recover, workspaces } = aRig([task]);

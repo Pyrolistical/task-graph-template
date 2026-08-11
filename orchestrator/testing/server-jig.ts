@@ -34,7 +34,7 @@ export async function startServer(
     runtime: await Runtime.open(options.repo, options.serverRoot),
     prompts: await PromptFiles.open(
       orchestratorDir,
-      options.overridesDir ?? options.tasksDir ?? null,
+      options.overridesDir ?? options.tasksDir,
     ),
   });
   return server;
@@ -42,7 +42,7 @@ export async function startServer(
 
 function rigOf(server: Server): Rig {
   const rig = RIGS.get(server);
-  if (rig === undefined) {
+  if (!rig) {
     throw new Error("the server was not started through the jig");
   }
   return rig;
@@ -193,17 +193,17 @@ export async function reaches(
 export async function compactionsOf(
   server: Server,
   id: string,
-): Promise<number | null> {
+): Promise<number | undefined> {
   if (!(await fs.exists(pathsOf(server).slotsView))) {
-    return null;
+    return undefined;
   }
   const view = JSON.parse(
     await fs.readFile(pathsOf(server).slotsView, "utf-8"),
   );
   const busy = view.slots.find(
-    (agent: { task_id: string | null }) => agent.task_id === id,
+    (agent: { task_id?: string }) => agent.task_id === id,
   );
-  return busy?.compactions ?? null;
+  return busy?.compactions;
 }
 
 export async function taskOf(server: Server, id: string): Promise<TaskMeta> {
@@ -230,14 +230,14 @@ export async function stateOf(server: Server, id: string): Promise<string> {
 export async function holderOf(
   server: Server,
   id: string,
-): Promise<string | null> {
-  return (await server.tasks()).get(id)?.claimed_by ?? null;
+): Promise<string | undefined> {
+  return (await server.tasks()).get(id)?.claimed_by;
 }
 
 export async function claimed(server: Server, id: string): Promise<void> {
-  await until(server, async () => (await holderOf(server, id)) !== null);
+  await until(server, async () => Boolean(await holderOf(server, id)));
 }
 
 export async function unclaimed(server: Server, id: string): Promise<void> {
-  await until(server, async () => (await holderOf(server, id)) === null);
+  await until(server, async () => !(await holderOf(server, id)));
 }

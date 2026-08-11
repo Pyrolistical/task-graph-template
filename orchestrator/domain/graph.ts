@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maybe } from "./schema.ts";
 import type { TaskId, TaskMeta } from "./task.ts";
 
 export const RECENT_TASKS = 100;
@@ -20,7 +21,7 @@ export function blockingCounts(
   for (const [id] of tasks) {
     const seen = new Set<TaskId>();
     const stack = [...(dependents.get(id) ?? [])];
-    for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    for (let next = stack.pop(); next; next = stack.pop()) {
       if (seen.has(next)) {
         continue;
       }
@@ -36,12 +37,12 @@ export const TaskRow = z.strictObject({
   id: z.string(),
   title: z.string(),
   state: z.string(),
-  state_entered: z.string().nullable(),
+  state_entered: maybe(z.string()),
   depends_on: z.array(z.string()),
   blocking: z.int(),
-  claimed_by: z.string().nullable(),
-  held_reason: z.string().nullable(),
-  worktree: z.string().nullable(),
+  claimed_by: maybe(z.string()),
+  held_reason: maybe(z.string()),
+  worktree: maybe(z.string()),
 });
 
 export type TaskRow = z.infer<typeof TaskRow>;
@@ -58,7 +59,7 @@ export function taskRow(task: TaskMeta, blocking: number): TaskRow {
     blocking,
     claimed_by: task.claimed_by,
     held_reason: task.held_reason,
-    worktree: task.workspace?.worktree ?? null,
+    worktree: task.workspace?.worktree,
   };
 }
 
@@ -72,9 +73,9 @@ export function taskRows(
 
   for (const id of recent.slice(0, RECENT_TASKS)) {
     const task = tasks.get(id);
-    if (task === undefined) {
+    if (!task) {
       const archived = closed.get(id);
-      if (archived !== undefined) {
+      if (archived) {
         rows.push(archived);
       }
       continue;

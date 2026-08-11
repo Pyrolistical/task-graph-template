@@ -37,8 +37,8 @@ export class Dispatcher {
     for (const [id, task] of tasks) {
       if (
         task.state === "WORK" &&
-        task.claimed_by === null &&
-        task.workspace?.session != null &&
+        !task.claimed_by &&
+        task.workspace?.session &&
         (await this.pool.hasSession(task.workspace.session)) &&
         (await this.messages.queued(id, "WORK"))
       ) {
@@ -57,7 +57,7 @@ export class Dispatcher {
       this.pool.rates.rateOf,
     )) {
       const task = tasks.get(candidate.task_id);
-      if (task === undefined) {
+      if (!task) {
         continue;
       }
       try {
@@ -104,7 +104,7 @@ export class Dispatcher {
       worktree,
       head: await this.workspaces.head(worktree),
       dispatched:
-        section === null && (await this.assignments.exists(task.id))
+        !section && (await this.assignments.exists(task.id))
           ? await this.assignments.read(task.id)
           : await this.writeAssignment(task, section),
     };
@@ -192,7 +192,7 @@ export class Dispatcher {
         `${task.id} left ${task.state} before ${slot.name} could claim it`,
       );
     }
-    if (current.claimed_by !== null) {
+    if (current.claimed_by) {
       throw new Error(
         `${task.id} was claimed by "${current.claimed_by}" before ${slot.name} could claim it`,
       );
@@ -201,12 +201,12 @@ export class Dispatcher {
 
   private async writeAssignment(
     task: TaskMeta,
-    section: string | null,
+    section?: string,
   ): Promise<string> {
     await this.assignments.rotate(task.id);
 
     const body = normalizeBody(await this.graph.body(task.id));
-    const dispatched = section === null ? body : `${body}\n${section}\n`;
+    const dispatched = !section ? body : `${body}\n${section}\n`;
     await this.assignments.write(task.id, dispatched);
     return dispatched;
   }

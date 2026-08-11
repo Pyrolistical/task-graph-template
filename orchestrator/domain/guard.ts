@@ -26,25 +26,27 @@ export type WorktreeIssue =
       base: string;
     };
 
-function joined(parts: (string | null)[]): string {
-  return parts.filter((part) => part !== null).join("; ");
+function joined(parts: (string | undefined)[]): string {
+  return parts.filter((part) => part).join("; ");
 }
 
-function dirtyDetail(dirty: string[]): string | null {
-  return dirty.length === 0 ? null : `${dirty.length} uncommitted file(s)`;
+function dirtyDetail(dirty: string[]): string | undefined {
+  return dirty.length === 0 ? undefined : `${dirty.length} uncommitted file(s)`;
 }
 
 export function detailOf(issue: WorktreeIssue): string {
   switch (issue.name) {
     case "uncommitted": {
       return joined([
-        issue.empty ? "nothing is committed on the branch" : null,
+        issue.empty ? "nothing is committed on the branch" : undefined,
         dirtyDetail(issue.dirty),
       ]);
     }
     case "modified-worktree": {
       return joined([
-        issue.commits === 0 ? null : `${issue.commits} commit(s) on the branch`,
+        issue.commits === 0
+          ? undefined
+          : `${issue.commits} commit(s) on the branch`,
         dirtyDetail(issue.dirty),
       ]);
     }
@@ -77,22 +79,22 @@ export function worktreeIssue(
   guard: Guard,
   status: WorktreeStatus,
   base: string,
-): WorktreeIssue | null {
+): WorktreeIssue | undefined {
   const { dirty, commits } = status;
 
   switch (guard) {
     case "none": {
-      return null;
+      return undefined;
     }
     case "untouched": {
       if (dirty.length === 0 && commits === 0) {
-        return null;
+        return undefined;
       }
       return { name: "modified-worktree", dirty, commits, base };
     }
     case "committed": {
       if (dirty.length === 0 && commits > 0) {
-        return null;
+        return undefined;
       }
       return { name: "uncommitted", dirty, empty: commits === 0 };
     }

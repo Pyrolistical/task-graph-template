@@ -28,14 +28,12 @@ export function nextTaskIdPath(tasksDir: string): string {
 export async function findTaskFile(
   id: string,
   tasksDir: string,
-): Promise<string | null> {
+): Promise<string | undefined> {
   const activePath = activeTaskPath(tasksDir, id);
   if (await exists(activePath)) return activePath;
 
   const closedPath = closedTaskPath(tasksDir, id);
   if (await exists(closedPath)) return closedPath;
-
-  return null;
 }
 
 export async function requireTaskFile(
@@ -43,7 +41,7 @@ export async function requireTaskFile(
   tasksDir: string,
 ): Promise<string> {
   const filePath = await findTaskFile(id, tasksDir);
-  if (filePath === null) {
+  if (!filePath) {
     throw new Error(`Task "${id}" not found`);
   }
   return filePath;

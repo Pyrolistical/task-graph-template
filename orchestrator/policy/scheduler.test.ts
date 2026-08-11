@@ -16,10 +16,10 @@ describe("Feature: which task is dispatched next", () => {
       state: "WORK",
       state_entered: "2026-07-29T00:00:00Z",
       depends_on: [],
-      claimed_by: null,
-      claimed_pid: null,
-      held_reason: null,
-      workspace: null,
+      claimed_by: undefined,
+      claimed_pid: undefined,
+      held_reason: undefined,
+      workspace: undefined,
       checks: [],
       ...overrides,
     };
@@ -36,12 +36,12 @@ describe("Feature: which task is dispatched next", () => {
     return candidates(tasks, resumable, blockingCounts(tasks));
   }
 
-  const unmeasured: RateOf = () => null;
+  const unmeasured: RateOf = () => undefined;
 
   const rates =
     (measured: Record<string, number>): RateOf =>
     (agent) =>
-      measured[agent] ?? null;
+      measured[agent];
 
   function planOf(
     tasks: Map<string, TaskMeta>,
@@ -309,12 +309,12 @@ describe("Feature: which task is dispatched next", () => {
 
     // When a slot is picked for it, once at the head of the queue and once below
     const picked = [
-      pickSlot(free, candidate, true, unmeasured)?.name ?? null,
-      pickSlot(free, candidate, false, unmeasured)?.name ?? null,
+      pickSlot(free, candidate, true, unmeasured)?.name,
+      pickSlot(free, candidate, false, unmeasured)?.name,
     ];
 
     // Then only the head takes the wrong model, so lower tasks keep waiting
-    expect(picked).toEqual(["pi-openai-m-1", null]);
+    expect(picked).toEqual(["pi-openai-m-1", undefined]);
   });
 
   test("one slot is never handed to two tasks in the same plan", () => {
@@ -412,10 +412,10 @@ describe("Feature: what is waiting on the manager", () => {
       state: "NEW",
       state_entered: "2026-07-29T00:00:00Z",
       depends_on: [],
-      claimed_by: null,
-      claimed_pid: null,
-      held_reason: null,
-      workspace: null,
+      claimed_by: undefined,
+      claimed_pid: undefined,
+      held_reason: undefined,
+      workspace: undefined,
       checks: [],
       ...overrides,
     };
@@ -517,7 +517,7 @@ describe("Feature: what is waiting on the manager", () => {
           branch: "work/000001",
           worktree: "/tmp/orchestrator/000001/worktree",
           slot: "pi-1",
-          session: null,
+          session: undefined,
         },
       }),
     );

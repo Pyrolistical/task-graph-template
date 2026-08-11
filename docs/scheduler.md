@@ -58,7 +58,7 @@ Affinity first, speed second:
 
 - an unclaimed `WORK` task is both what the manager holds-and-aborts and what the scheduler dispatches, so the dispatcher has to lose that race rather than win it
 - every claim asserts the task is still in the state the plan saw it in **and still unclaimed** — immediately before taking the claim, and after the last `await` that could have let a hold-and-abort, or a second tick, through
-- the `claimed_by !== null` check runs under the graph lock and is what makes the race safe; the assertion is what turns a lost race into a clean dispatch error rather than a spawned process with nothing to do
+- the `claimed_by !== undefined` check runs under the graph lock and is what makes the race safe; the assertion is what turns a lost race into a clean dispatch error rather than a spawned process with nothing to do
 - a claim that lost the race releases the slot and tears the process down, and the next tick plans against the graph as it now is
 
 ## The slot handoff

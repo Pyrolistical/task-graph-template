@@ -21,12 +21,11 @@ export class PromptFiles {
 
   static async open(
     orchestratorDir: string,
-    overridesDir: string | null = null,
+    overridesDir?: string,
   ): Promise<PromptFiles> {
-    const dirs =
-      overridesDir === null
-        ? [orchestratorDir]
-        : [overridesDir, orchestratorDir];
+    const dirs = !overridesDir
+      ? [orchestratorDir]
+      : [overridesDir, orchestratorDir];
     const prompts = new PromptFiles(dirs);
     await prompts.reload();
     return prompts;
@@ -77,7 +76,7 @@ export class PromptFiles {
 
   private file(name: string): CachedFile {
     const entry = this.cached.get(name);
-    if (entry === undefined) {
+    if (!entry) {
       throw new Error(
         `no prompts/${name}.md in ${this.dirs.map((dir) => path.join(dir, "prompts")).join(" or ")}`,
       );

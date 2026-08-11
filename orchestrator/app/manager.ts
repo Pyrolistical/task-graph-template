@@ -38,5 +38,5 @@ export interface Manager {
   writeViews(): Promise<void>;
   view(name: ViewName): Promise<string>;
   pathReport(): PathReport;
-  readonly lastError: string | null;
+  readonly lastError?: string;
 }

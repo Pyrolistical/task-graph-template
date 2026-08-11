@@ -27,7 +27,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 
 | `state` | `claimed_by` | what it is                         |
 | ------- | ------------ | ---------------------------------- |
-| `PLAN`  | `null`       | waiting for a planner slot         |
+| `PLAN`  | not set      | waiting for a planner slot         |
 | `PLAN`  | `pi-fake-2`  | that slot is planning it right now |
 
 - taking and clearing the claim write that one field and leave the state where it is
@@ -43,7 +43,7 @@ There is one state per stage. Whether an agent is on it is `claimed_by`, not a s
 - everything else is derived from that one array — `NEXT_STATE`, `CLAIM_STATES`, `STAGE_OF`, the scheduler's `RANKS`, the issue table's state lists, and the settle
 - adding a stage is an entry in the array, not an edit to six lookup tables that have to agree
 - a row is a union keyed by its role, so the combinations that exist are the only ones that compile: a `designer`, `planner` or `worker` has an extension, the section it appends and the issue for appending nothing, and no `back`; a `reviewer` has an extension and a `back`; a stage with no role has neither extension nor section
-- the two stages with a `null` role (`CHECK`, `MANAGER_REVIEW`) fall out of the agent-facing derivations by construction, so nothing claims them and no dispatcher special-cases them
+- the two stages with no role (`CHECK`, `MANAGER_REVIEW`) fall out of the agent-facing derivations by construction, so nothing claims them and no dispatcher special-cases them
 
 ## Why the review is split in two
 

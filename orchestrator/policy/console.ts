@@ -54,9 +54,9 @@ export interface ConsoleView {
 
 export interface Pane {
   slot: SlotRow;
-  task: TaskRow | null;
-  check: RunningCheck | null;
-  sinceMs: number | null;
+  task?: TaskRow;
+  check?: RunningCheck;
+  sinceMs?: number;
 }
 
 export function panes(view: ConsoleView): Pane[] {
@@ -73,9 +73,9 @@ export function panes(view: ConsoleView): Pane[] {
   return view.slots
     .map((slot) => ({
       slot,
-      task: slot.task_id === null ? null : (tasks.get(slot.task_id) ?? null),
-      check: slot.task_id === null ? null : (checks.get(slot.task_id) ?? null),
-      sinceMs: slot.started_at === null ? null : Date.parse(slot.started_at),
+      task: slot.task_id ? tasks.get(slot.task_id) : undefined,
+      check: slot.task_id ? checks.get(slot.task_id) : undefined,
+      sinceMs: !slot.started_at ? undefined : Date.parse(slot.started_at),
     }))
     .sort((one, two) => Number(two.slot.enabled) - Number(one.slot.enabled));
 }
@@ -181,7 +181,7 @@ function identity(slot: SlotRow): string {
 function stateLine(pane: Pane, nowMs: number): string {
   const state =
     pane.slot.state === "DISABLED" ? "idle" : pane.slot.state.toLowerCase();
-  if (pane.sinceMs === null) {
+  if (!pane.sinceMs) {
     return state;
   }
   const since = elapsed(nowMs - pane.sinceMs);
@@ -190,21 +190,21 @@ function stateLine(pane: Pane, nowMs: number): string {
 
 export function detailLine(pane: Pane): string {
   const { slot, task } = pane;
-  if (slot.task_id === null) {
+  if (!slot.task_id) {
     return "no task";
   }
 
   const parts = [`task ${slot.task_id}`];
-  if (slot.role !== null) {
+  if (slot.role) {
     parts.push(slot.role);
   }
-  if (task !== null) {
+  if (task) {
     parts.push(task.state);
   }
-  if (slot.pid !== null) {
+  if (slot.pid) {
     parts.push(`pid ${slot.pid}`);
   }
-  if (slot.retry !== null) {
+  if (slot.retry) {
     parts.push(
       `retry ${slot.retry.attempt} at ${clock(Date.parse(slot.retry.at))}`,
     );
@@ -213,20 +213,20 @@ export function detailLine(pane: Pane): string {
 }
 
 export function activityLine(pane: Pane): string {
-  if (pane.check !== null) {
+  if (pane.check) {
     return `check ${pane.check.index}: ${oneLine(pane.check.command)}`;
   }
   return describeActivity(pane.slot.activity);
 }
 
-export function statsLine(pane: Pane, rate: number | null): string {
+export function statsLine(pane: Pane, rate?: number): string {
   const parts: string[] = [];
-  if (rate !== null) {
+  if (rate) {
     parts.push(`${thousands(Math.round(rate * 10) / 10)} tok/s`);
   }
   const compactions =
     pane.slot.compactions > 0 ? ` x${pane.slot.compactions}` : "";
-  if (pane.slot.context_percent !== null) {
+  if (pane.slot.context_percent) {
     parts.push(`ctx ${Math.round(pane.slot.context_percent)}%${compactions}`);
   }
   return parts.join(" ");
@@ -234,9 +234,9 @@ export function statsLine(pane: Pane, rate: number | null): string {
 
 export function header(
   pane: Pane,
-  rate: number | null,
   width: number,
   nowMs: number,
+  rate?: number,
 ): Line[] {
   const enabled = toggle(pane.slot.enabled, "");
   const right = stateLine(pane, nowMs);
@@ -249,7 +249,7 @@ export function header(
   const button = abortButton(pane);
   const buttonWidth = spanWidth(button);
   const activityRow = (() => {
-    if (pane.check !== null) {
+    if (pane.check) {
       const text = [{ text: activityLine(pane), sgr: DIM }];
       const room = width - buttonWidth;
       const clipped = clip(text, room);
@@ -334,7 +334,7 @@ export class PaneLines {
     this.folded = settled;
 
     const last = entries[entries.length - 1];
-    if (last === undefined || last.label === "usage") {
+    if (!last || last.label === "usage") {
       return this.lines;
     }
     return [...this.lines, ...entryLines(last, width)];
@@ -342,7 +342,7 @@ export class PaneLines {
 }
 
 export interface Scroll {
-  bases: number[] | null;
+  bases?: number[];
   offsets: number[];
 }
 
@@ -354,13 +354,9 @@ export function topOf(total: number, height: number): number {
   return Math.max(0, total - height);
 }
 
-export function baseOf(
-  lines: number,
-  height: number,
-  frozen: number | undefined,
-): number {
+export function baseOf(lines: number, height: number, frozen?: number): number {
   const bottom = topOf(lines, height);
-  return frozen === undefined ? bottom : Math.min(frozen, bottom);
+  return Math.min(frozen ?? bottom, bottom);
 }
 
 export function body(
@@ -412,7 +408,7 @@ export function paneWidth(columns: number, count: number): number {
 
 export interface Cell {
   pane: Pane;
-  rate: number | null;
+  rate?: number;
   lines: (width: number) => Line[];
 }
 
@@ -427,7 +423,7 @@ export interface Frame {
   lines: string[];
   bases: number[];
   hits: Hit[];
-  news: Region | null;
+  news?: Region;
 }
 
 export function centred(
@@ -439,7 +435,7 @@ export function centred(
   const out: string[] = [];
   for (let row = 0; row < rows; row++) {
     const line = text[row - top];
-    if (line === undefined) {
+    if (!line) {
       out.push(renderLine(pad([], columns)));
       continue;
     }
@@ -471,7 +467,6 @@ export function emptyPool(
     ],
     bases: [],
     hits: [],
-    news: null,
   };
 }
 
@@ -488,7 +483,6 @@ export function errorFrame(message: string, layout: Layout): Frame {
     ),
     bases: [],
     hits: [],
-    news: null,
   };
 }
 
@@ -546,7 +540,7 @@ export function screen(
       });
     }
     return [
-      ...header(pane, rate, width, nowMs),
+      ...header(pane, width, nowMs, rate),
       [{ text: "─".repeat(width), sgr: DIM }],
       ...body(paneLines, height, base, scroll.offsets[index] ?? 0),
     ];
@@ -555,19 +549,15 @@ export function screen(
   const off = cells.flatMap((cell, index) =>
     cell.pane.slot.enabled ? [] : [index],
   );
-  const leftmost = off[0];
-  const rightmost = off[off.length - 1];
   const hide =
-    leftmost === undefined ||
-    rightmost === undefined ||
-    off.length === cells.length
-      ? null
+    off.length === 0 || off.length === cells.length
+      ? undefined
       : hideRegion(
-          leftmost * (width + 1),
-          rightmost * (width + 1) + width,
+          (off[0] ?? 0) * (width + 1),
+          (off[off.length - 1] ?? 0) * (width + 1) + width,
           rows,
         );
-  if (hide !== null) {
+  if (hide) {
     hits.push({ ...hide, command: { command: "hide_disabled" } });
   }
 
@@ -599,7 +589,7 @@ export function screen(
     });
   }
 
-  const news = unread ? newsRegion(columns, rows) : null;
+  const news = unread ? newsRegion(columns, rows) : undefined;
   const out: string[] = [
     renderLine(pad(queue, columns)),
     renderLine(pad(rule, columns)),
@@ -621,19 +611,16 @@ export function screen(
       line.push({ text: row === HEADER_LINES ? "┤" : "│", sgr: DIM });
       const label = SHOW[row + QUEUE_LINES - showAt];
       line.push(
-        ...pad(
-          label === undefined ? [] : [{ text: label, sgr: REVERSE }],
-          COLLAPSED_WIDTH,
-        ),
+        ...pad(!label ? [] : [{ text: label, sgr: REVERSE }], COLLAPSED_WIDTH),
       );
     }
     const withHide =
-      hide !== null && hide.row === row + QUEUE_LINES
+      hide && hide.row === row + QUEUE_LINES
         ? overlay(line, hideButton(), hide)
         : line;
     out.push(
       renderLine(
-        news !== null && row + QUEUE_LINES === news.row
+        news && row + QUEUE_LINES === news.row
           ? overlay(withHide, newsButton(), news)
           : withHide,
       ),
@@ -661,7 +648,7 @@ export function scrollBack(
 }
 
 export function scrollForward(scroll: Scroll, count: number): void {
-  if (scroll.bases === null) {
+  if (!scroll.bases) {
     return;
   }
   scroll.offsets = scroll.offsets.map((offset) => Math.max(0, offset - count));
@@ -675,7 +662,7 @@ export function scrollTop(scroll: Scroll, bottoms: number[]): void {
 }
 
 export function scrollBottom(scroll: Scroll): void {
-  scroll.bases = null;
+  scroll.bases = undefined;
   scroll.offsets = [];
 }
 

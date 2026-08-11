@@ -54,7 +54,7 @@ One stdio server, calling `task.ts` and `state-machine.ts` in process.
 | `tasks`          | `tasks.json`                                                   |
 | `queue`          | `queue.json` — what the scheduler would dispatch next          |
 | `paths`          | where the graph, the pool, the prompts and the logs are        |
-| `error`          | why the server is not working, or `null`                       |
+| `error`          | why the server is not working, absent when none                |
 | `workspace_path` | the path to `/tmp/task-graph-server/<repo>`, for file watchers |
 
 The first five are the [views](runtime-directory.md#the-views), served as they sit on disk.

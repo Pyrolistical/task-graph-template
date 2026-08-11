@@ -16,8 +16,8 @@ import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
 const TICK_MS = 500;
 
 export interface Startup {
-  server: Manager | null;
-  error: string | null;
+  server?: Manager;
+  error?: string;
 }
 
 const taskId = z.string().refine(isValidId, {
@@ -29,7 +29,7 @@ function text(value: string) {
 }
 
 function json(value: unknown) {
-  return text(JSON.stringify(value, null, 2));
+  return text(JSON.stringify(value, undefined, 2));
 }
 
 export function build(startup: Startup): McpServer {
@@ -39,7 +39,7 @@ export function build(startup: Startup): McpServer {
   );
 
   function live(): Manager {
-    if (startup.server === null) {
+    if (!startup.server) {
       throw new Error(
         startup.error ?? "the server did not start, and said nothing about why",
       );
@@ -249,18 +249,18 @@ export function build(startup: Startup): McpServer {
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () => JSON.stringify(live().pathReport(), null, 2),
+    () => JSON.stringify(live().pathReport(), undefined, 2),
   );
 
   resource(
     "error",
     "orchestrator://error",
-    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Null when there is none. Every other tool and resource fails with this message while it is set.",
+    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Absent when there is none. Every other tool and resource fails with this message while it is set.",
     "application/json",
     () =>
       JSON.stringify(
-        { error: startup.error ?? startup.server?.lastError ?? null },
-        null,
+        { error: startup.error ?? startup.server?.lastError },
+        undefined,
         2,
       ),
   );
@@ -277,7 +277,7 @@ export function build(startup: Startup): McpServer {
 }
 
 export interface Boot extends Startup {
-  server: Server | null;
+  server?: Server;
 }
 
 export interface Ticking {
@@ -305,10 +305,10 @@ export function startTicking(server: Server): Ticking {
 
 export async function boot(options: WiringOptions): Promise<Boot> {
   try {
-    return { server: await (await wire(options)).start(), error: null };
+    return { server: await (await wire(options)).start(), error: undefined };
   } catch (err) {
     return {
-      server: null,
+      server: undefined,
       error: `the server failed to start: ${messageOf(err)}`,
     };
   }
@@ -317,8 +317,7 @@ export async function boot(options: WiringOptions): Promise<Boot> {
 function start(): Promise<Boot> {
   return boot({
     repo: process.cwd(),
-    tasksDir:
-      process.argv[2] === undefined ? undefined : path.resolve(process.argv[2]),
+    tasksDir: !process.argv[2] ? undefined : path.resolve(process.argv[2]),
     serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
   });
 }
@@ -335,7 +334,7 @@ async function main(): Promise<void> {
     });
   };
 
-  if (startup.server === null) {
+  if (!startup.server) {
     log(startup.error ?? "the server failed to start");
     serveStdio(() => build(startup), {
       onerror: (err) => log(`mcp failed: ${err.message}`),

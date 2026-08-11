@@ -5,23 +5,23 @@ export interface Sample {
   tokens: number;
 }
 
-export type RateOf = (agent: string) => number | null;
+export type RateOf = (agent: string) => number | undefined;
 
 export function tokensPerSecond(
   samples: Sample[],
   nowMs: number,
-): number | null {
+): number | undefined {
   const first = samples[0];
   const last = samples[samples.length - 1];
-  if (first === undefined || last === undefined) {
-    return null;
+  if (!first || !last) {
+    return undefined;
   }
   let durationMs = last.timestampMs - first.timestampMs;
   if (durationMs <= 0) {
     durationMs = nowMs - first.timestampMs;
   }
   if (durationMs <= 0) {
-    return null;
+    return undefined;
   }
   let tokens = 0;
   for (const sample of samples) {
@@ -48,10 +48,10 @@ export class Rates {
     this.windows.set(agent, samples);
   }
 
-  rate(agent: string, nowMs = Date.now()): number | null {
+  rate(agent: string, nowMs = Date.now()): number | undefined {
     const samples = this.windows.get(agent);
-    if (samples === undefined) {
-      return null;
+    if (!samples) {
+      return undefined;
     }
     return tokensPerSecond(samples, nowMs);
   }

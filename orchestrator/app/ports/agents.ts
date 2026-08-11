@@ -24,8 +24,11 @@ export interface AgentProcess {
   steer(message: string): Awaitable<void>;
   abort(): void;
   abortBash(): void;
-  stats(): Awaitable<{ tokens: number | null; contextPercent: number | null }>;
-  lastAssistantText(): Awaitable<string | null>;
+  stats(): Awaitable<{
+    tokens?: number;
+    contextPercent?: number;
+  }>;
+  lastAssistantText(): Awaitable<string | undefined>;
   close(): void;
   kill(): void;
 }

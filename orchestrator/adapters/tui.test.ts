@@ -168,13 +168,13 @@ describe("Feature: the sessions the console is following", () => {
       const file = path.join(await tempDir("console-"), "session.jsonl");
       await write(file, [assistant("hi")]);
       const sessions: Sessions = new Sessions();
-      expect(sessions.rate(file, 5000)).toBeNull();
+      expect(sessions.rate(5000, file)).toBeUndefined();
 
       // When the console reads the session
       await sessions.entries(file);
 
       // Then the rate is measured from the samples that read left behind
-      expect(sessions.rate(file, 5000)).toBe(0.4);
+      expect(sessions.rate(5000, file)).toBe(0.4);
     },
   );
 
@@ -183,11 +183,11 @@ describe("Feature: the sessions the console is following", () => {
     const sessions: Sessions = new Sessions();
 
     // When the console asks for its transcript
-    const entries = await sessions.entries(null);
+    const entries = await sessions.entries(undefined);
 
     // Then it gets nothing, and no rate either
     expect(entries).toEqual([]);
-    expect(sessions.rate(null, 5000)).toBeNull();
+    expect(sessions.rate(5000)).toBeUndefined();
   });
 
   testInTempDirs("a session no slot names any more is forgotten", async () => {
@@ -201,7 +201,7 @@ describe("Feature: the sessions the console is following", () => {
     await sessions.keep(new Set());
 
     // Then the console drops it, rather than tailing a file nothing shows
-    expect(sessions.rate(file, 5000)).toBeNull();
+    expect(sessions.rate(5000, file)).toBeUndefined();
   });
 });
 
@@ -223,7 +223,10 @@ describe("Feature: the command channel between console and server", () => {
       const taken = [await takeCommand(runtime), await takeCommand(runtime)];
 
       // Then it arrives once, and is gone the second time
-      expect(taken).toEqual([{ command: "scheduler", enabled: true }, null]);
+      expect(taken).toEqual([
+        { command: "scheduler", enabled: true },
+        undefined,
+      ]);
     },
   );
 
@@ -261,7 +264,7 @@ describe("Feature: the command channel between console and server", () => {
       const taken = await takeCommand(runtime);
 
       // Then nothing is applied, and the file is cleared rather than retried
-      expect(taken).toBeNull();
+      expect(taken).toBeUndefined();
       expect(await fs.exists(runtime.consoleCommand)).toBe(false);
     },
   );
@@ -296,7 +299,7 @@ describe("Feature: the command channel between console and server", () => {
     const taken = await takeCommand(runtime);
 
     // Then nothing is applied, and the file is cleared rather than retried
-    expect(taken).toBeNull();
+    expect(taken).toBeUndefined();
     expect(await fs.exists(runtime.consoleCommand)).toBe(false);
   });
 
@@ -593,7 +596,7 @@ describe("Feature: reading the views the server publishes", () => {
       await frame(runtime, sessions, layoutOf({ nowMs: 5000 }), true);
 
       // Then the session is kept, so un-collapsing does not start from scratch
-      expect(sessions.rate(session, 5000)).toBe(0.4);
+      expect(sessions.rate(5000, session)).toBe(0.4);
     },
   );
 });

@@ -84,7 +84,7 @@ describe("Feature: where the mouse was clicked", () => {
     const event = mouse(report);
 
     // Then nothing comes back, and the key is handled as a key
-    expect(event).toBeNull();
+    expect(event).toBeUndefined();
   });
 
   test("a click inside a switch sends the command that switch carries", () => {
@@ -126,7 +126,7 @@ describe("Feature: where the mouse was clicked", () => {
     );
 
     // Then nothing is sent, because the click hit no target
-    expect(command).toBeNull();
+    expect(command).toBeUndefined();
   });
 
   test("a click on the row below a switch sends nothing", () => {

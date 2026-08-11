@@ -103,7 +103,7 @@ one of them is wrong.
 - application modules are nouns, one per file, and the file is the noun in
   kebab-case: `dispatcher.ts` holds `Dispatcher`, `settler.ts` holds `Settler`
 - `xOf(y)` derives an `x` from a `y` (`agentOf`, `tailOf`, `runOf`, `varsOf`)
-- `isX` and `hasX` are predicates; `requireX` throws instead of returning null
+- `isX` and `hasX` are predicates; `requireX` throws instead of returning undefined
 - `XRow` is a projection that exists only to be published in a view
 - a serialized row is one zod schema and the type inferred from it, under the
   same name (`SlotRow`, `TaskRow`, `Command`, `TransitionEntry`); anything read

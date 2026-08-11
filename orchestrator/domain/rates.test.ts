@@ -12,7 +12,7 @@ describe("Feature: measuring how fast an agent writes", () => {
     const rate = tokensPerSecond(samples, NOW);
 
     // Then there is no rate to report
-    expect(rate).toBeNull();
+    expect(rate).toBeUndefined();
   });
 
   test("a single sample is measured from when it arrived", () => {
@@ -62,7 +62,7 @@ describe("Feature: measuring how fast an agent writes", () => {
     const rate = tokensPerSecond(samples, NOW);
 
     // Then there is no rate rather than a negative one
-    expect(rate).toBeNull();
+    expect(rate).toBeUndefined();
   });
 });
 
@@ -75,7 +75,7 @@ describe("Feature: the rate table the scheduler picks slots by", () => {
     const rate = rates.rate("pi-anthropic-m", NOW);
 
     // Then it has none, which the scheduler reads as untried
-    expect(rate).toBeNull();
+    expect(rate).toBeUndefined();
   });
 
   test("an agent's rate is its output tokens over the span of its messages", () => {
@@ -124,6 +124,6 @@ describe("Feature: the rate table the scheduler picks slots by", () => {
     expect(measured).toBe(40);
 
     // Then a different agent is still untried
-    expect(rates.rateOf("pi-openai-m")).toBeNull();
+    expect(rates.rateOf("pi-openai-m")).toBeUndefined();
   });
 });

@@ -220,7 +220,7 @@ describe("Feature: releasing a slot when its work ends", () => {
 
     // Then the slot reads idle again, holding nothing
     expect(at(pool.rows(), 0).state).toBe("IDLE");
-    expect(pool.runner("pi-fake-fake-1").taskId).toBeNull();
+    expect(pool.runner("pi-fake-fake-1").taskId).toBeUndefined();
   });
 
   test("work that throws stops the slot and says which task it failed on", async () => {

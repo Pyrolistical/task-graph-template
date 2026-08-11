@@ -34,9 +34,9 @@ export interface ServerConfig {
 }
 
 export class Server implements Manager {
-  private watcher: { close(): void } | null = null;
+  private watcher: { close(): void } | undefined = undefined;
   private scheduling = false;
-  private failure: string | null = null;
+  private failure: string | undefined = undefined;
 
   constructor(
     readonly config: ServerConfig,
@@ -188,7 +188,7 @@ export class Server implements Manager {
     return paths;
   }
 
-  get lastError(): string | null {
+  get lastError(): string | undefined {
     return this.failure;
   }
 
@@ -223,7 +223,7 @@ export class Server implements Manager {
     return this.pool.rows();
   }
 
-  rateOf(agent: string): number | null {
+  rateOf(agent: string): number | undefined {
     return this.pool.rates.rate(agent);
   }
 
@@ -276,7 +276,7 @@ export class Server implements Manager {
 
   private async listen(): Promise<void> {
     const stale = await this.commands.take();
-    if (stale !== null) {
+    if (stale) {
       await this.applyCommand(stale);
     }
     this.watcher = this.commands.watch(

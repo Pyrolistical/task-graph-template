@@ -18,10 +18,10 @@ function aTask(state: ValidState, overrides: Partial<TaskMeta> = {}): TaskMeta {
     state,
     state_entered: "2026-07-27T12:00:00Z",
     depends_on: [],
-    claimed_by: isClaimState(state) ? "agent-1" : null,
-    claimed_pid: isClaimState(state) ? 1234 : null,
-    held_reason: null,
-    workspace: null,
+    claimed_by: isClaimState(state) ? "agent-1" : undefined,
+    claimed_pid: isClaimState(state) ? 1234 : undefined,
+    held_reason: undefined,
+    workspace: undefined,
     checks: [],
     ...overrides,
   };
@@ -1134,7 +1134,11 @@ describe("Feature: what a transition carries with it", () => {
     const decided = decide(meta, BODY, "submit", {});
 
     // Then the machine carries no body forward
-    expect(decided).toEqual({ kind: "move", to: "DESIGN_REVIEW", body: null });
+    expect(decided).toEqual({
+      kind: "move",
+      to: "DESIGN_REVIEW",
+      body: undefined,
+    });
   });
 
   test("findings sent back to the worker are appended to the task body", () => {
@@ -1164,7 +1168,7 @@ describe("Feature: what a transition carries with it", () => {
     });
 
     // Then the body is left for the planner to rewrite
-    expect(decided).toEqual({ kind: "move", to: "PLAN", body: null });
+    expect(decided).toEqual({ kind: "move", to: "PLAN", body: undefined });
   });
 
   test("feedback with no findings is refused", () => {
@@ -1182,7 +1186,10 @@ describe("Feature: what a transition carries with it", () => {
 describe("Feature: only the agent holding a task may speak for it", () => {
   test("an unclaimed task in an agent state cannot be submitted", () => {
     // Given a task in an agent state that nothing is claiming
-    const meta = aTask("WORK", { claimed_by: null, claimed_pid: null });
+    const meta = aTask("WORK", {
+      claimed_by: undefined,
+      claimed_pid: undefined,
+    });
 
     // When a submit arrives for it
     const attempt = () => decide(meta, BODY, "submit", { body: BODY });
@@ -1193,7 +1200,10 @@ describe("Feature: only the agent holding a task may speak for it", () => {
 
   test("an unclaimed task in an agent state cannot be sent feedback", () => {
     // Given a task in review that nothing is claiming
-    const meta = aTask("WORK_REVIEW", { claimed_by: null, claimed_pid: null });
+    const meta = aTask("WORK_REVIEW", {
+      claimed_by: undefined,
+      claimed_pid: undefined,
+    });
 
     // When feedback arrives for it
     const attempt = () =>

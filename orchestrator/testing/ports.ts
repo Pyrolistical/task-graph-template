@@ -9,6 +9,7 @@ import type { Reviews } from "../app/ports/reviews.ts";
 import type { CreatedTask, Tasks } from "../app/ports/tasks.ts";
 import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
 import type { Workspaces } from "../app/ports/workspaces.ts";
+import type { Awaitable } from "../domain/awaitable.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
@@ -48,10 +49,10 @@ export function aTask(overrides: Partial<TaskMeta> = {}): TaskMeta {
     state: "WORK",
     state_entered: "2026-07-29T00:00:00Z",
     depends_on: [],
-    claimed_by: null,
-    claimed_pid: null,
-    held_reason: null,
-    workspace: null,
+    claimed_by: undefined,
+    claimed_pid: undefined,
+    held_reason: undefined,
+    workspace: undefined,
     checks: [],
     ...overrides,
   };
@@ -69,35 +70,28 @@ export function aSession(
     stream: {
       state: {
         activity,
-        stopReason: null,
-        errorMessage: null,
         settled: false,
         retrying: false,
-        failure: null,
-        looping: null,
       },
       settled: () => {
         if (settles > 0) {
           return new Promise<void>(() => {});
         }
         settles += 1;
-        return yielded(undefined);
       },
     },
     newSession: () => yielded("a-session"),
-    switchSession: () => yielded(undefined),
+    switchSession: () => {},
     prompt: (message: string) => {
       prompts.push(message);
-      return yielded(undefined);
     },
     steer: (message: string) => {
       prompts.push(message);
-      return yielded(undefined);
     },
     abort: () => {},
     abortBash: () => {},
-    stats: () => yielded({ tokens: null, contextPercent: null }),
-    lastAssistantText: () => yielded(null),
+    stats: () => yielded({}),
+    lastAssistantText: () => {},
     close: () => {},
     kill: () => {},
   };
@@ -105,31 +99,29 @@ export function aSession(
 
 export class FakePublisher implements Publisher {
   readonly lines: string[] = [];
-  rows: SlotRow[] | null = null;
-  published: Views | null = null;
+  rows: SlotRow[] | undefined = undefined;
+  published: Views | undefined = undefined;
 
-  publish(views: Views): Promise<void> {
+  publish(views: Views): Awaitable<void> {
     this.published = views;
-    return yielded(undefined);
   }
 
   read(name: ViewName): Promise<string> {
     const views = this.published;
-    if (views === null) {
+    if (!views) {
       return yielded("{}");
     }
     return yielded(
-      `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, null, 2)}\n`,
+      `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, undefined, 2)}\n`,
     );
   }
 
-  lastSlots(): Promise<SlotRow[] | null> {
+  lastSlots(): Promise<SlotRow[] | undefined> {
     return yielded(this.rows);
   }
 
-  log(line: string): Promise<void> {
+  log(line: string): Awaitable<void> {
     this.lines.push(line);
-    return yielded(undefined);
   }
 }
 
@@ -146,8 +138,8 @@ export class FakeTasks implements Tasks {
     return yielded({ tasks: this.tasks, problems: new Map<string, string>() });
   }
 
-  read(id: TaskId): Promise<TaskMeta | null> {
-    return yielded(this.tasks.get(id) ?? null);
+  read(id: TaskId): Promise<TaskMeta | undefined> {
+    return yielded(this.tasks.get(id));
   }
 
   body(id: TaskId): Promise<string> {
@@ -183,26 +175,19 @@ export class FakeTasks implements Tasks {
     return yielded(result);
   }
 
-  claim(): Promise<void> {
-    return yielded(undefined);
-  }
+  claim(): Awaitable<void> {}
 
-  takeLock(): Promise<void> {
-    return yielded(undefined);
-  }
+  takeLock(): Awaitable<void> {}
 
-  clearLock(): Promise<void> {
-    return yielded(undefined);
-  }
+  clearLock(): Awaitable<void> {}
 
-  releaseClaim(id: TaskId): Promise<void> {
+  releaseClaim(id: TaskId): Awaitable<void> {
     this.released.push(id);
     const task = this.tasks.get(id);
-    if (task !== undefined) {
-      task.claimed_by = null;
-      task.claimed_pid = null;
+    if (task) {
+      task.claimed_by = undefined;
+      task.claimed_pid = undefined;
     }
-    return yielded(undefined);
   }
 }
 
@@ -212,15 +197,13 @@ export class FakeWorkspaces implements Workspaces {
   present = new Set<string>();
   branches = new Set<string>();
 
-  create(branch: string, worktree: string, _base: string): Promise<void> {
+  create(branch: string, worktree: string, _base: string): Awaitable<void> {
     this.created.push(worktree);
     this.present.add(worktree);
-    return yielded(undefined);
   }
 
-  remove(worktree: string): Promise<void> {
+  remove(worktree: string): Awaitable<void> {
     this.present.delete(worktree);
-    return yielded(undefined);
   }
 
   exists(worktree: string): Promise<boolean> {
@@ -231,18 +214,15 @@ export class FakeWorkspaces implements Workspaces {
     return yielded(this.branches.has(branch));
   }
 
-  deleteBranch(branch: string): Promise<void> {
+  deleteBranch(branch: string): Awaitable<void> {
     this.branches.delete(branch);
-    return yielded(undefined);
   }
 
   head(_worktree: string): Promise<string> {
     return yielded("0000000");
   }
 
-  resetTo(_worktree: string, _commit: string): Promise<void> {
-    return yielded(undefined);
-  }
+  resetTo(_worktree: string, _commit: string): Awaitable<void> {}
 
   status(
     _worktree: string,
@@ -251,14 +231,11 @@ export class FakeWorkspaces implements Workspaces {
     return yielded({ dirty: [], commits: 0 });
   }
 
-  harvest(worktree: string, _branch: string): Promise<void> {
+  harvest(worktree: string, _branch: string): Awaitable<void> {
     this.harvested.push(worktree);
-    return yielded(undefined);
   }
 
-  syncBase(_worktree: string, _base: string): Promise<void> {
-    return yielded(undefined);
-  }
+  syncBase(_worktree: string, _base: string): Awaitable<void> {}
 
   rebase(
     _worktree: string,
@@ -267,9 +244,7 @@ export class FakeWorkspaces implements Workspaces {
     return yielded({ code: 0, stderr: "" });
   }
 
-  abortRebase(_worktree: string): Promise<void> {
-    return yielded(undefined);
-  }
+  abortRebase(_worktree: string): Awaitable<void> {}
 
   fastForward(_branch: string): Promise<{ code: number; stderr: string }> {
     return yielded({ code: 0, stderr: "" });
@@ -301,9 +276,7 @@ export class FakeTransitions implements Transitions {
     return yielded(full);
   }
 
-  close(): Promise<void> {
-    return yielded(undefined);
-  }
+  close(): Awaitable<void> {}
 }
 
 export class FakeTaskFiles implements Messages, Reviews {
@@ -311,9 +284,8 @@ export class FakeTaskFiles implements Messages, Reviews {
   private readonly found = new Map<TaskId, string[]>();
   private readonly rejections = new Map<TaskId, number>();
 
-  queue(taskId: TaskId, state: string, message: string): Promise<void> {
+  queue(taskId: TaskId, state: string, message: string): Awaitable<void> {
     this.messages.set(`${taskId}/${state}`, message);
-    return yielded(undefined);
   }
 
   drain(taskId: TaskId, state: string): Promise<string> {
@@ -331,28 +303,24 @@ export class FakeTaskFiles implements Messages, Reviews {
     return yielded(this.found.get(taskId) ?? []);
   }
 
-  setFindings(taskId: TaskId, findings: string[]): Promise<void> {
+  setFindings(taskId: TaskId, findings: string[]): Awaitable<void> {
     this.found.set(taskId, findings);
-    return yielded(undefined);
   }
 
-  clearFindings(taskId: TaskId): Promise<void> {
+  clearFindings(taskId: TaskId): Awaitable<void> {
     this.found.delete(taskId);
-    return yielded(undefined);
   }
 
   failures(taskId: TaskId): Promise<number> {
     return yielded(this.rejections.get(taskId) ?? 0);
   }
 
-  setFailures(taskId: TaskId, failures: number): Promise<void> {
+  setFailures(taskId: TaskId, failures: number): Awaitable<void> {
     this.rejections.set(taskId, failures);
-    return yielded(undefined);
   }
 
-  clearFailures(taskId: TaskId): Promise<void> {
+  clearFailures(taskId: TaskId): Awaitable<void> {
     this.rejections.delete(taskId);
-    return yielded(undefined);
   }
 }
 
@@ -391,18 +359,16 @@ export class FakeAssignments implements Assignments {
     return yielded(this.contents.get(taskId) ?? "");
   }
 
-  write(taskId: TaskId, contents: string): Promise<void> {
+  write(taskId: TaskId, contents: string): Awaitable<void> {
     this.contents.set(taskId, contents);
-    return yielded(undefined);
   }
 
   exists(taskId: TaskId): Promise<boolean> {
     return yielded(this.contents.has(taskId));
   }
 
-  rotate(taskId: TaskId): Promise<void> {
+  rotate(taskId: TaskId): Awaitable<void> {
     this.rotated.push(taskId);
-    return yielded(undefined);
   }
 }
 
@@ -457,32 +423,23 @@ export class FakePaths implements Paths {
     return `/runtime/${id}/messages`;
   }
 
-  prepare(id: TaskId): Promise<void> {
+  prepare(id: TaskId): Awaitable<void> {
     this.prepared.push(id);
-    return yielded(undefined);
   }
 
-  discard(id: TaskId): Promise<void> {
+  discard(id: TaskId): Awaitable<void> {
     this.discarded.push(id);
-    return yielded(undefined);
   }
 
-  log(line: string): Promise<void> {
+  log(line: string): Awaitable<void> {
     this.lines.push(line);
-    return yielded(undefined);
   }
 
-  takeLock(): Promise<void> {
-    return yielded(undefined);
-  }
+  takeLock(): Awaitable<void> {}
 
-  clearLock(): Promise<void> {
-    return yielded(undefined);
-  }
+  clearLock(): Awaitable<void> {}
 
-  close(): Promise<void> {
-    return yielded(undefined);
-  }
+  close(): Awaitable<void> {}
 }
 
 export function fakePaths(): Paths {

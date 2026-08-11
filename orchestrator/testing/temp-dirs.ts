@@ -41,7 +41,7 @@ export async function withTasksRoot<T>(
   try {
     return await fn();
   } finally {
-    if (previous === undefined) {
+    if (!previous) {
       delete process.env.TASK_GRAPH_TASKS_ROOT;
     } else {
       process.env.TASK_GRAPH_TASKS_ROOT = previous;

@@ -105,7 +105,7 @@ export function sandboxArgs(policy: SandboxPolicy): string[] {
 let limitsProbe: Promise<boolean> | undefined;
 
 export function hasLimits(): Promise<boolean> {
-  if (limitsProbe === undefined) {
+  if (!limitsProbe) {
     const proc = Bun.spawn({
       cmd: [
         LIMIT_COMMAND,
@@ -137,7 +137,7 @@ export function hasLimits(): Promise<boolean> {
 let overlayProbe: Promise<boolean> | undefined;
 
 export function hasOverlay(): Promise<boolean> {
-  if (overlayProbe === undefined) {
+  if (!overlayProbe) {
     const probe = os.tmpdir();
     const proc = Bun.spawn({
       cmd: [

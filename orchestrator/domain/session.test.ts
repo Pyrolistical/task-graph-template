@@ -87,7 +87,7 @@ describe("Feature: reading a session record", () => {
     const result = recordEntries(record);
 
     // Then it contributes neither an entry nor a usage sample
-    expect(result).toEqual({ entries: [], usage: null });
+    expect(result).toEqual({ entries: [], usage: undefined });
   });
 
   test("the prompt an agent was given becomes one user entry", () => {
@@ -182,7 +182,7 @@ describe("Feature: reading a session record", () => {
     const result = recordEntries(record);
 
     // Then it contributes neither an entry nor a usage sample
-    expect(result).toEqual({ entries: [], usage: null });
+    expect(result).toEqual({ entries: [], usage: undefined });
   });
 
   test("a record whose message is not an object is ignored", () => {
@@ -193,7 +193,7 @@ describe("Feature: reading a session record", () => {
     const result = recordEntries(record);
 
     // Then the console draws nothing rather than failing on it
-    expect(result).toEqual({ entries: [], usage: null });
+    expect(result).toEqual({ entries: [], usage: undefined });
   });
 
   test("an assistant turn that reports no tokens still draws", () => {
@@ -208,7 +208,7 @@ describe("Feature: reading a session record", () => {
 
     // Then the turn is drawn, and the rate meter is given no sample
     expect(entries.map((one) => one.text)).toEqual(["done"]);
-    expect(usage).toBeNull();
+    expect(usage).toBeUndefined();
   });
 
   test("a tool call names the argument worth reading", () => {

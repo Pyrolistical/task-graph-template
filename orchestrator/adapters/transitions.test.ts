@@ -90,7 +90,7 @@ describe("Feature: a task that waits on other tasks", () => {
       // When it is submitted again
       const result = await run(dir, main, "submit");
       // Then the machine moves it nowhere, and it keeps waiting
-      expect(result.to).toBeNull();
+      expect(result.to).toBeUndefined();
       expect((await metaOf(dir, main)).state).toBe("BLOCKED");
     },
   );
@@ -107,7 +107,7 @@ describe("Feature: a task that waits on other tasks", () => {
       await editTask(dir, main, (meta) => {
         meta.depends_on = [first];
       });
-      expect((await run(dir, main, "submit")).to).toBeNull();
+      expect((await run(dir, main, "submit")).to).toBeUndefined();
       // Given the last dependency edited out of it
       await editTask(dir, main, (meta) => {
         meta.depends_on = [];
@@ -192,14 +192,14 @@ describe("Feature: taking and clearing a claim", () => {
       // Then the task keeps its stage and goes back into the queue unheld
       const meta = await metaOf(dir, id);
       expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeNull();
-      expect(meta.claimed_pid).toBeNull();
+      expect(meta.claimed_by).toBeUndefined();
+      expect(meta.claimed_pid).toBeUndefined();
     },
   );
   testInTempDirs("a state no agent runs has no claim to clear", async () => {
     // Given a task in a state the server drives rather than an agent
     const { dir, id } = await toChecking();
-    expect((await metaOf(dir, id)).claimed_by).toBeNull();
+    expect((await metaOf(dir, id)).claimed_by).toBeUndefined();
     // When a claim is cleared on it
     const attempt = async () => await unclaim(dir, id);
     // Then it is refused, because there was never a holder to release
@@ -212,7 +212,7 @@ describe("Feature: taking and clearing a claim", () => {
     const attempt = async () => await claim(dir, id, "agent-1");
     // Then it is refused, and nothing is written onto the task
     await expect(attempt()).rejects.toThrow(/which no agent runs/);
-    expect((await metaOf(dir, id)).claimed_by).toBeNull();
+    expect((await metaOf(dir, id)).claimed_by).toBeUndefined();
   });
   testInTempDirs(
     "a claim by an agent named only with spaces is refused",
@@ -228,7 +228,7 @@ describe("Feature: taking and clearing a claim", () => {
       );
       const meta = await metaOf(dir, id);
       expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeNull();
+      expect(meta.claimed_by).toBeUndefined();
     },
   );
   testInTempDirs("a claim carrying the process zero is refused", async () => {
@@ -241,7 +241,7 @@ describe("Feature: taking and clearing a claim", () => {
     await expect(attempt()).rejects.toThrow('"pid" must be a positive integer');
     const meta = await metaOf(dir, id);
     expect(meta.state).toBe("DESIGN");
-    expect(meta.claimed_by).toBeNull();
+    expect(meta.claimed_by).toBeUndefined();
   });
   testInTempDirs(
     "a claim carrying a fractional process is refused",
@@ -257,7 +257,7 @@ describe("Feature: taking and clearing a claim", () => {
       );
       const meta = await metaOf(dir, id);
       expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeNull();
+      expect(meta.claimed_by).toBeUndefined();
     },
   );
 });
@@ -472,7 +472,7 @@ describe("Feature: the checks a task carries", () => {
     expect(after.depends_on).toEqual(before.depends_on);
     expect(after.checks).toEqual(before.checks);
     expect(after.workspace).toEqual(before.workspace);
-    expect(after.held_reason).toBeNull();
+    expect(after.held_reason).toBeUndefined();
   });
   testInTempDirs(
     "a reviewer cannot fail the task it is reviewing",
@@ -742,7 +742,7 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     const before = await enteredAt(dir, main);
     await Bun.sleep(5);
     // When it is submitted again and stays blocked
-    expect((await run(dir, main, "submit")).to).toBeNull();
+    expect((await run(dir, main, "submit")).to).toBeUndefined();
     // Then the clock still moved, so the inbox shows how long it has waited
     expect(await enteredAt(dir, main)).toBeGreaterThan(before);
   });
@@ -771,7 +771,7 @@ describe("Feature: the workspace a task is worked in", () => {
     // When it is submitted into the design phase
     await run(dir, id, "submit");
     // Then it carries no workspace, because none has been cloned for it
-    expect((await metaOf(dir, id)).workspace).toBeNull();
+    expect((await metaOf(dir, id)).workspace).toBeUndefined();
   });
   testInTempDirs(
     "a work claim records the branch, worktree, agent and session",
@@ -807,7 +807,7 @@ describe("Feature: the workspace a task is worked in", () => {
         "/tmp/task-graph-server/-repo/000001/session/designer/019f.jsonl",
     });
     // Then no session is recorded, because only work is ever resumed
-    expect(requireWorkspace(await metaOf(dir, id)).session).toBeNull();
+    expect(requireWorkspace(await metaOf(dir, id)).session).toBeUndefined();
   });
   testInTempDirs(
     "a review claim leaves the worker's session where it was",
@@ -862,7 +862,7 @@ describe("Feature: the workspace a task is worked in", () => {
       worktree: "/tmp/wt",
     });
     // Then there is no session to resume from, and the field says so
-    expect(requireWorkspace(await metaOf(dir, id)).session).toBeNull();
+    expect(requireWorkspace(await metaOf(dir, id)).session).toBeUndefined();
   });
   testInTempDirs("a branch with no worktree beside it is refused", async () => {
     // Given a task in the design phase
@@ -876,7 +876,7 @@ describe("Feature: the workspace a task is worked in", () => {
       /"worktree" must be a non-empty string/,
     );
     expect((await metaOf(dir, id)).state).toBe("DESIGN");
-    expect((await metaOf(dir, id)).workspace).toBeNull();
+    expect((await metaOf(dir, id)).workspace).toBeUndefined();
   });
   testInTempDirs(
     "the workspace outlives the claim that recorded it",
@@ -926,7 +926,7 @@ describe("Feature: the workspace a task is worked in", () => {
       // Then the closed document points at no worktree, which is gone by then
       expect(
         (await readTaskFile(closedPath(result))).meta.workspace,
-      ).toBeNull();
+      ).toBeUndefined();
     },
   );
   testInTempDirs("a workspace missing a field is refused", () => {
@@ -945,7 +945,7 @@ describe("Feature: the workspace a task is worked in", () => {
       branch: "b",
       worktree: "w",
       slot: "a",
-      session: null,
+      session: undefined,
       pid: 1,
     };
     // When it is parsed as a task

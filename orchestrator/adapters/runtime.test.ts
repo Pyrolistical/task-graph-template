@@ -266,7 +266,7 @@ describe("Feature: keeping a second server out of the runtime directory", () => 
     // When the server is done with it
     await runtime.clearLock();
     // Then nothing is left to keep another server out
-    expect(await runtime.lockHolder()).toBe(null);
+    expect(await runtime.lockHolder()).toBe(undefined);
   });
   testInTempDirs(
     "a server does not clear a lock it does not hold",
@@ -640,7 +640,7 @@ describe("Feature: keeping what an agent wrote on an earlier attempt", () => {
         path.join(dir, "history"),
       );
       // Then nothing is moved, and the dispatch carries on
-      expect(rotated).toBeNull();
+      expect(rotated).toBeUndefined();
     },
   );
 });

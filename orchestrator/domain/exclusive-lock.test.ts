@@ -31,7 +31,7 @@ describe("Feature: a lock that hands one caller the shared state at a time", () 
 
   test("a caller that fails still frees the lock", async () => {
     // Given a lock
-    const lock = new ExclusiveLock(null);
+    const lock = new ExclusiveLock(undefined);
 
     // When the lock is acquired but an error is thrown
     await expect(

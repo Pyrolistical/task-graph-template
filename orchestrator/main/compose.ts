@@ -55,7 +55,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
   }
 
   const tasksDir = options.tasksDir ?? defaultTasksDir(repo);
-  if (options.tasksDir === undefined) {
+  if (!options.tasksDir) {
     await fs.cp(path.join(ORCHESTRATOR_DIR, "..", "tasks"), tasksDir, {
       recursive: true,
       force: false,

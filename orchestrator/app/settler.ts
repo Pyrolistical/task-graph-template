@@ -11,7 +11,7 @@ import {
   runOf,
 } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
-import { orNull } from "../domain/awaitable.ts";
+import { orUndefined } from "../domain/awaitable.ts";
 import { Queue } from "../domain/queue.ts";
 import { diffAssignment, restored } from "../domain/assignment.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
@@ -62,7 +62,7 @@ export class Settler {
 
   async settle(runner: Runner): Promise<void> {
     const run = runOf(runner);
-    if (run === null) {
+    if (!run) {
       return;
     }
 
@@ -79,8 +79,8 @@ export class Settler {
     runner.state = "SETTLED";
     const stopReason = run.process.stream.state.stopReason;
 
-    const closing = await orNull(run.process.lastAssistantText());
-    if (closing !== null) {
+    const closing = await orUndefined(run.process.lastAssistantText());
+    if (closing) {
       await this.publisher.log(
         `${runner.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
       );
@@ -144,7 +144,9 @@ export class Settler {
         }
         case "submit": {
           runner.backoff = BACKOFF_START_MS;
-          const live = intent.body ? await this.assignments.read(taskId) : null;
+          const live = intent.body
+            ? await this.assignments.read(taskId)
+            : undefined;
           await this.edits.submit(() => this.accept(run, live));
           return;
         }
@@ -158,13 +160,13 @@ export class Settler {
     await this.pool.finish(run.runner);
   }
 
-  private async accept(run: Run, body: string | null): Promise<void> {
+  private async accept(run: Run, body?: string): Promise<void> {
     run.process.close();
     await this.reviews.clearFindings(run.taskId);
     await this.graph.transition(
       run.taskId,
       "submit",
-      body === null ? {} : { body },
+      body ? { body } : {},
       run.runner.slot.name,
     );
     await this.pool.finish(run.runner);
@@ -183,7 +185,7 @@ export class Settler {
 
   async compacted(runner: Runner): Promise<void> {
     const run = runOf(runner);
-    if (run === null || !run.process.alive) {
+    if (!run || !run.process.alive) {
       return;
     }
 
@@ -236,7 +238,7 @@ export class Settler {
     }
 
     runner.state = "BUSY";
-    runner.retry = null;
+    runner.retry = undefined;
     await this.prompt(run, await this.nudge(run.taskId, run.state));
     this.watch(runner);
   }

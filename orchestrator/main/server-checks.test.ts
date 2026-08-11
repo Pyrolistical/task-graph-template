@@ -214,7 +214,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
       await dispatchOnce(server);
       const afterFailure = await taskOf(server, id);
       expect(afterFailure.state).toBe("WORK");
-      expect(requireWorkspace(afterFailure).session).not.toBeNull();
+      expect(requireWorkspace(afterFailure).session).not.toBeUndefined();
 
       // When the agent is dispatched again and finishes the work
       await walkTo(server, id, "MANAGER_REVIEW");

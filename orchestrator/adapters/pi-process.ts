@@ -72,7 +72,7 @@ export class PiProcess implements AgentProcess {
     for await (const chunk of this.proc.stdout) {
       const text = decoder.decode(chunk, { stream: true });
       this.stream.feed(text);
-      if (this.stream.state.looping !== null) {
+      if (this.stream.state.looping) {
         this.interrupt();
       }
     }
@@ -91,8 +91,8 @@ export class PiProcess implements AgentProcess {
   get alive(): boolean {
     return (
       !this.closed &&
-      this.proc.exitCode === null &&
-      this.stream.state.failure === null
+      typeof this.proc.exitCode !== "number" &&
+      !this.stream.state.failure
     );
   }
 
@@ -169,21 +169,24 @@ export class PiProcess implements AgentProcess {
   }
 
   async stats(): Promise<{
-    tokens: number | null;
-    contextPercent: number | null;
+    tokens?: number;
+    contextPercent?: number;
   }> {
     const response = await this.send({ type: "get_session_stats" });
     const stats = SessionStats.parse(response.data ?? {});
     return {
-      tokens: stats.tokens?.total ?? null,
-      contextPercent: stats.contextUsage?.percent ?? null,
+      tokens: stats.tokens?.total,
+      contextPercent: stats.contextUsage?.percent,
     };
   }
 
-  async lastAssistantText(): Promise<string | null> {
+  async lastAssistantText(): Promise<string | undefined> {
     const response = await this.send({ type: "get_last_assistant_text" });
     const text = response.data?.text;
-    return typeof text === "string" ? text : null;
+    if (typeof text !== "string") {
+      return;
+    }
+    return text;
   }
 
   close(): void {

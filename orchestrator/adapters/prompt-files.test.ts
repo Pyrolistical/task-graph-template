@@ -399,12 +399,12 @@ describe("Feature: what an agent's result tool call means", () => {
       // When it submits a review carrying that finding
       const result = resultFromCall(state, {
         tool: "submit",
-        args: { findings: ["the null case is untested"] },
+        args: { findings: ["the undefined case is untested"] },
       });
       // Then the finding comes back on the result
       expect(result).toEqual({
         type: "submit",
-        findings: ["the null case is untested"],
+        findings: ["the undefined case is untested"],
       });
     },
   );
@@ -416,12 +416,12 @@ describe("Feature: what an agent's result tool call means", () => {
       // When it submits a review carrying that finding
       const result = resultFromCall(state, {
         tool: "submit",
-        args: { findings: ["the null case is untested"] },
+        args: { findings: ["the undefined case is untested"] },
       });
       // Then the finding comes back on the result
       expect(result).toEqual({
         type: "submit",
-        findings: ["the null case is untested"],
+        findings: ["the undefined case is untested"],
       });
     },
   );
@@ -433,12 +433,12 @@ describe("Feature: what an agent's result tool call means", () => {
       // When it submits a review carrying that finding
       const result = resultFromCall(state, {
         tool: "submit",
-        args: { findings: ["the null case is untested"] },
+        args: { findings: ["the undefined case is untested"] },
       });
       // Then the finding comes back on the result
       expect(result).toEqual({
         type: "submit",
-        findings: ["the null case is untested"],
+        findings: ["the undefined case is untested"],
       });
     },
   );
@@ -774,7 +774,7 @@ describe("Feature: what an agent's result tool call means", () => {
     const tools = await toolsOf("WORK_REVIEW");
     // When it submits both of them
     const result = await toolOf(tools, "submit").execute("id", {
-      findings: ["the null case is untested", "it leaks"],
+      findings: ["the undefined case is untested", "it leaks"],
     });
     // Then it reads back that the work was rejected, and by how much
     expect(textOf(result)).toBe("Work rejected with 2 finding(s).");

@@ -73,7 +73,7 @@ Two caches keep a 1s redraw cheap:
 ## Scrolling
 
 - every key moves every pane by the same amount, counted back from the bottom rather than forward from the top, so panes of different lengths move together instead of the longest one moving first
-- follow is the default (`bases` is `null`): every pane sticks to its own bottom and new lines appear
+- follow is the default (`bases` unset): every pane sticks to its own bottom and new lines appear
 - the first backwards movement freezes each pane's bottom into `bases`, so lines arriving in a busy pane no longer slide what you are reading; the `offsets` are measured from those frozen rows
 - one `offset` per pane, each saturating at that pane's own top: a pane that runs out of history stops at its first line while the others keep going, and it moves again on the first step forward rather than sitting still until the others have caught up — a single shared offset would bank that overshoot as dead travel
 - follow returns only when every pane is back at `offset` 0, which clears `bases`

@@ -22,7 +22,7 @@ const EFFECTS =
 
 interface Module {
   path: string;
-  layer: Layer | null;
+  layer?: Layer;
   source: string;
 }
 
@@ -85,16 +85,16 @@ function importsOf(module: Module): string[] {
   });
 }
 
-function layerOf(relative: string): Layer | null {
+function layerOf(relative: string): Layer | undefined {
   const head = at(relative.split(path.sep), 0);
-  return isLayer(head) ? head : null;
+  return isLayer(head) ? head : undefined;
 }
 
 describe("Feature: the dependency rule", () => {
   test("no module imports a layer further out than its own", async () => {
     // Given every module in the orchestrator, tagged with its layer
     const layered = (await modules()).filter(
-      (module): module is Module & { layer: Layer } => module.layer !== null,
+      (module): module is Module & { layer: Layer } => Boolean(module.layer),
     );
 
     // When each module's imports are resolved to the layer they land in
@@ -103,7 +103,7 @@ describe("Feature: the dependency rule", () => {
         .map((target) => ({ module, target, layer: layerOf(target) }))
         .filter(
           (edge) =>
-            edge.layer !== null &&
+            edge.layer &&
             LAYERS.indexOf(edge.layer) > LAYERS.indexOf(module.layer),
         )
         .map((edge) => `${module.path} -> ${edge.target}`),
@@ -116,7 +116,7 @@ describe("Feature: the dependency rule", () => {
   test("the domain and policy layers reach for no effect at all", async () => {
     // Given the two layers that hold the pure decisions
     const inner = (await modules()).filter(
-      (module) => module.layer !== null && INNER.includes(module.layer),
+      (module) => module.layer && INNER.includes(module.layer),
     );
 
     // Given those layers are the reason the decisions are testable in isolation
@@ -153,7 +153,7 @@ describe("Feature: the dependency rule", () => {
 
   test("the only modules outside a layer are the extensions and the test rig", async () => {
     // Given the modules that belong to no layer directory
-    const loose = (await modules()).filter((module) => module.layer === null);
+    const loose = (await modules()).filter((module) => !module.layer);
 
     // When their names are collected
     const names = loose.map((module) => module.path).sort();

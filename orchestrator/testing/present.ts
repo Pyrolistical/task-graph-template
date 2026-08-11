@@ -1,5 +1,5 @@
-export function present<T>(value: T | null | undefined, what: string): T {
-  if (value === null || value === undefined) {
+export function present<T>(value?: T, what = "value"): T {
+  if (!value) {
     throw new Error(`expected ${what}, got ${String(value)}`);
   }
   return value;

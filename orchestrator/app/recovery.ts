@@ -20,10 +20,7 @@ export class Recovery {
   async reclone(): Promise<void> {
     for (const [id, task] of await this.graph.list()) {
       const workspace = task.workspace;
-      if (
-        workspace === null ||
-        (await this.workspaces.exists(workspace.worktree))
-      ) {
+      if (!workspace || (await this.workspaces.exists(workspace.worktree))) {
         continue;
       }
       if (!(await this.workspaces.branchExists(workspace.branch))) {
@@ -46,7 +43,7 @@ export class Recovery {
 
   async reattach(): Promise<void> {
     const rows = await this.publisher.lastSlots();
-    if (rows === null) {
+    if (!rows) {
       return;
     }
 
@@ -54,12 +51,7 @@ export class Recovery {
       const runner = this.pool
         .runners()
         .find((one) => one.slot.name === row.name);
-      if (
-        runner === undefined ||
-        row.pid === null ||
-        row.task_id === null ||
-        !(await this.alive(row.pid))
-      ) {
+      if (!runner || !row.pid || !row.task_id || !(await this.alive(row.pid))) {
         continue;
       }
 
@@ -80,7 +72,7 @@ export class Recovery {
     const held = this.pool.busyTasks();
 
     for (const [id, task] of tasks) {
-      if (task.claimed_pid === null || held.has(id)) {
+      if (!task.claimed_pid || held.has(id)) {
         continue;
       }
       if (await this.alive(task.claimed_pid)) {

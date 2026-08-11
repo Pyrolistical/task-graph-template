@@ -88,7 +88,7 @@ export async function readFile(filePath: string): Promise<File> {
     const ends = tests[index + 1]?.at ?? source.length;
     const owner = describes.findLastIndex((one) => one.at < test.at);
     const suite = suites[owner];
-    if (suite === undefined) {
+    if (!suite) {
       continue;
     }
     suite.cases.push({

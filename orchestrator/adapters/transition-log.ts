@@ -27,7 +27,7 @@ export class TransitionLog implements Transitions {
     await log.file.use(async (handle) => {
       log.lines = (await readLines(handle)).slice(-cap);
       const last = log.lines[log.lines.length - 1];
-      log.seq = last === undefined ? 0 : entryOf(last, filePath).seq;
+      log.seq = !last ? 0 : entryOf(last, filePath).seq;
     });
     return log;
   }

@@ -52,7 +52,7 @@ export function viewJson(
   rows: unknown[],
   extra: Record<string, unknown> = {},
 ): string {
-  return `${JSON.stringify({ at: new Date().toISOString(), seq, ...extra, [key]: rows }, null, 2)}\n`;
+  return `${JSON.stringify({ at: new Date().toISOString(), seq, ...extra, [key]: rows }, undefined, 2)}\n`;
 }
 
 async function trimToLastBytes(
@@ -144,7 +144,7 @@ export class Runtime {
     return this.locking.clear();
   }
 
-  lockHolder(): Promise<number | null> {
+  lockHolder(): Promise<number | undefined> {
     return this.locking.holder();
   }
 

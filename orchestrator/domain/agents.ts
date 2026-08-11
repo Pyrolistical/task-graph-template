@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parse } from "./schema.ts";
+import { maybe, parse } from "./schema.ts";
 import { ALL_ROLES, type Role } from "./state-machine.ts";
 import { Activity } from "./activity.ts";
 
@@ -119,16 +119,16 @@ export const SlotRow = z.strictObject({
   index: z.int(),
   enabled: z.boolean(),
   state: SlotState,
-  task_id: z.string().nullable(),
-  role: z.enum(ALL_ROLES).nullable(),
-  pid: z.int().nullable(),
-  started_at: z.string().nullable(),
+  task_id: maybe(z.string()),
+  role: maybe(z.enum(ALL_ROLES)),
+  pid: maybe(z.int()),
+  started_at: maybe(z.string()),
   activity: Activity,
-  tokens: z.number().nullable(),
-  context_percent: z.number().nullable(),
+  tokens: maybe(z.number()),
+  context_percent: maybe(z.number()),
   compactions: z.int(),
-  session: z.string().nullable(),
-  retry: Retry.nullable(),
+  session: maybe(z.string()),
+  retry: maybe(Retry),
 });
 
 export type SlotRow = z.infer<typeof SlotRow>;
@@ -153,15 +153,15 @@ export function idleRow(slot: Slot, enabled = true): SlotRow {
     index: slot.index,
     enabled,
     state: enabled ? "IDLE" : "DISABLED",
-    task_id: null,
-    role: null,
-    pid: null,
-    started_at: null,
+    task_id: undefined,
+    role: undefined,
+    pid: undefined,
+    started_at: undefined,
     activity: { kind: "none" },
-    tokens: null,
-    context_percent: null,
+    tokens: undefined,
+    context_percent: undefined,
     compactions: 0,
-    session: null,
-    retry: null,
+    session: undefined,
+    retry: undefined,
   };
 }

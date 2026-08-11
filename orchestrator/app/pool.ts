@@ -8,7 +8,7 @@ import {
   type Retry,
   idleRow,
 } from "../domain/agents.ts";
-import { type Awaitable, orNull } from "../domain/awaitable.ts";
+import { type Awaitable, orUndefined } from "../domain/awaitable.ts";
 import { abortable } from "../domain/activity.ts";
 import { messageOf, uncaught } from "../domain/errors.ts";
 import { type IssueName } from "../domain/issues.ts";
@@ -29,42 +29,42 @@ export interface Checkout {
 export interface Runner {
   slot: Slot;
   state: SlotState;
-  taskId: TaskId | null;
-  taskState: ClaimState | null;
-  role: Role | null;
-  checkout: Checkout | null;
-  process: AgentProcess | null;
-  startedAt: string | null;
-  detachedPid: number | null;
-  session: string | null;
-  tokens: number | null;
-  contextPercent: number | null;
+  taskId?: TaskId;
+  taskState?: ClaimState;
+  role?: Role;
+  checkout?: Checkout;
+  process?: AgentProcess;
+  startedAt?: string;
+  detachedPid?: number;
+  session?: string;
+  tokens?: number;
+  contextPercent?: number;
   compactions: number;
   results: ResultCall[];
   issues: Map<IssueName, number>;
   backoff: number;
-  retry: Retry | null;
+  retry?: Retry;
 }
 
 function freshRunner(slot: Slot): Runner {
   return {
     slot,
     state: "IDLE",
-    taskId: null,
-    taskState: null,
-    role: null,
-    checkout: null,
-    process: null,
-    startedAt: null,
-    detachedPid: null,
-    session: null,
-    tokens: null,
-    contextPercent: null,
+    taskId: undefined,
+    taskState: undefined,
+    role: undefined,
+    checkout: undefined,
+    process: undefined,
+    startedAt: undefined,
+    detachedPid: undefined,
+    session: undefined,
+    tokens: undefined,
+    contextPercent: undefined,
     compactions: 0,
     results: [],
     issues: new Map(),
     backoff: BACKOFF_START_MS,
-    retry: null,
+    retry: undefined,
   };
 }
 
@@ -76,15 +76,10 @@ export interface Run {
   checkout: Checkout;
 }
 
-export function runOf(runner: Runner): Run | null {
+export function runOf(runner: Runner): Run | undefined {
   const { process, taskId, taskState, checkout } = runner;
-  if (
-    process === null ||
-    taskId === null ||
-    taskState === null ||
-    checkout === null
-  ) {
-    return null;
+  if (!process || !taskId || !taskState || !checkout) {
+    return undefined;
   }
   return { runner, process, taskId, state: taskState, checkout };
 }
@@ -118,7 +113,7 @@ export class Pool {
 
   runner(name: string): Runner {
     const runner = this.byName.get(name);
-    if (runner === undefined) {
+    if (!runner) {
       throw new Error(`no agent slot named "${name}"`);
     }
     return runner;
@@ -133,10 +128,10 @@ export class Pool {
       .map((runner) => runner.slot);
   }
 
-  busyTasks(): Set<TaskId | null> {
+  busyTasks(): Set<TaskId | undefined> {
     return new Set(
       this.runners()
-        .filter((runner) => runner.process !== null)
+        .filter((runner) => runner.process)
         .map((runner) => runner.taskId),
     );
   }
@@ -176,13 +171,13 @@ export class Pool {
 
   async abortSlot(name: string): Promise<SlotRow> {
     const runner = this.byName.get(name);
-    if (runner === undefined) {
+    if (!runner) {
       throw new Error(
         `no agent slot named "${name}"; the pool has ${[...this.byName.keys()].join(", ")}`,
       );
     }
 
-    if (runner.process === null || !runner.process.alive) {
+    if (!runner.process || !runner.process.alive) {
       throw new Error(`${name} is not running`);
     }
 
@@ -219,7 +214,7 @@ export class Pool {
 
   requireRun(runner: Runner): Run {
     const run = runOf(runner);
-    if (run === null) {
+    if (!run) {
       throw new Error(
         `${runner.slot.name} has no session to work in: it holds ${runner.taskId ?? "no task"}`,
       );
@@ -251,13 +246,11 @@ export class Pool {
     return Promise.all([...this.tracked]);
   }
 
-  async harvest(
-    workspace: { branch: string; worktree: string } | null,
-  ): Promise<void> {
-    if (
-      workspace === null ||
-      !(await this.workspaces.exists(workspace.worktree))
-    ) {
+  async harvest(workspace?: {
+    branch: string;
+    worktree: string;
+  }): Promise<void> {
+    if (!workspace || !(await this.workspaces.exists(workspace.worktree))) {
       return;
     }
     await this.workspaces.harvest(workspace.worktree, workspace.branch);
@@ -265,7 +258,7 @@ export class Pool {
 
   async stop(runner: Runner): Promise<void> {
     const process = runner.process;
-    if (process !== null) {
+    if (process) {
       process.close();
       if (await this.alive(process.pid)) {
         process.kill();
@@ -314,11 +307,11 @@ export class Pool {
   async readStats(): Promise<void> {
     await Promise.all(
       this.runners().map(async (runner) => {
-        if (runner.process === null || !runner.process.alive) {
+        if (!runner.process || !runner.process.alive) {
           return;
         }
-        const stats = await orNull(runner.process.stats());
-        if (stats === null) {
+        const stats = await orUndefined(runner.process.stats());
+        if (!stats) {
           return;
         }
         runner.tokens = stats.tokens ?? runner.tokens;
@@ -329,7 +322,7 @@ export class Pool {
 
   shutdown(): void {
     for (const runner of this.runners()) {
-      if (runner.process === null) {
+      if (!runner.process) {
         continue;
       }
       runner.state = "ABORTING";

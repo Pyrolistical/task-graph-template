@@ -9,7 +9,7 @@ function anAgent(state: ClaimState): Settlement {
     state,
     alive: true,
     stopReason: "toolUse",
-    looping: null,
+    looping: undefined,
     calls: [{ tool: "submit", args: submitArgs(state) }],
     diff: state.endsWith("_REVIEW") ? "unchanged" : "ok",
     worktree: { dirty: [], commits: state === "WORK" ? 1 : 0 },
@@ -169,7 +169,7 @@ describe("Feature: settling an agent that finished its turn", () => {
     const intents = decideSettle(settled);
 
     // Then the whole file is restored, with no section kept
-    expect(intents[0]).toEqual({ kind: "restore", section: null });
+    expect(intents[0]).toEqual({ kind: "restore", section: undefined });
 
     // Then the modified-assignment issue is raised against it
     expect(at(intents, 1).kind).toBe("raise");

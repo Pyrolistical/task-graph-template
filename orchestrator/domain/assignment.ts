@@ -16,9 +16,9 @@ export function diffAssignment(
 export function restored(
   dispatched: string,
   live: string,
-  section: string | null,
+  section?: string,
 ): string {
-  if (section === null) {
+  if (!section) {
     return dispatched;
   }
   const heading = `\n${section}\n`;

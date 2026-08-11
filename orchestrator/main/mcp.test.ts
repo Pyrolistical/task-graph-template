@@ -67,7 +67,7 @@ async function connect(fixture: Fixture) {
     tasksDir: fixture.tasksDir,
     serverRoot: fixture.serverRoot,
   });
-  if (started.server !== null) {
+  if (started.server) {
     openServers.push(started.server);
     openTickers.push(startTicking(started.server));
   }
@@ -793,11 +793,11 @@ describe("Feature: the tool surface the manager works through", () => {
       const error = await resourceOf(
         client,
         "orchestrator://error",
-        z.looseObject({ error: z.string().nullable() }),
+        z.looseObject({ error: z.string().optional() }),
       );
 
       // Then there is no error on it
-      expect(error.error).toBeNull();
+      expect(error.error).toBeUndefined();
 
       await client.close();
     },
@@ -868,7 +868,7 @@ describe("Feature: a server that could not start", () => {
       const error = await resourceOf(
         client,
         "orchestrator://error",
-        z.looseObject({ error: z.string().nullable() }),
+        z.looseObject({ error: z.string().optional() }),
       );
 
       // Then it says the server failed to start, and what the pool file lacks

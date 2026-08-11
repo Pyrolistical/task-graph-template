@@ -11,7 +11,7 @@ export function keys(chunk: string): string[] {
     const sequence =
       rest.match(/^\x1b\[<\d+;\d+;\d+[mM]/) ??
       rest.match(/^\x1b\[[0-9;]*[A-Za-z~]/);
-    const key = sequence === null ? rest.slice(0, 1) : sequence[0];
+    const key = sequence?.[0] ?? rest.slice(0, 1);
     found.push(key);
     at += key.length;
   }
@@ -26,10 +26,10 @@ export interface Mouse {
   pressed: boolean;
 }
 
-export function mouse(key: string): Mouse | null {
+export function mouse(key: string): Mouse | undefined {
   const match = key.match(/^\x1b\[<(\d+);(\d+);(\d+)([mM])$/);
-  if (match === null) {
-    return null;
+  if (!match) {
+    return undefined;
   }
   return {
     button: parseInt(groupOf(match, 1), 10),
@@ -47,7 +47,7 @@ export function within(region: Region, event: Mouse): boolean {
   );
 }
 
-export function hitAt(hits: Hit[], event: Mouse): Command | Local | null {
+export function hitAt(hits: Hit[], event: Mouse): Command | Local | undefined {
   const hit = hits.find((candidate) => within(candidate, event));
-  return hit === undefined ? null : hit.command;
+  return hit?.command;
 }

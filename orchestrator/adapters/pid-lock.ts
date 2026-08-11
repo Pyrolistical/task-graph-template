@@ -16,7 +16,7 @@ export class PidLock {
         return;
       }
       const holder = await this.holder();
-      if (holder !== null && (await isProcessAlive(holder))) {
+      if (holder && (await isProcessAlive(holder))) {
         throw new Error(`${this.what} is already in use by server ${holder}`);
       }
       await fs.rm(this.filePath, { force: true });
@@ -33,18 +33,18 @@ export class PidLock {
     }
   }
 
-  async holder(): Promise<number | null> {
+  async holder(): Promise<number | undefined> {
     let held: string;
     try {
       held = await fs.readFile(this.filePath, "utf-8");
     } catch (err) {
       if (hasCode(err, "ENOENT")) {
-        return null;
+        return undefined;
       }
       throw err;
     }
     const holder = Number.parseInt(held, 10);
-    return Number.isInteger(holder) ? holder : null;
+    return Number.isInteger(holder) ? holder : undefined;
   }
 
   private async claim(): Promise<boolean> {

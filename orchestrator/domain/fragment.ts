@@ -28,7 +28,7 @@ export function render(fragment: string, vars: FragmentVars): string {
   for (const line of lines) {
     const open = SECTION_OPEN.exec(line);
 
-    if (open === null) {
+    if (!open) {
       out.push(substitute(line, vars));
       continue;
     }
@@ -39,7 +39,7 @@ export function render(fragment: string, vars: FragmentVars): string {
 
     for (const inner of lines) {
       const close = SECTION_CLOSE.exec(inner);
-      if (close !== null) {
+      if (close) {
         const closing = groupOf(close, 1);
         if (closing !== name) {
           throw new Error(`Fragment closes "${closing}" inside "${name}"`);

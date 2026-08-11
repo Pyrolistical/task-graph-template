@@ -75,7 +75,7 @@ export class Checker {
 
   private async runAll(taskId: TaskId): Promise<void> {
     const task = await this.graph.read(taskId);
-    if (task === null) {
+    if (!task) {
       throw new Error(`task "${taskId}" vanished before its checks could run`);
     }
     const worktree = task.workspace?.worktree ?? this.repo;

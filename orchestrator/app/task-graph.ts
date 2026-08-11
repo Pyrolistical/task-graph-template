@@ -101,7 +101,7 @@ export class TaskGraph {
     return { tasks, blocking: blockingCounts(tasks) };
   }
 
-  read(taskId: TaskId): Awaitable<TaskMeta | null> {
+  read(taskId: TaskId): Awaitable<TaskMeta | undefined> {
     return this.tasks.read(taskId);
   }
 
@@ -141,13 +141,13 @@ export class TaskGraph {
     }
     const to = result.to ?? before?.state ?? "NEW";
 
-    if (to === "CLOSED" && before !== undefined) {
+    if (to === "CLOSED" && before) {
       this.closed.set(taskId, {
         ...taskRow(before, blockingCounts(tasks).get(taskId) ?? 0),
         state: "CLOSED",
         state_entered: new Date().toISOString(),
-        claimed_by: null,
-        worktree: null,
+        claimed_by: undefined,
+        worktree: undefined,
       });
       await this.teardown(before);
       await this.paths.discard(taskId);
@@ -171,7 +171,7 @@ export class TaskGraph {
   ): Promise<TransitionResult> {
     await this.reviews.setFindings(taskId, findings);
     const state = (await this.tasks.read(taskId))?.state;
-    if (state !== undefined && isReviewState(state)) {
+    if (state && isReviewState(state)) {
       const failures = (await this.reviews.failures(taskId)) + 1;
       if (failures >= REVIEW_FAILURE_LIMIT) {
         await this.reviews.clearFailures(taskId);
@@ -189,7 +189,7 @@ export class TaskGraph {
 
   async teardown(task: TaskMeta): Promise<void> {
     const workspace = task.workspace;
-    if (workspace === null) {
+    if (!workspace) {
       return;
     }
 

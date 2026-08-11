@@ -44,20 +44,20 @@ type StageFields = {
       tools: string;
       section: string;
       missing: string;
-      back: null;
+      back: undefined;
     }
   | {
       role: "reviewer";
       tools: string;
-      section: null;
-      missing: null;
+      section: undefined;
+      missing: undefined;
       back: ValidState;
     }
   | {
-      role: null;
-      tools: null;
-      section: null;
-      missing: null;
+      role: undefined;
+      tools: undefined;
+      section: undefined;
+      missing: undefined;
       back: ValidState;
     }
 );
@@ -71,7 +71,7 @@ export const STAGE_OF = {
     section: "## Design",
     missing: "missing-design",
     guard: "untouched",
-    back: null,
+    back: undefined,
     body: false,
   },
   DESIGN_REVIEW: {
@@ -79,8 +79,8 @@ export const STAGE_OF = {
     phase: "design",
     role: "reviewer",
     tools: "design-reviewer",
-    section: null,
-    missing: null,
+    section: undefined,
+    missing: undefined,
     guard: "untouched",
     back: "DESIGN",
     body: true,
@@ -93,7 +93,7 @@ export const STAGE_OF = {
     section: "## Todos",
     missing: "missing-todos",
     guard: "untouched",
-    back: null,
+    back: undefined,
     body: false,
   },
   PLAN_REVIEW: {
@@ -101,8 +101,8 @@ export const STAGE_OF = {
     phase: "plan",
     role: "reviewer",
     tools: "plan-reviewer",
-    section: null,
-    missing: null,
+    section: undefined,
+    missing: undefined,
     guard: "untouched",
     back: "PLAN",
     body: true,
@@ -115,16 +115,16 @@ export const STAGE_OF = {
     section: "## Implementation Notes",
     missing: "missing-notes",
     guard: "committed",
-    back: null,
+    back: undefined,
     body: true,
   },
   CHECK: {
     state: "CHECK",
     phase: "work",
-    role: null,
-    tools: null,
-    section: null,
-    missing: null,
+    role: undefined,
+    tools: undefined,
+    section: undefined,
+    missing: undefined,
     guard: "none",
     back: "WORK",
     body: false,
@@ -134,8 +134,8 @@ export const STAGE_OF = {
     phase: "work",
     role: "reviewer",
     tools: "work-reviewer",
-    section: null,
-    missing: null,
+    section: undefined,
+    missing: undefined,
     guard: "none",
     back: "WORK",
     body: false,
@@ -143,10 +143,10 @@ export const STAGE_OF = {
   MANAGER_REVIEW: {
     state: "MANAGER_REVIEW",
     phase: "work",
-    role: null,
-    tools: null,
-    section: null,
-    missing: null,
+    role: undefined,
+    tools: undefined,
+    section: undefined,
+    missing: undefined,
     guard: "none",
     back: "WORK",
     body: false,
@@ -169,8 +169,8 @@ export type ReviewState = ReviewStage["state"];
 
 export type AdvancingState = Exclude<StageState, "MANAGER_REVIEW">;
 
-export const CLAIM_STAGES = STAGES.filter(
-  (stage): stage is ClaimStage => stage.role !== null,
+export const CLAIM_STAGES = STAGES.filter((stage): stage is ClaimStage =>
+  Boolean(stage.role),
 );
 
 export const CLAIM_STATES = CLAIM_STAGES.map((stage) => stage.state);
@@ -188,7 +188,7 @@ export const NEXT_STATE = tableOf(
   (stage) => stage.state,
   (stage, index) => {
     const next = STAGES[index + 1];
-    if (next === undefined) {
+    if (!next) {
       throw new Error(`Stage "${stage.state}" is followed by nothing`);
     }
     return next.state;
@@ -254,7 +254,7 @@ function allowedFrom(state: ValidState): TransitionName[] {
   }
 
   const stage = STAGE_OF[state];
-  if (stage.role === null) {
+  if (!stage.role) {
     return ["pass", "fail", "hold"];
   }
   return stage.role === "reviewer"
@@ -285,19 +285,19 @@ interface Landing {
 
 export type TransitionResult = Landing &
   (
-    | { to: null }
+    | { to: undefined }
     | { to: Exclude<TaskState, "CLOSED"> }
     | { to: "CLOSED"; closedPath: string }
   );
 
 export type Decision =
-  { kind: "stay" } | { kind: "move"; to: TaskState; body: string | null };
+  { kind: "stay" } | { kind: "move"; to: TaskState; body?: string };
 
 function stay(): Decision {
   return { kind: "stay" };
 }
 
-function move(to: TaskState, body: string | null = null): Decision {
+function move(to: TaskState, body?: string): Decision {
   return { kind: "move", to, body };
 }
 
@@ -335,7 +335,7 @@ function advancing(state: ValidState, name: TransitionName): AdvancingState {
 
 function backFrom(state: StageState, name: TransitionName): ValidState {
   const back = STAGE_OF[state].back;
-  if (back === null) {
+  if (!back) {
     throw new Error(
       `"${name}" sends a task back, and "${state}" has nowhere to go`,
     );
@@ -364,7 +364,7 @@ function mutate(
       const stage = advancing(state, name);
       const submitted = STAGE_OF[stage].body
         ? requireText(args.body, "body")
-        : null;
+        : undefined;
       return move(NEXT_STATE[stage], submitted);
     }
 
@@ -434,11 +434,7 @@ export function decide(
       `Transition "${name}" is not valid from state "${from}". Valid transitions: ${allowed.join(", ")}`,
     );
   }
-  if (
-    isClaimState(from) &&
-    AGENT_SPEECH.includes(name) &&
-    meta.claimed_by === null
-  ) {
+  if (isClaimState(from) && AGENT_SPEECH.includes(name) && !meta.claimed_by) {
     throw new Error(
       `Transition "${name}" is the agent holding "${meta.id}" speaking, but nothing is claiming it`,
     );

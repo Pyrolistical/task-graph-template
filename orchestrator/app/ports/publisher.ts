@@ -29,6 +29,6 @@ export type ViewName = (typeof VIEW_NAMES)[number];
 export interface Publisher {
   publish(views: Views): Awaitable<void>;
   read(name: ViewName): Awaitable<string>;
-  lastSlots(): Awaitable<SlotRow[] | null>;
+  lastSlots(): Awaitable<SlotRow[] | undefined>;
   log(line: string): Awaitable<void>;
 }

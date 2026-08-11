@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { maybe } from "./schema.ts";
 import { type Activity, toolCall, toolTarget } from "./activity.ts";
 import type { Awaitable } from "./awaitable.ts";
 import { type ResultCall, isResultTool } from "./results.ts";
@@ -41,7 +42,7 @@ const MessageEnd = z.looseObject({
   message: z.looseObject({
     role: z.string(),
     stopReason: z.enum(STOP_REASONS).optional(),
-    errorMessage: z.string().nullish(),
+    errorMessage: maybe(z.string()),
     usage: z.looseObject({ output: z.number().optional() }).optional(),
   }),
 });
@@ -76,12 +77,12 @@ export const LOOP_LIMIT = 10;
 
 export interface StreamState {
   activity: Activity;
-  stopReason: StopReason | null;
-  errorMessage: string | null;
+  stopReason?: StopReason;
+  errorMessage?: string;
   settled: boolean;
   retrying: boolean;
-  failure: string | null;
-  looping: string | null;
+  failure?: string;
+  looping?: string;
 }
 
 function signature(record: PiRecord): string {
@@ -107,12 +108,8 @@ export class PiStream {
 
   readonly state: StreamState = {
     activity: { kind: "none" },
-    stopReason: null,
-    errorMessage: null,
     settled: false,
     retrying: false,
-    failure: null,
-    looping: null,
   };
 
   constructor(
@@ -143,7 +140,7 @@ export class PiStream {
     switch (record.type) {
       case "response": {
         const response = Response.parse(record);
-        if (response.id !== undefined) {
+        if (response.id) {
           this.waiting.get(response.id)?.resolve(response);
           this.waiting.delete(response.id);
         }
@@ -199,10 +196,10 @@ export class PiStream {
         if (typeof output === "number") {
           this.onUsage({ timestampMs: Date.now(), tokens: output });
         }
-        if (message.stopReason !== undefined) {
+        if (message.stopReason) {
           this.state.stopReason = message.stopReason;
         }
-        this.state.errorMessage = message.errorMessage ?? null;
+        this.state.errorMessage = message.errorMessage;
         break;
       }
       case "agent_settled": {
@@ -232,15 +229,15 @@ export class PiStream {
 
   starting(): void {
     this.state.settled = false;
-    this.state.stopReason = null;
-    this.state.errorMessage = null;
+    this.state.stopReason = undefined;
+    this.state.errorMessage = undefined;
     this.state.activity = { kind: "thinking", started_at: Date.now() };
-    this.state.looping = null;
+    this.state.looping = undefined;
     this.repeated = { signature: "", count: 0 };
   }
 
   expect(id: string): Promise<PiResponse> {
-    if (this.state.failure !== null) {
+    if (this.state.failure) {
       return Promise.reject(new Error(this.state.failure));
     }
     return new Promise((resolve, reject) => {

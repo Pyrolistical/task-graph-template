@@ -24,7 +24,7 @@ export interface Tasks {
     tasks: Map<TaskId, TaskMeta>;
     problems: Map<string, string>;
   }>;
-  read(id: TaskId): Awaitable<TaskMeta | null>;
+  read(id: TaskId): Awaitable<TaskMeta | undefined>;
   body(id: TaskId): Awaitable<string>;
   create(title: string): Awaitable<CreatedTask>;
   writeBody(id: TaskId, body: string): Awaitable<string>;

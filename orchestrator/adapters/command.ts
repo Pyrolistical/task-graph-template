@@ -20,31 +20,31 @@ export async function writeCommand(
   }
   await writeAtomic(
     runtime.consoleCommand,
-    `${JSON.stringify(command, null, 2)}\n`,
+    `${JSON.stringify(command, undefined, 2)}\n`,
   );
   return true;
 }
 
-function parseCommand(raw: string): Command | null {
+function parseCommand(raw: string): Command | undefined {
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    return null;
+    return undefined;
   }
   const result = Command.safeParse(value);
-  return result.success ? result.data : null;
+  return result.success ? result.data : undefined;
 }
 
 export async function takeCommand(runtime: {
   consoleCommand: string;
-}): Promise<Command | null> {
+}): Promise<Command | undefined> {
   let raw: string;
   try {
     raw = await fs.readFile(runtime.consoleCommand, "utf-8");
   } catch (err) {
     if (hasCode(err, "ENOENT")) {
-      return null;
+      return undefined;
     }
     throw err;
   }
@@ -65,7 +65,7 @@ export function watchCommands(
         return;
       }
       const command = await takeCommand(runtime);
-      if (command === null) {
+      if (!command) {
         return;
       }
       await apply(command);
@@ -104,7 +104,7 @@ export function watchCommands(
 export class CommandFile implements CommandChannel {
   constructor(private readonly runtime: Runtime) {}
 
-  take(): Promise<Command | null> {
+  take(): Promise<Command | undefined> {
     return takeCommand(this.runtime);
   }
 

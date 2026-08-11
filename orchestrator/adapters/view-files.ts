@@ -40,9 +40,9 @@ export class ViewFiles implements Publisher {
     return (await exists(filePath)) ? fs.readFile(filePath, "utf-8") : "{}";
   }
 
-  async lastSlots(): Promise<SlotRow[] | null> {
+  async lastSlots(): Promise<SlotRow[] | undefined> {
     if (!(await exists(this.runtime.slotsView))) {
-      return null;
+      return undefined;
     }
     const view = parse(
       SlotsViewOfAnyServer,

@@ -155,7 +155,7 @@ export function drop(spans: Line, width: number): Line {
     let rest = chars.slice(count);
     const split = rest[0];
     let room = "";
-    if (used + head < width && split !== undefined) {
+    if (used + head < width && split) {
       room = " ".repeat(used + head + charWidth(split) - width);
       rest = rest.slice(1);
     }

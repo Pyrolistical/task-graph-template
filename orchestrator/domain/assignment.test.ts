@@ -81,7 +81,7 @@ describe("Feature: restoring an assignment an agent modified", () => {
     const live = "the body\n\n## Design\nthe design\n\n## Review\nmine\n";
 
     // When the assignment is restored with no section to keep
-    const kept = restored(DISPATCHED, live, null);
+    const kept = restored(DISPATCHED, live, undefined);
 
     // Then the whole file goes back to what was dispatched
     expect(kept).toBe(DISPATCHED);

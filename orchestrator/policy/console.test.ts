@@ -130,12 +130,12 @@ describe("Feature: joining a slot to the task it is running", () => {
     const pane = paneOf(view);
 
     // Then the pane has nothing to draw but the slot itself
-    expect(pane.task).toBeNull();
-    expect(pane.check).toBeNull();
-    expect(pane.sinceMs).toBeNull();
+    expect(pane.task).toBeUndefined();
+    expect(pane.check).toBeUndefined();
+    expect(pane.sinceMs).toBeUndefined();
     expect(detailLine(pane)).toBe("no task");
     expect(activityLine(pane)).toBe("");
-    expect(statsLine(pane, null)).toBe("");
+    expect(statsLine(pane, undefined)).toBe("");
   });
 
   test("a task the view has dropped still draws from the agent row", () => {
@@ -146,7 +146,7 @@ describe("Feature: joining a slot to the task it is running", () => {
     const pane = paneOf(view);
 
     // Then the pane still names the task and the role, without its state
-    expect(pane.task).toBeNull();
+    expect(pane.task).toBeUndefined();
     expect(detailLine(pane)).toBe("task 000123 worker pid 4242");
   });
 
@@ -186,7 +186,7 @@ describe("Feature: the numbers on a pane header", () => {
     const pane = paneOf({ slots: [busyRow({ compactions: 3 })] });
 
     // When the stats line is drawn
-    const stats = statsLine(pane, null);
+    const stats = statsLine(pane, undefined);
 
     // Then the compaction count follows the context percentage
     expect(stats).toBe("ctx 42% x3");
@@ -445,7 +445,7 @@ describe("Feature: scrolling every pane together", () => {
 
   test("the first step back freezes where every pane's bottom was", () => {
     // Given every pane following the bottom of its own transcript
-    const scroll: Scroll = { bases: null, offsets: [] };
+    const scroll: Scroll = { bases: undefined, offsets: [] };
 
     // When the reader steps back one line
     scrollBack(scroll, [4, 9], 1);
@@ -467,7 +467,7 @@ describe("Feature: scrolling every pane together", () => {
 
   test("a pane that runs out of history stops without holding the others", () => {
     // Given one pane with four lines of history and one with nine
-    const scroll: Scroll = { bases: null, offsets: [] };
+    const scroll: Scroll = { bases: undefined, offsets: [] };
 
     // When the reader steps back six lines
     scrollBack(scroll, [4, 9], 6);
@@ -489,13 +489,13 @@ describe("Feature: scrolling every pane together", () => {
 
   test("moving forward while already following does nothing", () => {
     // Given every pane following the bottom of its own transcript
-    const scroll: Scroll = { bases: null, offsets: [] };
+    const scroll: Scroll = { bases: undefined, offsets: [] };
 
     // When the reader moves forward
     scrollForward(scroll, 3);
 
     // Then nothing changes, because there is nothing below the bottom
-    expect(scroll).toEqual({ bases: null, offsets: [] });
+    expect(scroll).toEqual({ bases: undefined, offsets: [] });
   });
 
   test("every pane reaching its bottom puts the console back into following", () => {
@@ -506,12 +506,12 @@ describe("Feature: scrolling every pane together", () => {
     scrollForward(scroll, 3);
 
     // Then the frozen bottoms are dropped and the console follows again
-    expect(scroll).toEqual({ bases: null, offsets: [] });
+    expect(scroll).toEqual({ bases: undefined, offsets: [] });
   });
 
   test("the top key takes every pane to its first line", () => {
     // Given every pane following the bottom of its own transcript
-    const scroll: Scroll = { bases: null, offsets: [] };
+    const scroll: Scroll = { bases: undefined, offsets: [] };
 
     // When the reader jumps to the top
     scrollTop(scroll, [4, 9]);
@@ -528,7 +528,7 @@ describe("Feature: scrolling every pane together", () => {
     scrollBottom(scroll);
 
     // Then the frozen bottoms are dropped and the console follows again
-    expect(scroll).toEqual({ bases: null, offsets: [] });
+    expect(scroll).toEqual({ bases: undefined, offsets: [] });
   });
 
   test("the new messages button sits centred one row above the bottom", () => {
@@ -649,7 +649,7 @@ describe("Feature: drawing the whole screen", () => {
       pane: paneOf({
         slots: [busyRow({ ...SLOTS[index % SLOTS.length], task_id: "000123" })],
       }),
-      rate: null,
+      rate: undefined,
       lines: (width: number) =>
         new PaneLines().update([entryOf("working")], width),
     }));
@@ -670,7 +670,7 @@ describe("Feature: drawing the whole screen", () => {
       pane: paneOf({
         slots: [idleRow(at(SLOTS, index % SLOTS.length), false)],
       }),
-      rate: null,
+      rate: undefined,
       lines: (width: number) => new PaneLines().update([], width),
     };
   }
@@ -804,7 +804,7 @@ describe("Feature: drawing the whole screen", () => {
     // Then there is no switch and nothing to scroll, because there is no pane
     expect(frame.hits).toEqual([]);
     expect(frame.bases).toEqual([]);
-    expect(frame.news).toBeNull();
+    expect(frame.news).toBeUndefined();
   });
 
   test("a pool with no agents says which file to add one to", () => {
@@ -835,7 +835,7 @@ describe("Feature: drawing the whole screen", () => {
     // Then there is no switch and nothing to scroll, because there is no pane
     expect(frame.hits).toEqual([]);
     expect(frame.bases).toEqual([]);
-    expect(frame.news).toBeNull();
+    expect(frame.news).toBeUndefined();
   });
 
   test("the screen is exactly one line per row of the terminal", () => {
@@ -929,7 +929,7 @@ describe("Feature: drawing the whole screen", () => {
     const drawn = screen(panes, [], layoutOf());
 
     // Then no button appears, because the reader is already at the newest line
-    expect(drawn.news).toBeNull();
+    expect(drawn.news).toBeUndefined();
     expect(drawn.lines.join("")).not.toContain(NEWS);
   });
 
@@ -942,7 +942,7 @@ describe("Feature: drawing the whole screen", () => {
     const { news } = screen(deep(8), [], layoutOf({ scroll }));
 
     // Then no button appears, because nothing has arrived since it froze
-    expect(news).toBeNull();
+    expect(news).toBeUndefined();
   });
 
   test("lines arriving do not move what a scrolled screen is showing", () => {
@@ -1051,7 +1051,7 @@ describe("Feature: drawing the whole screen", () => {
     ];
 
     // Then only the click inside the target sends the command
-    expect(clicked).toEqual([abort.command, null]);
+    expect(clicked).toEqual([abort.command, undefined]);
   });
 
   test("an idle pane offers no abort target", () => {
@@ -1059,7 +1059,7 @@ describe("Feature: drawing the whole screen", () => {
     const panes = [
       {
         pane: paneOf({ slots: [idleRow(SLOTS[0])] }),
-        rate: null,
+        rate: undefined,
         lines: (width: number) =>
           new PaneLines().update([entryOf("nothing")], width),
       },
@@ -1170,7 +1170,7 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf();
 
     // When its header is drawn
-    const lines = header(pane, null, 60, 1000);
+    const lines = header(pane, 60, 1000);
 
     // Then the switch comes first, then the identity, then how long it has run
     expect(renderLine(at(lines, 0))).toBe(
@@ -1183,7 +1183,7 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf();
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, null, 30, 1000), 0));
+    const line = renderLine(at(header(pane, 30, 1000), 0));
 
     // Then the identity is what gives way, and the row still fills the pane
     expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
@@ -1195,7 +1195,7 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf({ slots: [idleRow(SLOTS[0], false)] });
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, null, 60, 1000), 0));
+    const line = renderLine(at(header(pane, 60, 1000), 0));
 
     // Then the switch says disabled and the slot itself still reads as idle
     expect(line).toBe(
@@ -1277,7 +1277,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf();
 
     // When the header is drawn
-    const line = renderLine(at(header(pane, null, 60, 1000), 2));
+    const line = renderLine(at(header(pane, 60, 1000), 2));
 
     // Then the activity is at the left of the row and the button at its right
     expect(line).toBe(
@@ -1290,7 +1290,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf({ slots: [idleRow(SLOTS[0])] });
 
     // When the header is drawn
-    const line = renderLine(at(header(pane, null, 60, 1000), 2));
+    const line = renderLine(at(header(pane, 60, 1000), 2));
 
     // Then the activity row carries nothing at all
     expect(line).toBe("\x1b[2m\x1b[0m");
@@ -1312,7 +1312,7 @@ describe("Feature: the abort button on a pane", () => {
     });
 
     // When the header is drawn for a thirty-column pane
-    const line = renderLine(at(header(pane, null, 30, 1000), 2));
+    const line = renderLine(at(header(pane, 30, 1000), 2));
 
     // Then the command is clipped, the elapsed time and button both survive
     expect(line).toBe(

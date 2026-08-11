@@ -65,7 +65,7 @@ export function taskRowOf(overrides: Partial<TaskRow> = {}): TaskRow {
     depends_on: [],
     blocking: 0,
     claimed_by: SLOTS[0].name,
-    held_reason: null,
+    held_reason: undefined,
     worktree: "/tmp/worktree",
     ...overrides,
   };
@@ -90,8 +90,8 @@ export function candidateOf(overrides: Partial<Candidate> = {}): Candidate {
     state: "WORK",
     role: "worker",
     blocking: 0,
-    prefer_slot: null,
-    session: null,
+    prefer_slot: undefined,
+    session: undefined,
     ...overrides,
   };
 }
@@ -101,7 +101,7 @@ export function layoutOf(overrides: Partial<Layout> = {}): Layout {
     columns: 100,
     rows: 12,
     nowMs: 1000,
-    scroll: { bases: null, offsets: [] },
+    scroll: { bases: undefined, offsets: [] },
     ...overrides,
   };
 }

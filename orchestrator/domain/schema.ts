@@ -1,5 +1,9 @@
 import type { z } from "zod";
 
+export function maybe<T extends z.ZodType>(schema: T) {
+  return schema.nullish().transform((value) => value ?? undefined);
+}
+
 export class SchemaError extends Error {
   readonly issues: string[];
 

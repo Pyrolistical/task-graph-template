@@ -18,9 +18,9 @@ export interface InboxRow {
   title: string;
   rank: InboxRank;
   blocking: number;
-  held_reason: string | null;
-  branch: string | null;
-  waiting_since: string | null;
+  held_reason?: string;
+  branch?: string;
+  waiting_since?: string;
 }
 
 export function inbox(
@@ -39,7 +39,7 @@ export function inbox(
       rank: task.state,
       blocking: blocking.get(id) ?? 0,
       held_reason: task.held_reason,
-      branch: task.workspace?.branch ?? null,
+      branch: task.workspace?.branch,
       waiting_since: task.state_entered,
     });
   }

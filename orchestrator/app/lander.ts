@@ -44,9 +44,7 @@ export class Lander {
         }
       }
 
-      await this.pool.harvest(
-        (await this.graph.read(taskId))?.workspace ?? null,
-      );
+      await this.pool.harvest((await this.graph.read(taskId))?.workspace);
     }
 
     if (await this.workspaces.branchExists(branch)) {
@@ -70,10 +68,10 @@ export class Lander {
 
   async abort(taskId: TaskId): Promise<TransitionResult> {
     const task = await this.requireAbortable(taskId);
-    const branch = task.workspace?.branch ?? null;
+    const branch = task.workspace?.branch;
 
     if (
-      branch !== null &&
+      branch &&
       (await this.workspaces.branchExists(branch)) &&
       (await this.workspaces.isAncestor(branch, this.base))
     ) {
@@ -87,7 +85,7 @@ export class Lander {
 
   private async requireManagerReview(taskId: TaskId): Promise<TaskMeta> {
     const task = (await this.graph.list()).get(taskId);
-    if (task === undefined || task.state !== "MANAGER_REVIEW") {
+    if (!task || task.state !== "MANAGER_REVIEW") {
       throw new Error(`task "${taskId}" is not in MANAGER_REVIEW`);
     }
     return task;
@@ -95,7 +93,7 @@ export class Lander {
 
   private async requireAbortable(taskId: TaskId): Promise<TaskMeta> {
     const task = (await this.graph.list()).get(taskId);
-    if (task === undefined || !ABORTABLE_STATES.includes(task.state)) {
+    if (!task || !ABORTABLE_STATES.includes(task.state)) {
       throw new Error(
         `task "${taskId}" is not in ${ABORTABLE_STATES.join(" or ")}`,
       );
