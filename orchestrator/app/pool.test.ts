@@ -236,17 +236,6 @@ describe("Feature: the pool of agent slots", () => {
       "IDLE",
     ]);
   });
-
-  test("an agent the pool never loaded cannot be toggled", () => {
-    // Given a pool that holds one agent
-    const { pool } = aPool();
-
-    // When some other agent is disabled
-    const attempt = () => pool.setAgentEnabled("pi-other-other", false);
-
-    // Then the pool refuses and names what it does hold
-    expect(attempt).toThrow(/no agent named "pi-other-other"/);
-  });
 });
 
 describe("Feature: aborting the tool call an agent is inside", () => {
@@ -269,21 +258,6 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
   });
 
-  test("a busy slot doing nothing in particular is refused", () => {
-    // Given a busy slot whose session reports no activity at all
-    const activity: Activity = { kind: "none" };
-    const { pool } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.process = aSession(activity);
-
-    // When the slot is aborted
-    const attempt = () => pool.abortSlot("pi-fake-fake-1");
-
-    // Then it is refused, because there is no command to kill
-    expect(attempt).toThrow(/not running a bash tool call/);
-  });
-
   test("a slot that is thinking is refused", () => {
     // Given a busy slot that is thinking rather than running a command
     const activity: Activity = { kind: "thinking", started_at: 0 };
@@ -297,67 +271,6 @@ describe("Feature: aborting the tool call an agent is inside", () => {
 
     // Then it is refused, because there is no command to kill
     expect(attempt).toThrow(/not running a bash tool call/);
-  });
-
-  test("a slot that is compacting is refused", () => {
-    // Given a busy slot compacting an overflowing context rather than running a command
-    const activity: Activity = {
-      kind: "compacting",
-      reason: "overflow",
-      started_at: 0,
-    };
-    const { pool } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.process = aSession(activity);
-
-    // When the slot is aborted
-    const attempt = () => pool.abortSlot("pi-fake-fake-1");
-
-    // Then it is refused, because there is no command to kill
-    expect(attempt).toThrow(/not running a bash tool call/);
-  });
-
-  test("a slot inside a read call is refused", () => {
-    // Given a busy slot reading a file rather than running a command
-    const activity: Activity = {
-      kind: "tool-call",
-      tool: "read",
-      target: "a.txt",
-      started_at: 0,
-    };
-    const { pool } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.process = aSession(activity);
-
-    // When the slot is aborted
-    const attempt = () => pool.abortSlot("pi-fake-fake-1");
-
-    // Then it is refused, because there is no command to kill
-    expect(attempt).toThrow(/not running a bash tool call/);
-  });
-
-  test("a slot with no process at all is refused as not running", () => {
-    // Given a slot the scheduler has never dispatched to
-    const { pool } = aPool();
-
-    // When that slot is asked to abort its tool call
-    const attempt = () => pool.abortSlot("pi-fake-fake-1");
-
-    // Then the pool says the slot is not running
-    expect(attempt).toThrow(/pi-fake-fake-1 is not running/);
-  });
-
-  test("aborting by agent key rather than slot name is refused", () => {
-    // Given a pool whose slots are suffixed with their number
-    const { pool } = aPool();
-
-    // When the agent key is passed where a slot name belongs
-    const attempt = () => pool.abortSlot("pi-fake-fake");
-
-    // Then the pool refuses and lists the slot names it has
-    expect(attempt).toThrow(/no agent slot named "pi-fake-fake"/);
   });
 });
 

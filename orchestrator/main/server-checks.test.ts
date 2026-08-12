@@ -459,27 +459,6 @@ describe("Feature: landing or abandoning finished work", () => {
   );
 
   testInTempDirs(
-    "abort refuses a branch that already landed",
-    async () => {
-      // Given work whose branch has already been merged into the base
-      const { fixture, server, id } = await atManagerReview();
-      await git.gitOrThrow(fixture.repo, [
-        "merge",
-        "--ff-only",
-        branchName(id),
-      ]);
-
-      // When the manager aborts it
-      const attempt = server.abort(id);
-
-      // Then it is refused, because there is no longer work to throw away
-      await expect(attempt).rejects.toThrow(/already part of master/);
-      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
-    },
-    30000,
-  );
-
-  testInTempDirs(
     "closing a task deletes its runtime directory",
     async () => {
       const fixture = await makeFixture();

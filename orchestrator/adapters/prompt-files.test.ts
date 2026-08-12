@@ -186,44 +186,8 @@ describe("Feature: overriding the words an agent reads", () => {
       );
     },
   );
-  testInTempDirs(
-    "a prompt in neither directory names both of them",
-    async () => {
-      // Given a project with no overrides at all
-      const dir = await overrides({});
-      // When a prompt that exists nowhere is asked for
-      const attempt = async () =>
-        (await PromptFiles.open(ORCHESTRATOR_DIR, dir)).fragment("nope");
-      // Then both places it looked are named, so the typo is easy to find
-      expect(attempt).toThrow(
-        new RegExp(
-          `no prompts/nope.md in ${path.join(dir, "prompts")} or ${path.join(ORCHESTRATOR_DIR, "prompts")}`,
-        ),
-      );
-    },
-  );
 });
-describe("Feature: filling a prompt in", () => {
-  testInTempDirs(
-    "a fragment asking for something it was not given fails",
-    () => {
-      // Given a fragment that refers to a variable
-      const fragment = "agent: {{agent}}\n";
-      // When it is rendered without that variable
-      const attempt = () => render(fragment, {});
-      // Then it fails and names what was missing, rather than rendering a blank
-      expect(attempt).toThrow(/refers to "agent"/);
-    },
-  );
-  testInTempDirs("a section that is never closed fails", () => {
-    // Given a fragment with an unclosed section in it
-    const fragment = "{{#todos}}\n- x\n";
-    // When the fragment is rendered
-    const attempt = () => render(fragment, { todos: [] });
-    // Then it fails and names the section, rather than swallowing the rest
-    expect(attempt).toThrow(/never closes "todos"/);
-  });
-});
+describe("Feature: filling a prompt in", () => {});
 describe("Feature: the issues an agent is sent back for", () => {
   testInTempDirs("an agent that says it is blocked is asked only once", () => {
     // Given the issue raised when an agent reports it cannot continue

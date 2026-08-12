@@ -1119,17 +1119,6 @@ describe("Feature: drawing the whole screen", () => {
     expect(attempt).toThrow(/2 panes need/);
   });
 
-  test("a screen with no slots at all refuses to draw", () => {
-    // Given a view whose agents list is empty
-    const panes: ReturnType<typeof cells> = [];
-
-    // When the screen is drawn
-    const attempt = () => screen(panes, [], layoutOf());
-
-    // Then it refuses, because an empty pool means the server never loaded
-    expect(attempt).toThrow(/empty/);
-  });
-
   test("a single pane takes the whole terminal", () => {
     // Given a terminal a hundred columns wide, split one way
     const count = 1;

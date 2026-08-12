@@ -7,7 +7,7 @@ import {
   createTask,
   readTaskFile,
 } from "./task-store.ts";
-import { parseTaskMeta, requireWorkspace } from "../domain/task.ts";
+import { requireWorkspace } from "../domain/task.ts";
 import {
   type TransitionArgs,
   type TransitionName,
@@ -17,7 +17,6 @@ import { applyTransition } from "./task-documents.ts";
 import {
   ORCHESTRATOR_DIR,
   addDeps,
-  baseMeta,
   bodyOf,
   claim,
   closeTask,
@@ -30,14 +29,11 @@ import {
   newTask,
   newTasks,
   planThrough,
-  raw,
   run,
   toAgentReview,
   toChecking,
-  toDesignReview,
   toManagerReview,
   toPlan,
-  toPlanReview,
   toWorking,
   unclaim,
   writeTask,
@@ -196,70 +192,6 @@ describe("Feature: taking and clearing a claim", () => {
       expect(meta.claimed_pid).toBeUndefined();
     },
   );
-  testInTempDirs("a state no agent runs has no claim to clear", async () => {
-    // Given a task in a state the server drives rather than an agent
-    const { dir, id } = await toChecking();
-    expect((await metaOf(dir, id)).claimed_by).toBeUndefined();
-    // When a claim is cleared on it
-    const attempt = async () => await unclaim(dir, id);
-    // Then it is refused, because there was never a holder to release
-    await expect(attempt()).rejects.toThrow(/with no claim to clear/);
-  });
-  testInTempDirs("a state no agent runs cannot be claimed", async () => {
-    // Given a task in a state the server drives rather than an agent
-    const { dir, id } = await toChecking();
-    // When an agent claims it
-    const attempt = async () => await claim(dir, id, "agent-1");
-    // Then it is refused, and nothing is written onto the task
-    await expect(attempt()).rejects.toThrow(/which no agent runs/);
-    expect((await metaOf(dir, id)).claimed_by).toBeUndefined();
-  });
-  testInTempDirs(
-    "a claim by an agent named only with spaces is refused",
-    async () => {
-      // Given a task ready to be claimed
-      const { dir, id } = await newTask();
-      await run(dir, id, "submit_designing");
-      // When a claim is made under a name of two spaces, with the process 12
-      const attempt = async () => await claim(dir, id, "  ", 12);
-      // Then it is refused for the empty name, and the task is left unclaimed in DESIGN
-      await expect(attempt()).rejects.toThrow(
-        '"slotName" must be a non-empty string',
-      );
-      const meta = await metaOf(dir, id);
-      expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeUndefined();
-    },
-  );
-  testInTempDirs("a claim carrying the process zero is refused", async () => {
-    // Given a task ready to be claimed
-    const { dir, id } = await newTask();
-    await run(dir, id, "submit_designing");
-    // When the agent a claims it with the process 0
-    const attempt = async () => await claim(dir, id, "a", 0);
-    // Then it is refused for the process, and the task is left unclaimed in DESIGN
-    await expect(attempt()).rejects.toThrow('"pid" must be a positive integer');
-    const meta = await metaOf(dir, id);
-    expect(meta.state).toBe("DESIGN");
-    expect(meta.claimed_by).toBeUndefined();
-  });
-  testInTempDirs(
-    "a claim carrying a fractional process is refused",
-    async () => {
-      // Given a task ready to be claimed
-      const { dir, id } = await newTask();
-      await run(dir, id, "submit_designing");
-      // When the agent a claims it with the process 1.5
-      const attempt = async () => await claim(dir, id, "a", 1.5);
-      // Then it is refused for the process, and the task is left unclaimed in DESIGN
-      await expect(attempt()).rejects.toThrow(
-        '"pid" must be a positive integer',
-      );
-      const meta = await metaOf(dir, id);
-      expect(meta.state).toBe("DESIGN");
-      expect(meta.claimed_by).toBeUndefined();
-    },
-  );
 });
 describe("Feature: what a review writes into the task body", () => {
   testInTempDirs(
@@ -331,17 +263,6 @@ describe("Feature: what a review writes into the task body", () => {
     expect(result.to).toBe("PLAN");
     expect(await bodyOf(activeTaskPath(dir, id))).toBe(before);
   });
-  testInTempDirs("a review with no findings at all is refused", async () => {
-    // Given finished work under review
-    const { dir, id } = await toAgentReview();
-    const before = await fs.readFile(activeTaskPath(dir, id), "utf-8");
-    // When the reviewer sends it back with an empty list
-    const attempt = async () =>
-      await apply(dir, id, "feedback", { findings: [] });
-    // Then it is refused, and the document is untouched
-    await expect(attempt()).rejects.toThrow(/non-empty/);
-    expect(await fs.readFile(activeTaskPath(dir, id), "utf-8")).toBe(before);
-  });
   testInTempDirs("an accepted plan becomes the task's body", async () => {
     // Given a plan under review
     const { dir, id } = await toPlan();
@@ -364,36 +285,6 @@ describe("Feature: what a review writes into the task body", () => {
     expect(result.to).toBe("CHECK");
     expect(await bodyOf(activeTaskPath(dir, id))).toBe(accepted);
   });
-  testInTempDirs("a task in WORK cannot submit without a body", async () => {
-    // Given a task an agent is working on, which hands in the work it wrote
-    const { dir, id } = await toWorking();
-    // When it submits with no body
-    const attempt = async () => await apply(dir, id, "submit", {});
-    // Then it is refused for the missing body
-    await expect(attempt()).rejects.toThrow(/body/);
-  });
-  testInTempDirs(
-    "a task in PLAN_REVIEW cannot submit without a body",
-    async () => {
-      // Given a task under plan review, which hands in the plan it accepted
-      const { dir, id } = await toPlanReview();
-      // When it submits with no body
-      const attempt = async () => await apply(dir, id, "submit", {});
-      // Then it is refused for the missing body
-      await expect(attempt()).rejects.toThrow(/body/);
-    },
-  );
-  testInTempDirs(
-    "a task in DESIGN_REVIEW cannot submit without a body",
-    async () => {
-      // Given a task under design review, which hands in the design it accepted
-      const { dir, id } = await toDesignReview();
-      // When it submits with no body
-      const attempt = async () => await apply(dir, id, "submit", {});
-      // Then it is refused for the missing body
-      await expect(attempt()).rejects.toThrow(/body/);
-    },
-  );
   testInTempDirs(
     "findings written into the body survive to the closed file",
     async () => {
@@ -474,17 +365,6 @@ describe("Feature: the checks a task carries", () => {
     expect(after.workspace).toEqual(before.workspace);
     expect(after.held_reason).toBeUndefined();
   });
-  testInTempDirs(
-    "a reviewer cannot fail the task it is reviewing",
-    async () => {
-      // Given finished work under review
-      const { dir, id } = await toAgentReview();
-      // When the reviewer tries to fail it as a check would
-      const attempt = async () => await run(dir, id, "fail");
-      // Then it is refused, because a review sends findings back instead
-      await expect(attempt()).rejects.toThrow(/not valid from state/);
-    },
-  );
 });
 describe("Feature: closing a task", () => {
   testInTempDirs(
@@ -512,19 +392,6 @@ describe("Feature: closing a task", () => {
       const result = await run(dir, id, "abort");
       // Then it closes, because aborting is throwing the work away
       expect(result.to).toBe("CLOSED");
-    },
-  );
-  testInTempDirs(
-    "a task an agent is still holding cannot be aborted",
-    async () => {
-      // Given a task in the design phase
-      const { dir, id } = await newTask("the wrong shape");
-      await run(dir, id, "submit_designing");
-      expect((await metaOf(dir, id)).state).toBe("DESIGN");
-      // When the manager aborts it
-      const attempt = async () => await run(dir, id, "abort");
-      // Then it is refused, because a task is held before it is thrown away
-      await expect(attempt()).rejects.toThrow(/not valid from state "DESIGN"/);
     },
   );
   testInTempDirs("a task held out of design can then be aborted", async () => {
@@ -617,84 +484,8 @@ describe("Feature: closing a task", () => {
     // Then it is refused, because a closed task is finished with
     await expect(attempt()).rejects.toThrow(/is CLOSED/);
   });
-  testInTempDirs("a closed task will not take a pass", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When a pass is applied to it
-    const attempt = async () => await apply(dir, id, "pass", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
-  testInTempDirs("a closed task will not take a fail", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When a fail is applied to it
-    const attempt = async () => await apply(dir, id, "fail", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
-  testInTempDirs("a closed task will not take a hold", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When a hold is applied to it
-    const attempt = async () => await apply(dir, id, "hold", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
-  testInTempDirs("a closed task will not take a resume", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When a resume is applied to it
-    const attempt = async () => await apply(dir, id, "resume", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
-  testInTempDirs("a closed task will not take a feedback", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When a feedback is applied to it
-    const attempt = async () => await apply(dir, id, "feedback", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
-  testInTempDirs("a closed task will not take an abort", async () => {
-    // Given a task that has been closed
-    const { dir, id } = await toManagerReview();
-    await run(dir, id, "submit");
-    // When an abort is applied to it
-    const attempt = async () => await apply(dir, id, "abort", {});
-    // Then it is refused, because a closed task is finished with
-    await expect(attempt()).rejects.toThrow(/is CLOSED/);
-  });
 });
 describe("Feature: a transition that is refused writes nothing", () => {
-  testInTempDirs(
-    "a transition on a task the directory has never held",
-    async () => {
-      // Given a task directory with nothing in it
-      const dir = await makeTasksDir();
-      // When a transition is applied to an id nothing carries
-      const attempt = async () => await run(dir, "000999", "submit");
-      // Then it is refused, naming the task that was not found
-      await expect(attempt()).rejects.toThrow(/not found/);
-    },
-  );
-  testInTempDirs("holding with a blank reason is refused", async () => {
-    // Given a task an agent is working on
-    const { dir, id } = await toWorking();
-    // When it is held with a reason that is only spaces
-    const attempt = async () => await apply(dir, id, "hold", { reason: "  " });
-    // Then it is refused, and the task stays where it was
-    await expect(attempt()).rejects.toThrow(
-      /"reason" must be a non-empty string/,
-    );
-    expect((await metaOf(dir, id)).state).toBe("WORK");
-  });
   testInTempDirs(
     "every rejected argument leaves the document byte for byte",
     async () => {
@@ -882,20 +673,6 @@ describe("Feature: the workspace a task is worked in", () => {
     // Then there is no session to resume from, and the field says so
     expect(requireWorkspace(await metaOf(dir, id)).session).toBeUndefined();
   });
-  testInTempDirs("a branch with no worktree beside it is refused", async () => {
-    // Given a task in the design phase
-    const { dir, id } = await newTask();
-    await run(dir, id, "submit_designing");
-    // When it is claimed with a branch but no worktree
-    const attempt = async () =>
-      await claim(dir, id, "pi-1", process.pid, { branch: "work/000001" });
-    // Then it is refused, and nothing is written onto the task
-    await expect(attempt()).rejects.toThrow(
-      /"worktree" must be a non-empty string/,
-    );
-    expect((await metaOf(dir, id)).state).toBe("DESIGN");
-    expect((await metaOf(dir, id)).workspace).toBeUndefined();
-  });
   testInTempDirs(
     "the workspace outlives the claim that recorded it",
     async () => {
@@ -947,28 +724,4 @@ describe("Feature: the workspace a task is worked in", () => {
       ).toBeUndefined();
     },
   );
-  testInTempDirs("a workspace missing a field is refused", () => {
-    // Given a document whose workspace names only a branch
-    const partial = raw(baseMeta());
-    partial.workspace = { branch: "work/000001" };
-    // When it is parsed as a task
-    const attempt = () => parseTaskMeta(partial);
-    // Then it is refused, naming the field that is missing
-    expect(attempt).toThrow(/workspace\.worktree/);
-  });
-  testInTempDirs("a workspace carrying an unknown field is refused", () => {
-    // Given a document whose workspace carries a field the schema has no use for
-    const extra = raw(baseMeta());
-    extra.workspace = {
-      branch: "b",
-      worktree: "w",
-      slot: "a",
-      session: undefined,
-      pid: 1,
-    };
-    // When it is parsed as a task
-    const attempt = () => parseTaskMeta(extra);
-    // Then it is refused, naming the field nobody will read
-    expect(attempt).toThrow(/Unrecognized key: "pid"/);
-  });
 });

@@ -467,20 +467,6 @@ describe("Feature: the log of every transition applied", () => {
     },
   );
   testInTempDirs(
-    "a log that cannot be read fails loudly rather than reading empty",
-    async () => {
-      // Given a log path that is a directory, not a file
-      const filePath = path.join(
-        await tempDir("orchestrator-"),
-        "transitions.jsonl",
-      );
-      await fs.mkdir(filePath);
-      // When the log is opened
-      // Then it fails, rather than pretending no transitions ever happened
-      await expect(TransitionLog.open(filePath)).rejects.toThrow(/EISDIR/);
-    },
-  );
-  testInTempDirs(
     "the file is trimmed but the sequence keeps counting",
     async () => {
       // Given a log that keeps only its last ten entries

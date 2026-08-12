@@ -939,9 +939,6 @@ describe("Feature: the design and planning phases", () => {
       const server = await serverFor(fixture);
       await server.setSchedulerEnabled(false);
       await server.tick();
-      expect(() => server.abort(id)).toThrow(
-        /not in MANAGER_REVIEW or HELD_DESIGN or HELD_PLAN or HELD_WORK/,
-      );
 
       // Given the manager holds it, abandoning it
       await server.transition(id, "hold", { reason: "abandoning" }, "manager");

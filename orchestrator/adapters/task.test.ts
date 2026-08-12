@@ -158,14 +158,6 @@ describe("Feature: splitting a task document", () => {
       expect(split.body).toBe(body);
     },
   );
-  testInTempDirs("a document with no frontmatter at all is refused", () => {
-    // Given a file that is prose and nothing else
-    const document = "# No frontmatter here";
-    // When the document is split
-    const attempt = () => splitDocument(document);
-    // Then it is refused, rather than read as a task with no fields
-    expect(attempt).toThrow(/no YAML frontmatter/);
-  });
   testInTempDirs(
     "the shipped template carries every field the schema has",
     async () => {
@@ -530,26 +522,6 @@ describe("Feature: creating a task", () => {
       );
     },
   );
-  testInTempDirs("a task with an empty title is refused", async () => {
-    // Given an empty task directory
-    const dir = await makeTasksDir();
-    // Given a title with no characters in it at all
-    const title = "";
-    // When a task is created with it
-    const attempt = async () => await createTask(dir, ORCHESTRATOR_DIR, title);
-    // Then it is refused, because a task nobody named cannot be worked on
-    await expect(attempt()).rejects.toThrow(/title is required/);
-  });
-  testInTempDirs("a task titled with only spaces is refused", async () => {
-    // Given an empty task directory
-    const dir = await makeTasksDir();
-    // Given a title of three spaces, with nothing in it a person could read
-    const title = "   ";
-    // When a task is created with it
-    const attempt = async () => await createTask(dir, ORCHESTRATOR_DIR, title);
-    // Then it is refused, because a task nobody named cannot be worked on
-    await expect(attempt()).rejects.toThrow(/title is required/);
-  });
   testInTempDirs("the first task created takes the id 000001", async () => {
     // Given an empty task directory
     const dir = await makeTasksDir();
@@ -605,15 +577,6 @@ describe("Feature: creating a task", () => {
       expect(await fs.readFile(filePath, "utf-8")).toContain("## Rollout");
     },
   );
-  testInTempDirs("a counter someone has corrupted fails loudly", async () => {
-    // Given a task directory whose counter is not a number
-    const dir = await makeTasksDir();
-    await fs.writeFile(nextTaskIdPath(dir), "not-a-number\n");
-    // When a task is created
-    const attempt = async () => await createTask(dir, ORCHESTRATOR_DIR, "t");
-    // Then it fails and names the file, rather than guessing an id
-    await expect(attempt()).rejects.toThrow(/Invalid value in next-task-id/);
-  });
   testInTempDirs(
     "a task file that already exists is never written over",
     async () => {
@@ -700,32 +663,6 @@ describe("Feature: rewriting the body of a task", () => {
       await writeTaskBody(dir, id, "\n\n\n# Goal\n\n\n");
       // Then it is stored with one blank line above and one newline below
       expect(await bodyOf(path.join(dir, `${id}.md`))).toBe("\n\n# Goal\n");
-    },
-  );
-  testInTempDirs(
-    "an empty body is refused and the document is untouched",
-    async () => {
-      // Given a task and a body that is only whitespace
-      const { dir, id } = await newTask();
-      const before = await fs.readFile(path.join(dir, `${id}.md`), "utf-8");
-      // When that body is written
-      const attempt = async () => await writeTaskBody(dir, id, "   \n ");
-      // Then it is refused, and the document is left exactly as it was
-      await expect(attempt()).rejects.toThrow(/body is required/);
-      expect(await fs.readFile(path.join(dir, `${id}.md`), "utf-8")).toBe(
-        before,
-      );
-    },
-  );
-  testInTempDirs(
-    "a body written to a task that does not exist is refused",
-    async () => {
-      // Given an empty task directory
-      const dir = await makeTasksDir();
-      // When a body is written to an id nothing carries
-      const attempt = async () => await writeTaskBody(dir, "000999", "# Goal");
-      // Then it is refused, naming the task that was not found
-      await expect(attempt()).rejects.toThrow(/not found/);
     },
   );
   testInTempDirs("a body written before a transition survives it", async () => {

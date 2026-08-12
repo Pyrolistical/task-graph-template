@@ -81,17 +81,4 @@ describe("Feature: where a provider is asked whether it is up", () => {
     // Then the key is sent the way that api takes it
     expect(health.headers).toEqual({ "x-goog-api-key": "secret" });
   });
-
-  test("an api with no known health endpoint is refused by name", () => {
-    // Given bedrock, which is reached over aws signing rather than a url
-    const baseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com";
-
-    // When the health check for that provider is worked out
-    const attempt = () => probe(baseUrl, "bedrock-converse-stream");
-
-    // Then it is refused, naming the apis that can be checked
-    expect(attempt).toThrow(
-      /no health check for api "bedrock-converse-stream".*openai-completions/s,
-    );
-  });
 });

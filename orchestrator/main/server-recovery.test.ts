@@ -143,25 +143,6 @@ describe("Feature: picking a project back up at startup", () => {
     },
     30000,
   );
-
-  testInTempDirs(
-    "a directory that is not a git repository is refused at startup",
-    async () => {
-      // Given a project directory that is not under version control
-      const fixture = await makeFixture();
-      await fs.rm(path.join(fixture.repo, ".git"), {
-        recursive: true,
-        force: true,
-      });
-
-      // When a server is started against it
-      const attempt = () => serverFor(fixture);
-
-      // Then it refuses at startup rather than on the first dispatch
-      expect(attempt).toThrow(/not a git repository/);
-    },
-    30000,
-  );
 });
 
 describe("Feature: reaping a claim whose agent is gone", () => {

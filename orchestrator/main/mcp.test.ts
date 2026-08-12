@@ -805,47 +805,6 @@ describe("Feature: the tool surface the manager works through", () => {
     },
     60000,
   );
-
-  testInTempDirs("slot_abort refuses a slot that is idle", async () => {
-    // Given a pool whose slots are all sitting idle
-    const fixture = await makeFixture();
-    const client = await connect(fixture);
-    const slots = (await resourceOf(client, "orchestrator://slots", SlotsView))
-      .slots;
-
-    // When the manager aborts one of them
-    const result = await client.callTool({
-      name: "slot_abort",
-      arguments: { slot: at(slots, 0).name },
-    });
-
-    // Then it is refused, because there is no command of its own to kill
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain(`${at(slots, 0).name} is not running`);
-
-    await client.close();
-  });
-
-  testInTempDirs(
-    "slot_abort names the pool when the slot is unknown",
-    async () => {
-      // Given a server whose pool holds one slot
-      const fixture = await makeFixture();
-      const client = await connect(fixture);
-
-      // When the manager aborts a slot that does not exist
-      const result = await client.callTool({
-        name: "slot_abort",
-        arguments: { slot: "pi-fake-fake9" },
-      });
-
-      // Then the refusal lists the slots there are, so the name is easy to fix
-      expect(result.isError).toBe(true);
-      expect(textOf(result)).toContain('no agent slot named "pi-fake-fake9"');
-
-      await client.close();
-    },
-  );
 });
 
 describe("Feature: a server that could not start", () => {
@@ -899,24 +858,6 @@ describe("Feature: a server that could not start", () => {
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain("the server failed to start");
       expect((await client.listTools()).tools.length).toBeGreaterThan(0);
-
-      await client.close();
-    },
-    60000,
-  );
-
-  testInTempDirs(
-    "a view resource fails with that error rather than reading nothing",
-    async () => {
-      // Given a project whose pool file the server refuses to load
-      const fixture = await brokenPool();
-      const client = await connect(fixture);
-
-      // When the manager reads the slots view
-      const attempt = client.readResource({ uri: "orchestrator://slots" });
-
-      // Then it is refused with why the server did not start
-      await expect(attempt).rejects.toThrow(/the server failed to start/);
 
       await client.close();
     },

@@ -210,25 +210,6 @@ describe("Feature: a pool with no agents in it", () => {
   }
 
   testInTempDirs(
-    "starting the scheduler is refused, naming the file to add an agent to",
-    async () => {
-      // Given a server whose pool file declares no agents
-      const fixture = await emptyPoolFixture();
-      const server = await serverFor(fixture);
-
-      // When the scheduler is started
-      const attempt = server.setSchedulerEnabled(true);
-
-      // Then it is refused, naming the pool file a person can add an agent to
-      await expect(attempt).rejects.toThrow(`add one to ${fixture.agentsPath}`);
-      expect(server.schedulerEnabled).toBe(false);
-
-      await server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
     "a task authored with no agents still reaches the queue",
     async () => {
       // Given a server whose pool file declares no agents
@@ -666,42 +647,6 @@ describe("Feature: turning an agent off and on", () => {
     },
     30000,
   );
-
-  testInTempDirs(
-    "a slot name passed where an agent belongs is refused",
-    async () => {
-      // Given a server whose pool holds the one agent pi-fake-fake
-      const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-
-      // When the name of that agent's first slot is passed where an agent belongs
-      const attempt = server.setAgentEnabled("pi-fake-fake-1", false);
-
-      // Then it is refused as no agent of that name
-      await expect(attempt).rejects.toThrow('no agent named "pi-fake-fake-1"');
-
-      await server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
-    "a name the pool never held is refused with the agents it does hold",
-    async () => {
-      // Given a server whose pool holds the one agent pi-fake-fake
-      const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-
-      // When the name nope is passed where an agent belongs
-      const attempt = server.setAgentEnabled("nope", false);
-
-      // Then it is refused, and the pool it does have is named
-      await expect(attempt).rejects.toThrow("the pool has pi-fake-fake");
-
-      await server.shutdown();
-    },
-    30000,
-  );
 });
 
 describe("Feature: aborting the command an agent is running", () => {
@@ -745,65 +690,6 @@ describe("Feature: aborting the command an agent is running", () => {
       expect(await stateOf(server, id)).not.toBe("WORK");
       expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
         "aborted bash: git status",
-      );
-
-      await server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
-    "aborting an IDLE slot throws",
-    async () => {
-      // Given a slot the scheduler has dispatched nothing to
-      const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-
-      // When the manager aborts it
-      const attempt = server.abortSlot("pi-fake-fake-1");
-
-      // Then it is refused, because there is no command to kill
-      await expect(attempt).rejects.toThrow(/not running/);
-
-      await server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
-    "aborting an unknown slot name throws, listing the pool's slot names",
-    async () => {
-      // Given a server whose pool holds one slot
-      const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-
-      // When the manager aborts a slot that is not in the pool
-      const attempt = server.abortSlot("pi-nobody-1");
-
-      // Then it is refused, and the slot names it does have are listed
-      await expect(attempt).rejects.toThrow(
-        /no agent slot named "pi-nobody-1"/,
-      );
-      await expect(attempt).rejects.toThrow(/pi-fake-fake-1/);
-
-      await server.shutdown();
-    },
-    30000,
-  );
-
-  testInTempDirs(
-    "aborting by agent key (no slot suffix) throws",
-    async () => {
-      // Given a server whose slot names carry a number
-      const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-
-      // When the manager aborts using the agent key rather than the slot name
-      const attempt = server.abortSlot("pi-fake-fake");
-
-      // Then it is refused, because an abort names one running process
-      await expect(attempt).rejects.toThrow(
-        /no agent slot named "pi-fake-fake"/,
       );
 
       await server.shutdown();

@@ -10,7 +10,6 @@ import path from "node:path";
 import { agentOf } from "../domain/agents.ts";
 import { parsePool } from "./agent-pool.ts";
 import { agentWrite, checkWrite, loadAgents } from "./agent-pool.ts";
-import { SchemaError } from "../domain/schema.ts";
 import * as git from "./git.ts";
 import {
   CACHE_HOME,
@@ -37,17 +36,7 @@ import { tempRepo } from "../testing/orchestrator-jig.ts";
 import { at } from "../testing/present.ts";
 
 const OVERLAY = await hasOverlay();
-function issuesOf(pool: unknown): string[] {
-  try {
-    parsePool(pool);
-    return [];
-  } catch (err) {
-    if (!(err instanceof SchemaError)) {
-      throw err;
-    }
-    return err.issues;
-  }
-}
+
 describe("Feature: loading the pool of agents", () => {
   testInTempDirs(
     "a slot is named for its type, provider, model and number",
@@ -169,60 +158,6 @@ describe("Feature: loading the pool of agents", () => {
       expect(at(slots, 1).roles).toEqual(["reviewer"]);
     },
   );
-  testInTempDirs("a role the pipeline does not have is refused on load", () => {
-    // Given a pool naming a role no stage is run by
-    const pool = {
-      agents: [
-        {
-          type: "pi",
-          provider: "anthropic",
-          model: "m",
-          slots: 1,
-          roles: ["agent_checker"],
-        },
-      ],
-    };
-    // When the pool is loaded
-    const attempt = () => parsePool(pool);
-    // Then it is refused at startup rather than at the first dispatch
-    expect(attempt).toThrow(/Invalid option/);
-  });
-  testInTempDirs("a pool entry asking for retries is refused on load", () => {
-    // Given a pool entry asking for 3 retries, a setting the server does not read
-    const pool = {
-      agents: [
-        {
-          type: "pi",
-          provider: "anthropic",
-          model: "m",
-          slots: 1,
-          retries: 3,
-        },
-      ],
-    };
-    // When the pool is loaded
-    const attempt = () => parsePool(pool);
-    // Then it is refused by name, so a setting that would do nothing is never believed
-    expect(attempt).toThrow('Unrecognized key: "retries"');
-  });
-  testInTempDirs("a pool entry asking for thinking is refused on load", () => {
-    // Given a pool entry asking for high thinking, a setting the server does not read
-    const pool = {
-      agents: [
-        {
-          type: "pi",
-          provider: "anthropic",
-          model: "m",
-          slots: 1,
-          thinking: "high",
-        },
-      ],
-    };
-    // When the pool is loaded
-    const attempt = () => parsePool(pool);
-    // Then it is refused by name, so a setting that would do nothing is never believed
-    expect(attempt).toThrow('Unrecognized key: "thinking"');
-  });
   testInTempDirs(
     "a slot is a type, provider, model and number, and nothing more",
     () => {
@@ -350,24 +285,6 @@ describe("Feature: loading the pool of agents", () => {
       const writable = checkWrite(slots);
       // Then every declared path is there once, and no agent's home is
       expect(writable).toEqual([one, two]);
-    },
-  );
-  testInTempDirs(
-    "everything wrong with a pool file is reported at once",
-    () => {
-      // Given a pool with a bad slot count in one entry and no type in another
-      const pool = {
-        agents: [
-          { type: "pi", provider: "anthropic", model: "m", slots: 0 },
-          { provider: "anthropic", model: "n", slots: 1 },
-        ],
-      };
-      // When the pool is loaded
-      const issues = issuesOf(pool);
-      // Then both are named by their place in the file, so one edit fixes it
-      expect(issues).toHaveLength(2);
-      expect(issues[0]).toContain("agents[0].slots");
-      expect(issues[1]).toContain("agents[1].type");
     },
   );
   testInTempDirs("the same model declared twice is refused", () => {

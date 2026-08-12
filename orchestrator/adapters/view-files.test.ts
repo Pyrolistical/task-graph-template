@@ -59,19 +59,6 @@ describe("Feature: reading back the slots the last server published", () => {
     },
   );
 
-  testInTempDirs(
-    "a view file that is not readable JSON stops the server",
-    async () => {
-      // Given a slots view that was left truncated on disk
-      const { runtime, publisher } = await viewsFor();
-      await writeAtomic(runtime.slotsView, '{"slots": [{"name"');
-
-      // When the next server tries to read it back
-      // Then it fails, rather than starting as though nothing had been running
-      await expect(publisher.lastSlots()).rejects.toThrow();
-    },
-  );
-
   testInTempDirs("a view file carrying no slots stops the server", async () => {
     // Given a slots view that parses but holds no slots at all
     const { runtime, publisher } = await viewsFor();

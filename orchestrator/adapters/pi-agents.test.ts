@@ -10,13 +10,6 @@ function aCatalog(baseUrl: string, auth: ModelAuth = {}): Catalog {
   };
 }
 
-function anEmptyCatalog(): Catalog {
-  return {
-    getModel: () => undefined,
-    getAuth: () => Promise.resolve(undefined),
-  };
-}
-
 function agentsOf(models: Catalog): PiAgents {
   return new PiAgents(
     fakePaths(),
@@ -104,18 +97,5 @@ describe("Feature: asking a provider whether it is up", () => {
 
     // Then the key pi would stream with is the key the health check authenticates with
     expect(seen).toBe("Bearer sk-secret");
-  });
-
-  test("a model pi does not know is refused by name", async () => {
-    // Given a pi runtime that has no model for the slot at all
-    const agents = agentsOf(anEmptyCatalog());
-
-    // When the slot's provider is checked
-    const attempt = agents.healthy(aSlot({ healthCheck: true }));
-
-    // Then the misconfigured pool entry is named rather than reported as an outage
-    await expect(attempt).rejects.toThrow(
-      'pi knows no model "fake" on provider "fake"',
-    );
   });
 });

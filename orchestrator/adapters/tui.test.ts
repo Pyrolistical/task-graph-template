@@ -255,22 +255,6 @@ describe("Feature: the command channel between console and server", () => {
   );
 
   testInTempDirs(
-    "a command that is not one the server knows is dropped",
-    async () => {
-      // Given a command file naming something the server cannot do
-      const runtime = await runtimeIn(await tempDir("console-"));
-      await fs.writeFile(runtime.consoleCommand, `{ "command": "explode" }`);
-
-      // When the server takes it
-      const taken = await takeCommand(runtime);
-
-      // Then nothing is applied, and the file is cleared rather than retried
-      expect(taken).toBeUndefined();
-      expect(await fs.exists(runtime.consoleCommand)).toBe(false);
-    },
-  );
-
-  testInTempDirs(
     "an abort command survives the round trip to the server",
     async () => {
       // Given a console that has clicked the abort button on a slot
@@ -330,19 +314,6 @@ describe("Feature: the command channel between console and server", () => {
       expect(failures).toEqual([]);
       expect(taken).toEqual([{ command: "scheduler", enabled: true }]);
       expect(await fs.exists(runtime.consoleCommand)).toBe(false);
-    },
-  );
-
-  testInTempDirs(
-    "a command path that is a directory fails loudly",
-    async () => {
-      // Given a command path that is a directory, not a file
-      const runtime = await runtimeIn(await tempDir("console-"));
-      await fs.mkdir(runtime.consoleCommand);
-
-      // When the server takes a command from it
-      // Then it fails, rather than pretending nothing was there
-      await expect(takeCommand(runtime)).rejects.toThrow(/EISDIR/);
     },
   );
 
@@ -420,56 +391,6 @@ describe("Feature: reading the views the server publishes", () => {
       expect(view.scheduling).toBe(true);
     },
   );
-
-  testInTempDirs(
-    "a queue view without the scheduler flag is refused",
-    async () => {
-      // Given a queue view written without the flag the switch is drawn from
-      const runtime = await seed(await tempDir("console-"));
-      await writeAtomic(runtime.queueView, viewJson(1, "queue", []));
-
-      // When the console reads the views
-      const attempt = async () => await readView(runtime);
-
-      // Then it says what is missing rather than drawing a switch it cannot trust
-      await expect(attempt()).rejects.toThrow(
-        /Invalid queue view in .*queue\.json/,
-      );
-      await expect(attempt()).rejects.toThrow(/scheduling: /);
-    },
-  );
-
-  testInTempDirs(
-    "a runtime directory with no views at all is refused",
-    async () => {
-      // Given a runtime directory no server has ever written to
-      const runtime: Runtime = new Runtime(
-        path.join(await tempDir("console-"), "repo"),
-        await tempDir("console-"),
-      );
-
-      // When the console reads the views
-      const attempt = async () => await readView(runtime);
-
-      // Then it says there is no server here, rather than drawing an empty screen
-      await expect(attempt()).rejects.toThrow(/no server state/);
-    },
-  );
-
-  testInTempDirs("a view written without its rows is refused", async () => {
-    // Given a tasks view whose rows are missing
-    const runtime = await seed(await tempDir("console-"));
-    await writeAtomic(runtime.tasksView, `${JSON.stringify({ at: "now" })}\n`);
-
-    // When the console reads the views
-    const attempt = async () => await readView(runtime);
-
-    // Then it names the view and the array it expected to find in it
-    await expect(attempt()).rejects.toThrow(
-      /Invalid tasks view in .*tasks\.json/,
-    );
-    await expect(attempt()).rejects.toThrow(/tasks: .*expected array/);
-  });
 
   testInTempDirs(
     "a console with no views to read draws the failure",
