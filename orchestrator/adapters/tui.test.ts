@@ -14,6 +14,7 @@ import { writeAtomic } from "./files.ts";
 import { Runtime, viewJson } from "./runtime.ts";
 import { idleRow } from "../domain/agents.ts";
 import { HIDE, SHOW } from "../policy/console.ts";
+import { Toggles } from "../policy/toggles.ts";
 import {
   SLOTS,
   busyRow,
@@ -480,7 +481,12 @@ describe("Feature: reading the views the server publishes", () => {
       );
 
       // When a frame is drawn from it
-      const { lines } = await frameOrError(runtime, new Sessions(), layoutOf());
+      const { lines } = await frameOrError(
+        runtime,
+        new Sessions(),
+        new Toggles(),
+        layoutOf(),
+      );
 
       // Then the screen says the console cannot draw, and why
       expect(lines.join("\n")).toContain("the console cannot draw");
@@ -512,7 +518,12 @@ describe("Feature: reading the views the server publishes", () => {
       );
 
       // When a frame is drawn from them
-      const { lines, hits } = await frame(runtime, new Sessions(), layoutOf());
+      const { lines, hits } = await frame(
+        runtime,
+        new Sessions(),
+        new Toggles(),
+        layoutOf(),
+      );
 
       // Then the pane carries the task, the queue line and the agent's transcript
       const text = lines.join("\n");
@@ -548,6 +559,7 @@ describe("Feature: reading the views the server publishes", () => {
       const { lines, hits } = await frame(
         runtime,
         new Sessions(),
+        new Toggles(),
         layoutOf(),
         true,
       );
@@ -593,7 +605,13 @@ describe("Feature: reading the views the server publishes", () => {
       await sessions.entries(session);
 
       // When a frame is drawn with that slot collapsed away
-      await frame(runtime, sessions, layoutOf({ nowMs: 5000 }), true);
+      await frame(
+        runtime,
+        sessions,
+        new Toggles(),
+        layoutOf({ nowMs: 5000 }),
+        true,
+      );
 
       // Then the session is kept, so un-collapsing does not start from scratch
       expect(sessions.rate(5000, session)).toBe(0.4);

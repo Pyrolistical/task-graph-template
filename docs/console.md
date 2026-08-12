@@ -46,6 +46,8 @@ SGR mouse reporting; targets are recomputed every frame from the layout that dre
 
 The agent switch names the **agent** and toggles every slot of it; abort names the **slot**, because it kills one command in one process. The same three commands exist over MCP, so the console adds no authority.
 
+A switch flips on the click, before the server has seen it: the clicked value is drawn over the views until one of them agrees. It takes **two** views that still disagree to reset it, because the first one is likely to have been published before the server read the command — resetting on it would flip the switch back and then forward again as the next view lands. Two disagreeing views mean the command was dropped or refused, and the switch springs back. Clicking again starts the two over.
+
 ## The command channel
 
 The console writes one JSON object into `console-command` atomically rather than talking to the server. If the file exists the write is skipped: queueing switch flips is worse than dropping one.

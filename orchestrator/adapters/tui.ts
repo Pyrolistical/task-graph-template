@@ -36,6 +36,7 @@ import {
   scrollTop,
 } from "../policy/console.ts";
 import { hitAt, keys, mouse, within } from "../policy/keys.ts";
+import { Toggles } from "../policy/toggles.ts";
 import { QueueView } from "../policy/scheduler.ts";
 import { type Command, writeCommand } from "./command.ts";
 import { ExclusiveLock } from "../domain/exclusive-lock.ts";
@@ -247,10 +248,11 @@ export async function readView(runtime: Runtime): Promise<ConsoleView> {
 export async function frame(
   runtime: Runtime,
   sessions: Sessions,
+  toggles: Toggles,
   layout: Layout,
   collapsed = false,
 ): Promise<Frame> {
-  const view = await readView(runtime);
+  const view = toggles.apply(await readView(runtime));
   const all = panes(view);
   const running = all.filter((pane) => pane.slot.enabled);
   const shown = collapsed && running.length > 0 ? running : all;
@@ -286,11 +288,12 @@ export async function frame(
 export async function frameOrError(
   runtime: Runtime,
   sessions: Sessions,
+  toggles: Toggles,
   layout: Layout,
   collapsed = false,
 ): Promise<Frame> {
   try {
-    return await frame(runtime, sessions, layout, collapsed);
+    return await frame(runtime, sessions, toggles, layout, collapsed);
   } catch (err) {
     return errorFrame(messageOf(err), layout);
   }
@@ -306,6 +309,7 @@ export async function main(repo: string): Promise<void> {
   }
 
   const sessions: Sessions = new Sessions();
+  const toggles: Toggles = new Toggles();
   const scroll: Scroll = { bases: undefined, offsets: [] };
   let hits: Hit[] = [];
   let bottoms: number[] = [];
@@ -332,6 +336,7 @@ export async function main(repo: string): Promise<void> {
     const result: Frame = await frameOrError(
       runtime,
       sessions,
+      toggles,
       layout,
       collapsed,
     );
@@ -427,6 +432,7 @@ export async function main(repo: string): Promise<void> {
                 scroll.bases = undefined;
                 break;
               }
+              toggles.push(command);
               outbox.push(command);
             } else {
               continue;
