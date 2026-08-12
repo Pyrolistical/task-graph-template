@@ -1,116 +1,33 @@
 # The layers
 
-The orchestrator is an onion: five layers, and every dependency points inward.
+Five layers, every dependency pointing inward.
 
 ```text
-              ┌─────────────────────────────────────────┐
-              │  main/     composition root             │  builds the adapters,
-              │            mcp.ts · console.ts          │  hands them to the app
-              ├─────────────────────────────────────────┤
-              │  adapters/ git · pi · bwrap · the       │  every effect the
-              │            runtime directory · MCP · tty│  system has
-              ├─────────────────────────────────────────┤
-              │  app/      the use cases, one module    │  orchestration, over ports
-              │            each, and the ports they use │
-              ├─────────────────────────────────────────┤
-              │  policy/   scheduler · settle · inbox   │  decisions over the model
-              ├─────────────────────────────────────────┤
-              │  domain/   the state machine · the task│  the vocabulary, and the
-              │            document · transitions       │  rules that never do I/O
-              └─────────────────────────────────────────┘
+main/      composition root — mcp.ts · console.ts    builds adapters, wires the app
+adapters/  git · pi · bwrap · runtime dir · MCP · tty   every effect the system has
+app/       use cases over ports                      orchestration
+policy/    scheduler · settle · inbox · console       decisions over the model
+domain/    state machine · task document · text       vocabulary and rules, no I/O
 ```
 
-- `domain/` and `policy/` name no filesystem, no subprocess, no environment
-- `app/` knows the ports in `app/ports/` and nothing about what implements them
-- `adapters/` is where `node:fs`, `git`, `bwrap` and `pi` live
-- `main/compose.ts` is the only module that knows both halves
+- `domain/` and `policy/` name no filesystem, subprocess or environment; `app/` knows only `app/ports/`; `main/compose.ts` is the only module that knows both halves
+- tests in `domain/`, `policy/` and `app/` name no effect either — they run over the fakes in `testing/ports.ts`
+- [`architecture.test.ts`](../orchestrator/architecture.test.ts) enforces all of it
 
-- a test in `domain/`, `policy/` or `app/` names no effect either: those layers
-  decide, and their suites run over the fakes in `testing/ports.ts`
+## Why this shape
 
-[`architecture.test.ts`](../orchestrator/architecture.test.ts) enforces all four
-rules on every commit, and it is what keeps the diagram true.
+The pipeline is mostly **decisions**: what to dispatch, what a settled turn meant, where findings go, whether a worktree broke its guard. Inside one server they could only be reached by starting a subprocess, cloning a repo and driving a fake `pi`. As pure functions with the observations passed in, each is a table test.
 
-## Why this shape here
+`main/` drives the real adapters, so a port buys a seam, not a faster suite.
 
-The pipeline is mostly **decisions**: which task is dispatched next, what a
-settled agent's turn meant, where findings go, whether a worktree broke its
-guard. Those decisions were spread through a 1,500-line server that could only
-be reached by starting a subprocess, cloning a repo and driving a fake `pi`.
+## Structure
 
-They are now pure functions with the observations passed in:
+`app/server.ts` holds the lifecycle and ticks the modules in order; `main/compose.ts` constructs them in dependency order and hands each port to the module that names it — no dependency bag. `dispatcher` → `settler` → `pool`/`task-graph`; `lander` → `checker`; nothing points back.
 
-| Decision                       | Lives in                  | Tested by                     |
-| ------------------------------ | ------------------------- | ----------------------------- |
-| what a settled turn meant      | `policy/settle.ts`        | 18 tests, no subprocess, 36ms |
-| what to dispatch next          | `policy/scheduler.ts`     | a table of tasks and slots    |
-| what is waiting on the manager | `policy/inbox.ts`         | a map of tasks                |
-| where a transition lands       | `domain/state-machine.ts` | a `TaskMeta` and a name       |
-| whether a worktree is clean    | `domain/guard.ts`         | `{ dirty, commits }`          |
-| what an agent may have written | `domain/assignment.ts`    | two strings                   |
-
-## The application modules
-
-`app/server.ts` is the lifecycle and the console; the work is one module each,
-constructed in dependency order by `main/compose.ts`.
-
-| Module          | What it owns                                                       |
-| --------------- | ------------------------------------------------------------------ |
-| `task-graph.ts` | reading the graph, applying transitions, the recently-touched list |
-| `pool.ts`       | the slots, their runners, and the work in flight                   |
-| `dispatcher.ts` | turning a scheduled candidate into a claimed, prompted agent       |
-| `settler.ts`    | what a settled turn does next: restore, raise, back off, submit    |
-| `checker.ts`    | running a task's declared checks and passing or failing it         |
-| `lander.ts`     | rebasing, re-checking and fast-forwarding a task onto the base     |
-| `recovery.ts`   | recloning workspaces, reattaching live pids, reaping dead claims   |
-
-- `dispatcher` needs `settler`, `settler` needs `pool` and `task-graph`,
-  `lander` needs `checker`; nothing points back the other way
-- `server.ts` holds them, ticks them in order, and owns nothing else
-
-## The ports
-
-`app/manager.ts` declares what a protocol adapter may ask the application to do:
-the ~15 operations behind the MCP tools and resources, and nothing else. `mcp.ts`
-holds a `Manager`, never a `Server`, so it cannot reach a store, a path or a
-prompt through it.
-
-`app/ports/` declares what the application needs, one file per port;
-`main/compose.ts` supplies it, and hands each port to the constructor of the
-module that uses it. There is no bag of dependencies: a module names what it
-needs, and gets exactly that. `compose.ts` only constructs and wires: every port
-is a class in `adapters/` that declares `implements`, so an adapter is checked
-where it is written rather than where it is passed.
-
-| Port             | What it is for                                          | Adapter                                |
-| ---------------- | ------------------------------------------------------- | -------------------------------------- |
-| `Tasks`          | the graph on disk, under its lock                       | `task-documents` over `task-store`     |
-| `Workspaces`     | clones, branches, rebases, and the status a guard reads | `git-workspaces` over `git.ts`         |
-| `Agents`         | spawning a sandboxed `pi` and talking to it             | `pi-agents` over `pi-process`          |
-| `Checks`         | running a declared check and reporting how it went      | `sandboxed-checks` over `check-runner` |
-| `Prompts`        | every word an agent reads                               | `prompt-files`                         |
-| `Messages`       | the message queue a task carries between dispatches     | `task-files`                           |
-| `Reviews`        | `findings.json` and the review-failure count            | `task-files`                           |
-| `Assignments`    | the live `ASSIGNMENT.md` and its rotation               | `task-files`                           |
-| `Transitions`    | the transition log and its cursor                       | `transition-log`                       |
-| `Publisher`      | the five views and the server log                       | `view-files` over `runtime`            |
-| `CommandChannel` | the command channel the TUI writes on                   | `command`                              |
-| `Paths`          | the runtime directory layout                            | `runtime`                              |
-
-`Agents` and `Checks` are the two that reach a subprocess. `main/` drives the
-real ones — that is what those suites are for — so a port here buys a seam, not
-a faster suite: the whole `main/` tier is 27s, spread evenly, and no test in it
-is waiting on anything but `git` and `pi` doing real work.
+`app/manager.ts` declares what a protocol adapter may ask of the application, so `mcp.ts` holds a `Manager` and cannot reach a store, a path or a prompt through it. Every adapter is a class declaring `implements`, so it is checked where it is written.
 
 ## What the layers are not
 
-- `Tasks` is one object over the task directory and
-  `Messages`/`Reviews`/`Assignments` are one object over the runtime directory,
-  because each is one place on disk with one convention; splitting them into a
-  file per verb only spread the layout.
-- `Tasks` is deliberately coarse — whole documents, read and written under one
-  lock. The task document's whole point is that a person can edit it; a
-  repository-per-aggregate abstraction over that would be `fs` with extra steps.
-- there is no `Clock` port. `rates.ts` takes `nowMs` as a defaulted parameter,
-  which is the same benefit without the ceremony.
-- `main/` may import anything. That is what a composition root is for.
+- `Tasks` is one coarse port over whole documents under one lock: the document's point is that a person can edit it, and a repository-per-aggregate over that is `fs` with extra steps
+- `Messages`, `Reviews` and `Assignments` share one adapter over the runtime directory, because it is one place with one convention; a file per verb only spreads the layout
+- no `Clock` port: `rates.ts` takes `nowMs` as a defaulted parameter

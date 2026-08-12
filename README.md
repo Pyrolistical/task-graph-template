@@ -1,120 +1,25 @@
 # Task Graph System
 
-Have your smart coding agent manage a team of pi agents to implement the design, planning, implementation, review of coding tasks.
+A smart coding agent (the manager) drives a team of `pi` agents through the design, planning, implementation and review of coding tasks.
 
-## Task State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> NEW
-
-    NEW --> BLOCKED : submit (has deps)
-    NEW --> DESIGN : submit
-    BLOCKED --> BLOCKED : submit (has deps)
-    BLOCKED --> DESIGN : submit (no deps)
-
-    state design {
-        DESIGN
-        DESIGN_REVIEW
-    }
-
-    DESIGN --> DESIGN_REVIEW : submit
-    DESIGN_REVIEW --> PLAN : submit
-    DESIGN_REVIEW --> DESIGN : feedback
-
-    design --> HELD_DESIGN : hold
-
-    state planning {
-        PLAN
-        PLAN_REVIEW
-    }
-
-    PLAN --> PLAN_REVIEW : submit
-    PLAN_REVIEW --> WORK : submit
-    PLAN_REVIEW --> PLAN : feedback
-
-    planning --> HELD_PLAN : hold
-
-    state working {
-        WORK
-        CHECK
-        WORK_REVIEW
-    }
-
-    WORK --> CHECK : submit
-
-    HELD_DESIGN --> DESIGN : resume
-    HELD_DESIGN --> BLOCKED : resume (has deps)
-    HELD_DESIGN --> CLOSED : abort
-
-    HELD_PLAN --> PLAN : resume
-    HELD_PLAN --> BLOCKED : resume (has deps)
-    HELD_PLAN --> CLOSED : abort
-
-    HELD_WORK --> WORK : resume
-    HELD_WORK --> BLOCKED : resume (deps added)
-    HELD_WORK --> CLOSED : abort
-
-    CHECK --> WORK_REVIEW : pass
-    CHECK --> WORK : fail
-
-    WORK_REVIEW --> WORK : feedback
-    WORK_REVIEW --> MANAGER_REVIEW : submit
-
-    working --> HELD_WORK : hold
-
-    MANAGER_REVIEW --> WORK : feedback
-    MANAGER_REVIEW --> CLOSED : submit
-    MANAGER_REVIEW --> CLOSED : abort
-
-    CLOSED --> [*]
+```text
+NEW → [BLOCKED] → DESIGN → DESIGN_REVIEW → PLAN → PLAN_REVIEW
+    → WORK → CHECK → WORK_REVIEW → MANAGER_REVIEW → CLOSED
 ```
 
-There is one state per stage, and `claimed_by` names the slot that is on it: `WORK` with no claim is a task waiting for a worker slot, `WORK` claimed by `pi-fake-2` is that slot working on it. A claim is refused when the field is already set, and that refusal — under the graph lock, on one field — is what makes a task exactly one slot's.
+Reviews send work back to their author state; a failed check sends `CHECK` back to `WORK`; anything blocked parks in `HELD_DESIGN`/`HELD_PLAN`/`HELD_WORK` until the manager resumes or aborts it. The manager is at both ends: it defines a task before anyone can work on it, and it is the only role that can close one. See [States](docs/states.md).
 
-</details>
+## The manager inbox
 
-### Roles
+Everything waiting on the manager, most nearly closed first:
 
-Every state belongs to exactly one role. A transition between two states of the same role is that role at work; a transition that leaves them is a handoff, and the diagram below is only the handoffs.
-
-```mermaid
-stateDiagram-v2
-    [*] --> manager : create
-    manager --> designer : submit (NEW)
-    designer --> reviewer : submit
-    reviewer --> designer : feedback
-    reviewer --> planner : submit
-    planner --> reviewer : submit
-    reviewer --> planner : feedback
-    reviewer --> worker : submit
-    worker --> checker : submit
-    checker --> worker : fail
-    checker --> reviewer : pass
-    reviewer --> worker : feedback
-    reviewer --> manager : submit, hold
-    worker --> manager : hold
-    manager --> designer : resume (held from design)
-    manager --> planner : resume (held from planning)
-    manager --> worker : resume (held from work)
-    manager --> [*] : submit, abort
-```
-
-A second rejection of the same review holds the task instead of bouncing it: `DESIGN_REVIEW → HELD_DESIGN`, `PLAN_REVIEW → HELD_PLAN`, `WORK_REVIEW → HELD_WORK`, with the findings in `held_reason`.
-
-The manager is at both ends: it defines the task before anyone can work on it, and it is the only role that can close one.
-
-### The manager inbox
-
-The `inbox` resource is everything waiting on the manager:
-
-- `MANAGER_REVIEW` — ready for final review. If complete use `task_submit` to merge it to master, otherwise `task_feedback` with findings sends it back; `task_abort` throws it away.
-- `HELD_DESIGN` / `HELD_PLAN` / `HELD_WORK` — an agent was blocked with `held_reason`. Resolve by directly updating the task document, then `task_resume`, or `task_abort` to close it.
-- `NEW` — author the task: edit the file directly — body, checks, dependencies — then `task_submit` to dispatch it.
+- `MANAGER_REVIEW` — `task_submit` lands the branch, `task_feedback` sends it back with findings, `task_abort` throws it away
+- `HELD_*` — read `held_reason`, edit the task, then `task_resume` or `task_abort`
+- `NEW` — author the task: edit the file (body, checks, dependencies), then `task_submit`
 
 ## Setup
 
-Clone this template beside the project you want it to drive, not inside it, and install its dependencies there. It needs `bun` and `git` on the path, plus `pi` for the agents themselves — the server drives them as `pi --mode rpc` subprocesses.
+Clone this template **beside** the project it drives, not inside it. Needs `bun`, `git` and `pi` on the path.
 
 ```bash
 git clone https://github.com/Pyrolistical/task-graph-template.git task-graph-template
@@ -124,27 +29,7 @@ cd ../my-project
 claude mcp add task-graph -- bun ../task-graph-template/mcp.ts
 ```
 
-Restart `claude`. Starting the server seeds `~/task-graph/<key>/` — the key is derived from the repository's path — with the contents of the template's `tasks/`. Fill in the pool it left there:
-
-```bash
-edit ~/task-graph/my-project/agents.json
-```
-
-Then restart the `task-graph` MCP server inside `claude`.
-
-The repository the server drives is the directory it is started in, so `claude` must be run from the project root.
-
-```text
-~/task-graph/<key>/
-├── agents.json          # the pool, seeded disabled
-├── next-task-id         # seeded on first start
-├── template.md          # optional; overrides orchestrator/template.md
-└── 000001.md ...        # the task documents, as they are created
-```
-
-### The agent pool
-
-`agents.json` is read from the task directory — `~/task-graph/my-project/agents.json`. It is seeded with one disabled placeholder; give it a real provider and model, set `enabled` to true, and add as many slots as the pool should run. A provider that is not always running — a local inference server — takes `"healthCheck": true`, which asks it whether it is up before a slot of that agent is dispatched to. See [Agents configuration](docs/agents.md).
+The server drives the directory `claude` was started in, so run it from the project root. The first start seeds `~/task-graph/<key>/` — the key derives from the repository path — from the template's `tasks/`. Fill in `agents.json` there, then restart the `task-graph` MCP server inside `claude`.
 
 ```json
 {
@@ -153,30 +38,24 @@ The repository the server drives is the directory it is started in, so `claude` 
       "type": "pi",
       "provider": "anthropic",
       "model": "claude-sonnet-4-5",
-      "slots": 3,
-      "write": ["~/.cache"]
+      "slots": 3
     }
   ]
 }
 ```
 
-### The manager skill
+It is seeded with one disabled placeholder: give it a real provider and model, set `enabled`, add slots. A provider that is not always up — a local inference server — takes `"healthCheck": true`. See [Agents](docs/agents.md).
 
-[`task-graph-inbox`](.claude/skills/task-graph-inbox/SKILL.md) is the manager's loop written down: drain the inbox head first, by rank, then watch `inbox.json` for the next arrival. Link it into the project the manager runs in, so it stays the template's copy:
+Link the manager's skills in, so they stay the template's copy: `task-graph-inbox` clears the inbox once, `task-graph-monitor` clears it and keeps watching.
 
 ```bash
 mkdir -p ~/my-project/.claude/skills
 ln -s ../../../task-graph-template/.claude/skills/task-graph-inbox ~/my-project/.claude/skills/task-graph-inbox
+ln -s ../../../task-graph-template/.claude/skills/task-graph-monitor ~/my-project/.claude/skills/task-graph-monitor
 ```
 
-Start `claude` in the project root and confirm with `/mcp` that `task-graph` is connected.
-
-Once the server is up, a second terminal in your project root can monitor the pool:
-
-```bash
-bun ../task-graph-template/console.ts
-```
+Confirm with `/mcp` that `task-graph` is connected. A second terminal can watch the pool with `bun ../task-graph-template/console.ts`.
 
 ## Design documentation
 
-[`docs/`](docs/) is how the orchestrator works and why — start with [The dictionary](docs/dictionary.md), [Authority](docs/authority.md), [States](docs/states.md) and [ASSIGNMENT.md](docs/assignment.md).
+[`docs/`](docs/) is how the orchestrator works and why: start with [the dictionary](docs/dictionary.md), [authority](docs/authority.md), [states](docs/states.md) and [ASSIGNMENT.md](docs/assignment.md).

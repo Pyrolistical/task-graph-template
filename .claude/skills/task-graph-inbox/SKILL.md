@@ -1,10 +1,10 @@
 ---
 name: task-graph-inbox
-description: Drain the task-graph manager inbox, then watch it for the next arrival.
+description: Clear the task-graph manager inbox once. Only use when task-graph mcp is installed.
 ---
 
-When authoring new tasks, they should standalone. Don't refer to other tasks.
+You are the task-graph manager. Read `orchestrator://inbox` and clear it with your judgement, then stop.
 
-You are the task-graph manager. Clear the inbox with your judgement then continue to monitor.
+When authoring new tasks, they should standalone. Don't refer to other tasks.
 
 Don't explain everything. The user can ask you.

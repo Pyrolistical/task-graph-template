@@ -1,100 +1,26 @@
-# The MCP tool surface
+# The MCP surface
 
-One stdio server, calling `task.ts` and `state-machine.ts` in process.
+One stdio server calling the application in process. There is no CLI path into the graph, because a single writer is what keeps the lock meaningful and the transition log complete.
 
-- there is no command-line path into the graph for the manager to reach for
-- a single writer is what keeps the lock meaningful and the transition log complete
+Tools, beyond what their names say ([who may call what](authority.md)):
 
-## Authoring
+- `task_create` returns a path; authoring is then editing that file — checks and dependencies are frontmatter, not tools
+- `task_submit` spans `NEW`, `BLOCKED` and `MANAGER_REVIEW` because they are one judgement; from `MANAGER_REVIEW` it lands the branch first ([Integration](workspace.md#integration))
+- `task_write_body` exists for rewriting a body the manager does **not** hold
+- `disable_scheduler` / `disable_agent` are one verb at two scopes — the whole pool, or one model on one provider that is misbehaving; running work still settles, and both return what is draining
+- `slot_abort` is the one place a slot is the unit ([why](agents.md#aborting-one-tool-call))
+- `reload_prompts` re-reads prompts cached at startup and returns each resolved absolute path, which is how a broken or deleted override is seen
 
-| Tool                        | Effect                                 |
-| --------------------------- | -------------------------------------- |
-| `task_create(title)`        | a new document in `NEW`, path returned |
-| `task_write_body(id, body)` | replaces the body under the lock       |
-
-- checks and dependencies are not tools: they are frontmatter fields in the document
-- authoring is editing the file directly — see [The task document](task-document.md)
-
-## Judgement
-
-| Tool                          | Effect                                                                                                                                                                                   |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_submit(id)`             | `NEW` → `DESIGN` or `BLOCKED`; `BLOCKED` → `DESIGN` once the dependencies are gone; from `MANAGER_REVIEW` the branch is landed first (rebase, recheck, fast-forward) and the task closes |
-| `task_feedback(id, findings)` | `MANAGER_REVIEW` → `WORK`, findings appended under `# Review findings` and written to `findings.json` for the next worker                                                                |
-| `task_hold(id, reason)`       | design states → `HELD_DESIGN`, planning states → `HELD_PLAN`, work states → `HELD_WORK`                                                                                                  |
-| `task_resume(id)`             | `HELD_DESIGN` → `DESIGN`, `HELD_PLAN` → `PLAN`, `HELD_WORK` → `WORK`, or `BLOCKED` if dependencies were added while held                                                                 |
-| `task_abort(id)`              | `abort` from `MANAGER_REVIEW` or any held state, refusing a branch that landed                                                                                                           |
-
-- `task_submit` from `MANAGER_REVIEW` and `task_abort` are the two that do work before they touch the graph, and the two whose failures come straight back to the caller rather than into the task — see [Integration](workspace.md#integration)
-- rewriting the graph is not a state: the manager creates, edits and deletes tasks whenever it decides to, and a task does not wait in a queue for that to happen
-
-## Dispatch
-
-| Tool                   | Behaviour                                                             |
-| ---------------------- | --------------------------------------------------------------------- |
-| `enable_scheduler()`   | begin dispatching; returns immediately                                |
-| `disable_scheduler()`  | start nothing new; running processes are still settled and released   |
-| `disable_agent(agent)` | stop dispatching to every slot of one agent; running slots drain      |
-| `enable_agent(agent)`  | offer that agent's slots again                                        |
-| `slot_abort(slot)`     | kill the `bash` call one slot is inside; the turn and the claim stand |
-| `reload_prompts()`     | re-read every prompt and template from disk; returns each cached path |
-
-- `disable_scheduler` and `disable_agent` are the same verb at different scopes: the first parks the whole pool, the second parks one model on one provider when it is the thing misbehaving
-- both return the slots they affected, so the caller can see what is still draining
-- `agent` is `type-provider-model` with no slot number — there is no way to disable a single slot, because a slot is a concurrency unit and not something you can have an opinion about
-- prompts and templates are cached when the server starts, so an edit to the project's overrides does not take effect until the next start; `reload_prompts` is the same re-read without the restart, and returns the absolute paths so the caller can see what a broken override resolved to or that an override it deleted is gone
-
-## Resources
-
-| Resource         | Contents                                                       |
-| ---------------- | -------------------------------------------------------------- |
-| `inbox`          | `inbox.json` — what is waiting on the manager, in order        |
-| `slots`          | `slots.json`                                                   |
-| `checks`         | `checks.json`                                                  |
-| `tasks`          | `tasks.json`                                                   |
-| `queue`          | `queue.json` — what the scheduler would dispatch next          |
-| `paths`          | where the graph, the pool, the prompts and the logs are        |
-| `error`          | why the server is not working, absent when none                |
-| `workspace_path` | the path to `/tmp/task-graph-server/<repo>`, for file watchers |
-
-The first five are the [views](runtime-directory.md#the-views), served as they sit on disk.
+Resources: the five [views](runtime-directory.md#the-views) served as they sit on disk, plus `paths`, `workspace_path` for file watchers, and `error`.
 
 ## When the server cannot start
 
-A crash at startup is a crash loop: the client restarts the server, it reads the same broken `agents.json`, and it dies again. So it does not die.
-
-- a failure while wiring or starting is caught and kept
-- the process still serves the tool surface: every tool and every other resource comes back as an error carrying that message, rather than the connection dropping
-- `error` is where the manager reads it, and where a failure the server hits later — a tick, or publishing the views the console draws — shows up too
-- if serving that resource is itself what crashes, the process dies as any other program would, with the reason in `server.log`
-- a second `claude` in the same checkout lands here too: its server refuses the runtime directory the first one holds, and `error` names the pid holding it — see [One server at a time](runtime-directory.md#one-server-at-a-time)
+A startup crash would be a crash loop — the client restarts it, it reads the same broken config, it dies again. So it does not die: a failure while wiring or starting is caught and kept, the process still serves the tool surface, and every tool and other resource returns that message instead of the connection dropping. `error` is where the manager reads it, and where later failures (a tick, publishing views) show up. If serving `error` is itself what crashes, the process dies with the reason in `server.log`.
 
 ## The manager owns what it holds
 
-`task_create` returns a path, and the document at that path is the manager's to edit with ordinary file writes until it transitions out of `NEW`.
+A document is the manager's to edit with ordinary file writes wherever the manager owns the state: `NEW`, a held task before `resume`/`abort`, a `MANAGER_REVIEW` task before `submit`. Safe because ownership follows the state — no agent is dispatched to those states and the server applies no transitions there, so there is no second writer to race.
 
-- the checks, the `depends_on` list and the body are all just fields in that file, so authoring never goes through a tool
-- the same applies wherever the manager owns the state:
-  - a held task is edited in place before `resume` or `abort`
-  - a task in `MANAGER_REVIEW` is edited in place before `submit` — folding the assignment history into the Implementation History section is exactly the kind of prose work that should not go through a tool
+## The manager loop
 
-This is safe because ownership follows the state:
-
-- the manager states are the end of the pipeline and no agent is dispatched to them, so the server applies no transitions to a task sitting in one and there is no second writer to race with
-- `task_write_body` exists for the case where the manager wants to rewrite a body it does not hold; direct editing is for the case where it does
-
-## The manager state machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> MANAGER_REVIEW : inbox head is MANAGER_REVIEW
-    IDLE --> UNBLOCKING : inbox head is a held state
-    IDLE --> AUTHORING : inbox head is NEW, or the inbox is empty
-    MANAGER_REVIEW --> IDLE : submit, abort, or feedback
-    UNBLOCKING --> IDLE : resume or abort
-    AUTHORING --> IDLE : task reaches WORK
-    IDLE --> [*] : session ends, server dies, agents detach
-```
-
-The three outgoing edges from `IDLE` are [the inbox order](scheduler.md#the-manager-inbox), which is why the inbox is a view and not a suggestion.
+Idle → work the [inbox](scheduler.md#the-manager-inbox) head: `MANAGER_REVIEW` → submit/abort/feedback; a held state → resume or abort; `NEW` or an empty inbox → author. That order is the inbox's.

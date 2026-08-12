@@ -6,118 +6,30 @@ bun run typecheck # tsc --noEmit
 bun run bdd       # regenerate docs/bdd.md from the suite
 ```
 
-- nothing in the suite calls a model
-- everything that would is replaced by a fake `pi` that speaks the same rpc protocol
-- so the tests exercise the real server against a scripted agent
+Nothing in the suite calls a model: everything that would is replaced by a fake `pi` speaking the same rpc protocol, so the tests exercise the real server against a scripted agent.
 
 ## The fake pi
 
-`fixture.ts` writes a `pi`-compatible bun script and points the server at it with `piCommand`.
+`fixture.ts` writes a `pi`-compatible bun script and points the server at it. It parses the same flags, reads the same JSONL, emits the same events, and writes a real session `.jsonl` so the transcript reader and `get_session_stats` have something true to read.
 
-- it parses the same flags the real one gets (`--session-dir`, `--name`)
-- it reads JSONL commands on stdin and emits the same events: `agent_start`, `tool_execution_*`, `agent_end`, `agent_settled`
-- a `busy_ms` step is a `bash` call that has not returned yet, so `abort_bash` has something to kill: the fake ends the tool call as an error and finishes the turn from there, the way a real agent reacts to its command dying
-- it writes a real session `.jsonl`, so the transcript reader and `get_session_stats` have something true to read
+Behaviour is declared, not coded: a `Plan` maps task id → claimed state → one `Step` per dispatch of that state. A step can append a section, call a result tool with arguments, answer in prose and call nothing, commit or dirty the worktree, tamper with the assignment, settle with any `stopReason`, repeat a call, compact, take time, die without settling, or corrupt the workspace. Every [issue](settle.md#issues) has a step that produces it.
 
-What it does is declared, not coded. A `Plan` maps task id → claimed state → a list of `Step`s, one per dispatch of that state:
-
-| Field                                               | What the fake agent does                                     |
-| --------------------------------------------------- | ------------------------------------------------------------ |
-| `design` / `todos` / `notes`                        | append that section to `ASSIGNMENT.md`                       |
-| `submit`, `findings`                                | call the state's `submit` result tool with those arguments   |
-| `blocked`                                           | call `blocked` with that message                             |
-| `raw_final_message`                                 | answer in prose and call nothing — the `missing-result` path |
-| `commit` / `write`                                  | commit a file, or write one and leave it dirty               |
-| `clean`                                             | delete paths from the worktree                               |
-| `tamper: {from, to}`                                | rewrite part of the assignment above its own section         |
-| `stop_reason`                                       | settle with `length`, `error`, `aborted`                     |
-| `loop: n`                                           | emit the same tool call `n` times                            |
-| `compact: reason`                                   | act on the worktree, then emit `compaction_start`            |
-| `busy_ms`, `start_delay_ms`, `new_session_delay_ms` | take time, so timing paths are reachable                     |
-| `die`                                               | exit without settling — the `BUSY → IDLE` edge               |
-| `break_git`                                         | corrupt the workspace so a git operation fails               |
-
-- every issue in [the issues table](settle.md#issues) has a step that produces it
-- a test asserts on the graph, on `held_reason` or on the fragment the agent was prompted with, rather than on server internals
+Tests assert on the graph, on `held_reason`, or on the fragment the agent was prompted with — never on server internals.
 
 ## The jigs
 
-| File                  | What it stands up                                                                                                                                               |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `temp-dirs.ts`        | `testInTempDirs()`, a `test()` that gives each test its own temp directories and removes them on success, keeping them on failure so a failure can be inspected |
-| `ports.ts`            | pure fakes for every port in `app/ports/`, so an app module can be driven with no filesystem at all                                                             |
-| `orchestrator-jig.ts` | a real git repo with one commit, and `commitIn` to add more                                                                                                     |
-| `graph-jig.ts`        | a task directory seeded with `next-task-id`, plus `baseMeta` and `bodyOf` for document-level tests                                                              |
-| `fixture.ts`          | the whole world: repo, task directory, agents file, runtime root, fake `pi`, and the `Plan` it runs                                                             |
-| `server-jig.ts`       | `serverFor(fixture)`, `editTaskFile`, and the two ways to advance time — `settle(server, ticks)` and `until(server, predicate)`                                 |
+`temp-dirs.ts` gives per-test directories kept only on failure; `ports.ts` pure fakes for every port; `orchestrator-jig.ts` a real git repo; `graph-jig.ts` a seeded task directory; `fixture.ts` the whole world plus the `Plan` it runs; `server-jig.ts` a wired server and time.
 
-- `settle` and `until` both tick and drain, because a tick starts work the next tick observes; a test that ticked once and asserted would be asserting on a half-applied transition
-- `deadPid()` spawns and reaps a real process, which is the only honest way to get a pid that is certainly gone
+- `settle` and `until` tick **and** drain, because a tick starts work the next tick observes; asserting after one tick would assert on a half-applied transition
+- `deadPid()` spawns and reaps a real process, the only honest way to get a pid that is certainly gone
 
-## The layers
+## Where a test lives
 
-| Suite                                 | What it holds fixed                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| `domain/state-machine.test.ts`        | every edge of the state machine, and every edge it refuses                            |
-| `domain/*.test.ts`                    | the stage table, the task document, the append-only rule, rates, the console's text   |
-| `policy/settle.test.ts`               | what every settled turn means, as a table                                             |
-| `policy/scheduler.test.ts`            | ranking, slot choice, the inbox                                                       |
-| `policy/console.test.ts`              | panes, headers, the frame and the scroll anchor                                       |
-| `app/*.test.ts`                       | the pool, the reaper and the settle path over the fakes in `testing/ports.ts`         |
-| `adapters/*.test.ts`                  | transitions against a task directory, the pi protocol, pool loading, prompts, the tty |
-| `main/server-*.test.ts`               | the wired server against the fake pi: dispatch, settle, checks, views, recovery       |
-| `main/mcp.test.ts`                    | the tool surface over a real MCP client, linked to the server in process              |
-| `architecture.test.ts`, `bdd.test.ts` | the dependency rule, and the Given/When/Then style itself                             |
+Each decision is tested where it lives ([the layers](architecture.md)): the state machine and the document in `domain/`, settle, ranking and the console's frame in `policy/`, the pool and reaper over fakes in `app/`, real git and rpc in `adapters/`, the wired server against the fake `pi` and the tool surface over a real MCP client in `main/`.
 
-A test lives in the layer it exercises. The pure layers need no fixture, no
-repository and no subprocess, so most of what used to need the fake `pi` is now
-a table of inputs — see [the layers](architecture.md).
+Only `adapters/` and `main/` may touch the filesystem in a test; a suite needing a real repo, task directory or subprocess belongs there. `architecture.test.ts` and `bdd.test.ts` guard the layering and the test style.
 
-## Given, When, Then
-
-Every test in the orchestrator is written as [behaviour](bdd-tests.md): one
-`When` per test, complete sentences, domain language.
-
-```ts
-test("a worker that committed nothing is told its work is uncommitted", () => {
-  // Given a worker settled after calling submit with notes appended
-  const settled = anAgent("WORK");
-
-  // Given its branch carries no commit of its own
-  settled.worktree = { dirty: [], commits: 0 };
-
-  // When the server decides what to do with the settle
-  const intents = decideSettle(settled);
-
-  // Then the uncommitted issue is raised against it
-  expect(intents[0]).toMatchObject({ kind: "raise", issue: "uncommitted" });
-});
-```
-
-Only `adapters/` and `main/` may touch the filesystem in a test. `domain/`,
-`policy/` and `app/` are the layers that decide, so their suites use bun's own
-`test()` and never reach for `testInTempDirs`; a suite that needs a real
-repository, a task directory or a subprocess belongs further out.
-
-`bdd.test.ts` enforces the rules on every suite in the orchestrator: three
-comments per test, one `When`, prose rather than code, and a `Feature:` name on
-every `describe`. It also checks that it can read every suite, so a test file it
-cannot parse fails the check rather than passing it by default.
-
-Because the rules hold, the suite reads as a specification without being one:
-`bun run bdd` walks every suite and writes [every Given, When and Then](bdd.md)
-to `docs/bdd.md`, keeping the file, `Feature:` and test nesting. It is generated
-from the tests, so it cannot drift from what is actually asserted — regenerate
-it rather than editing it.
-
-The console is the most-formatted code in the repo, and it is tested where each
-part of it lives: `domain/text.test.ts` for grapheme segmentation, east-asian
-widths, clipping and wrapping; `domain/session.test.ts` for turning a session
-record into entries; `policy/console.test.ts` for panes, headers, the frame and
-the scroll anchor; `policy/keys.test.ts` for key and mouse decoding; and
-`adapters/tui.test.ts` for the two things that touch a disk — tailing a session
-file and reading the five views. They are exact-output tests, which is what lets
-the drawing code stay free of defensive checks.
+The console is the most-formatted code in the repo and is tested with exact-output tests, which is what lets the drawing code stay free of defensive checks.
 
 ## The schema jig
 
@@ -125,12 +37,4 @@ the drawing code stay free of defensive checks.
 bun orchestrator/testing/tools-jig.ts --provider <provider> --model <model> [--trials N] [--states ...]
 ```
 
-This one **does** call a model — it measures how reliably a model ends with the right result tool.
-
-- for each state and each scenario — submit, blocked, and the reviewer variants — it spawns a `pi` session loaded with the state's real extension (`result-tools-<tools>.ts`) and the real `prompts/<STATE>.md`
-- it sends a trivial assignment and checks which result tool the last call was
-- the report is a per-scenario pass rate with the failure modes (wrong tool, no call) and the calls that failed
-- the exit code is non-zero when any scenario passes nothing
-
-- it is the tool for iterating on the wording of the result contract in the prompts: run it against a provider, read where it fails, tighten the prompt, run it again
-- a model that scores badly here is a model to restrict with [`roles`](agents.md#which-roles-an-agent-may-take), not one to work around in the server
+This one **does** call a model: per state and scenario it spawns a real `pi` session with that state's extension and prompt, sends a trivial assignment, and reports how often the last call was the right result tool, with the failure modes. The tool for iterating on the wording of the result contract. A model that scores badly is one to restrict with [`roles`](agents.md#roles), not to work around in the server.

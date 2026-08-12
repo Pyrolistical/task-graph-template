@@ -1,86 +1,45 @@
 # Orchestrator
 
-An MCP server that turns the task graph into a work queue for `pi` agents.
-
-- a manager agent (Claude Code) owns the server over stdio
-- the server drives `pi --mode rpc` subprocesses, each in a dedicated clone of the repo
-- each subprocess runs inside a `bwrap` sandbox that leaves the repo itself read-only
-- the server runs the declared checks itself, rather than trusting an agent to
-- it publishes a live view of everything it owns under `/tmp/task-graph-server/<repo>/`
-- it brings a task to the manager only when a judgement is needed
-
-## Topology
+MCP server turning a task graph into a work queue for `pi` agents.
 
 ```text
-        ┌─────────────────────────┐
-        │  manager (Claude Code)  │   authors tasks, reviews commits,
-        └────────────┬────────────┘   decides what enters the graph
-                     │ stdio (MCP)      watches inbox/agents/checks/tasks.json
-        ┌────────────┴────────────┐
-        │   orchestrator server   │   scheduler · check runner · reaper
-        │        (bun)            │   mechanical transitions only
-        └────────────┬────────────┘
-                     │ JSONL commands in, events out
-     ┌───────────────┼───────────────┐
-┌────┴────┐     ┌────┴────┐     ┌────┴────┐
-│ pi #1   │     │ pi #2   │     │ pi #3   │   commits + ASSIGNMENT.md
-│ 000042  │     │ 000057  │     │ 000058  │   no graph access
-└─────────┘     └─────────┘     └─────────┘
+manager (Claude Code)     authors tasks, judges reviews, closes tasks
+  │ stdio (MCP)
+server (bun)              scheduler · check runner · reaper · settler · lander
+  │ JSONL rpc
+pi #1  pi #2  pi #3       commits on task/<id>, read ASSIGNMENT.md
 ```
 
-- agents never touch the task graph
-- each one gets an `ASSIGNMENT.md` and produces two things: commits on its own branch, and edits to that `ASSIGNMENT.md`
-- nothing it writes becomes a graph mutation without passing through the server or the manager
+Invariants everything else rests on:
 
-## The documents
+- agents never see the graph; `ASSIGNMENT.md` is their whole interface
+- nothing an agent writes becomes a graph mutation without the server or the manager
+- one writer process, one lock, one transition log
+- a task reaches the manager only when a judgement is needed
 
-**The contract**
+| Document                                  | Covers                                                 |
+| ----------------------------------------- | ------------------------------------------------------ |
+| [Dictionary](dictionary.md)               | one name per thing; identifier spelling                |
+| [Authority](authority.md)                 | server states facts, manager states opinions           |
+| [States](states.md)                       | the pipeline, claims, splits, holds                    |
+| [Task document](task-document.md)         | the graph on disk                                      |
+| [ASSIGNMENT.md](assignment.md)            | the agent interface                                    |
+| [MCP surface](mcp.md)                     | tools, resources, startup failure                      |
+| [Layers](architecture.md)                 | domain · policy · app · adapters · main, and the ports |
+| [Runtime directory](runtime-directory.md) | views, transition log, retention                       |
+| [Server](server.md)                       | startup, tick order, pause, detach                     |
+| [Scheduler](scheduler.md)                 | dispatch order, slot choice, inbox order               |
+| [Settle](settle.md)                       | turn end → graph, issues and their budgets             |
+| [Checks](checks.md)                       | the deterministic half                                 |
+| [Workspace](workspace.md)                 | the per-task clone and landing it                      |
+| [Sessions](sessions.md)                   | what resumes, what is fresh                            |
+| [Agents](agents.md)                       | `agents.json`, health checks, outages, disabling       |
+| [Sandbox](sandbox.md)                     | `pi` spawn, `bwrap`, cgroups, the rpc stream           |
+| [Prompts](prompts.md)                     | every word an agent reads, and overrides               |
+| [Console](console.md)                     | read-only TUI over the views                           |
+| [Testing](testing.md)                     | the fake `pi`, the jigs                                |
+| [Behaviour tests](bdd-tests.md)           | how a test is written here                             |
+| [Behaviour](bdd.md)                       | every Given/When/Then, generated                       |
+| [Coverage](coverage.md)                   | where the suite does not reach                         |
 
-| Document                              | What it covers                                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [The dictionary](dictionary.md)       | every noun the orchestrator uses, once, and how identifiers are spelled                    |
-| [Authority](authority.md)             | who may write what — the server states facts, the manager states opinions                  |
-| [States](states.md)                   | the thirteen states, why the reviews are split, the design and planning phases, held tasks |
-| [The task document](task-document.md) | the graph on disk: frontmatter schema, ids, the lock, cycles, closing                      |
-| [ASSIGNMENT.md](assignment.md)        | the whole interface between an agent and the project: append-only, result tools, rotation  |
-| [The MCP tool surface](mcp.md)        | the tools and resources the manager drives the server through, and the manager's own loop  |
-
-**The machinery**
-
-| Document                                      | What it covers                                                                  |
-| --------------------------------------------- | ------------------------------------------------------------------------------- |
-| [The layers](architecture.md)                 | the onion: domain, policy, app, adapters, main, and the ports between them      |
-| [The runtime directory](runtime-directory.md) | `/tmp/task-graph-server/<repo>/`, the five views, the transition log, retention |
-| [The server](server.md)                       | startup, the tick, pausing, detaching, recovery                                 |
-| [The scheduler](scheduler.md)                 | dispatch order, the slot handoff, the manager inbox                             |
-| [Settling an agent](settle.md)                | mapping pi signals onto the graph, the named issues, applying a review          |
-| [Checks](checks.md)                           | the deterministic half of the pipeline                                          |
-| [The workspace](workspace.md)                 | the per-task clone, its lifecycle, and landing a branch                         |
-| [Sessions](sessions.md)                       | what is resumed, what is fresh, and why roles never share one                   |
-
-**The agents**
-
-| Document                            | What it covers                                                              |
-| ----------------------------------- | --------------------------------------------------------------------------- |
-| [Agents configuration](agents.md)   | `agents.json`, roles, the write list, disabling, provider outages           |
-| [The sandbox](sandbox.md)           | spawning `pi`, `bwrap` and cgroups, the command channel, reading the stream |
-| [Prompts and templates](prompts.md) | every word an agent reads, and how a project replaces any of it             |
-
-**The tools around it**
-
-| Document                        | What it covers                                                         |
-| ------------------------------- | ---------------------------------------------------------------------- |
-| [The console](console.md)       | the live TUI over the views, and the command channel it writes back on |
-| [Testing](testing.md)           | the fake `pi`, the jigs, the schema jig, and the Given/When/Then style |
-| [Behaviour tests](bdd-tests.md) | how a test is written here                                             |
-| [Behaviour](bdd.md)             | every Given, When and Then in the suite, generated from it             |
-| [Coverage](coverage.md)         | what the suite holds down, and where it does not reach                 |
-
-## Where to start
-
-- [The dictionary](dictionary.md) — what everything is called
-- [Authority](authority.md) — who is allowed to move a task
-- [States](states.md) — where it can move to
-- [ASSIGNMENT.md](assignment.md) — the only thing an agent ever sees
-
-Those four are enough to follow the rest.
+Read in order: dictionary → authority → states → assignment.

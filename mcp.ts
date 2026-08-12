@@ -194,7 +194,7 @@ export function build(startup: Startup): McpServer {
     "slot_abort",
     {
       description:
-        "Abort whatever a slot is doing right now. Names a slot (with the trailing number), only works while the slot is doing something. The aborted turn ends the assignment and releases the slot.",
+        "Kill the bash command a slot is running right now. Names a slot (with the trailing number), and is refused unless that slot is inside a bash tool call. The command dies, the turn does not: the agent reads the failed tool result and carries on, keeping its session, its claim and its slot.",
       inputSchema: z.object({ slot: z.string().min(1) }),
     },
     async ({ slot }) =>

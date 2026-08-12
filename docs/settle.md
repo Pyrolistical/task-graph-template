@@ -1,189 +1,43 @@
 # Settling an agent
 
-## Mapping pi signals onto the graph
+Everything the server does to a task in a role stage comes out of this path ([`policy/settle.ts`](../orchestrator/policy/settle.ts)).
 
-The load-bearing one: everything the server does to a task in `DESIGN`, `DESIGN_REVIEW`, `PLAN`, `PLAN_REVIEW`, `WORK` or `WORK_REVIEW` comes out of it.
+Two inputs, not interchangeable: the **event stream** says how the turn ended and carries the result tool calls; **`ASSIGNMENT.md` on disk** says what the agent believes it accomplished. The file is only worth reading once the stream says the turn settled, because a run whose every attempt failed still fires `agent_end` per attempt ([reading the stream](sandbox.md#reading-the-stream)).
 
-Two inputs, and they are not interchangeable:
+By outcome:
 
-- the **event stream** says how the turn ended
-- the **`ASSIGNMENT.md` on disk** says what the agent believes it accomplished
-- the stream is also where the result tool calls land — a `submit` or `blocked` call is an event like any other, read back at settle with the activity that surrounded it
-- the file is authoritative for everything else
-- a run whose every attempt failed still exits 0, and `agent_end` fires once per attempt, so the file is only worth reading once the stream says the turn settled
+| Turn ended with             | Server does                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| provider error              | back off, re-prompt the same session ([outages](agents.md#when-the-provider-is-down)) |
+| aborted (shutdown, loop)    | close stdin, release the slot                                                         |
+| `length`, or no result call | raise `missing-result`                                                                |
+| `blocked`                   | raise `blocked`                                                                       |
+| `submit`                    | the checks below, then apply                                                          |
 
-```text
-on agent_settled:
-    stopReason ← the last assistant message's stopReason
+Then, in order: the stage's section must have been appended; nothing above it may have changed; the stage's worktree guard must hold; non-empty findings are feedback back to the author state; otherwise `submit`, handing the assignment in as the new body where the stage says so. A wrong-shaped result never reaches here — `pi` refuses it in-session against the schema.
 
-    if stopReason = error:                        # provider trouble, not the agent's
-        back off, re-prompt the same session, done
-
-    if the turn was cut short as a loop            → raise "looping"
-
-    if stopReason = aborted:                      # shutdown or timeout
-        close stdin, release the slot, done
-
-    calls ← the result tools called this turn, from the rpc stream
-    if stopReason = length, or there is no call → raise "missing-result"
-
-    if the last call is blocked    → raise "blocked"
-
-    stage ← the stage table row for the claimed state
-
-    if the stage appends a section (DESIGN, PLAN, WORK):
-        if nothing was appended                   → raise the stage's "missing" issue
-        if anything above the section changed      → restore everything above the
-                                                     agent's heading, keep what is
-                                                     under it, raise
-                                                     "modified-assignment"
-    else (the review stages, which append nothing):
-        if the assignment changed at all           → restore it, raise
-                                                     "modified-assignment"
-
-    if the stage guards its worktree and the tree broke the guard
-        untouched (design and planning)            → raise "modified-worktree"
-        committed (work)                           → raise "uncommitted"
-
-    if findings is not empty:                     # only a review can have any
-        write findings.json, feedback back to the stage it came from,
-        release the slot, done
-
-    clear findings.json
-    submit — with the assignment as the new body when the stage hands one in
-    (DESIGN_REVIEW, PLAN_REVIEW, WORK) — release the slot
-```
-
-As a table, since these are the cases that matter:
-
-| `stopReason` | result tool call | Server action                                              |
-| ------------ | ---------------- | ---------------------------------------------------------- |
-| `toolUse`    | `submit`         | the settle above, `submit`, close stdin, release the slot  |
-| `stop`       | `blocked`        | raise `blocked`                                            |
-| `toolUse`    | wrong arguments  | never reaches the server; refused by the schema in-session |
-| `length`     | any              | raise `missing-result`                                     |
-| `error`      | any              | leave the process up; re-prompt on backoff                 |
-| `aborted`    | any              | close stdin, release the slot                              |
-
-A `length` or resultless outcome still keeps the branch, so the next attempt starts from the partial work rather than from the base.
+A `length` or resultless outcome keeps the branch, so the next attempt starts from the partial work rather than the base.
 
 ## Issues
 
-Everything the server can find wrong with a settle — and one thing it can find wrong before the settle — is a **named issue**.
+Every way a settle can be wrong is a **named issue** with its own [fragment](prompts.md) and attempt budget ([`domain/issues.ts`](../orchestrator/domain/issues.ts)). Raising one prompts the live session with that fragment; the attempt after the last is a `hold` naming the issue. Attempts are counted per issue per dispatch.
 
-- each has its own prompt fragment and its own number of attempts
-- raising one prompts the live session with that fragment
-- the attempt after the last one is a `hold` whose reason names the issue
+- **4** for the ordinary recoverable ones: a retry costs one turn against a session that already holds the whole task, and the alternative costs a person
+- **8** for `missing-result`: the work is done and only the reporting call is missing, the causes are what a nudge clears (prose instead of a call, exhausted context, aborted turn), and a compaction between attempts changes the conditions
+- **1** for `blocked`: it is a stated outcome, not a failure. The second look catches only resolvable confusion; a third would argue with the answer
+- one fragment per issue whatever state it fires from, since the words do not depend on the state; `modified-assignment` is per state because each names the section that state may append
+- named so the log says which issue and how many attempts are gone, `held_reason` says which won, and each fragment is rewritable without a server diff
 
-| Issue                 | Attempts | Fragment                                         | Held as                                                     |
-| --------------------- | -------- | ------------------------------------------------ | ----------------------------------------------------------- |
-| `missing-result`      | 8        | `missing-result.md`                              | the agent stopped without calling a submit or blocked tool  |
-| `missing-todos`       | 4        | `missing-todos.md`                               | the planner submitted without appending a todo list         |
-| `missing-design`      | 4        | `missing-design.md`                              | the designer submitted without appending a design section   |
-| `missing-notes`       | 4        | `missing-notes.md`                               | the worker submitted without appending implementation notes |
-| `modified-assignment` | 4        | `modified-assignment-<state>.md`                 | the agent changed parts of the assignment it may not        |
-| `uncommitted`         | 4        | `uncommitted.md`, rendered from `git status`     | the agent submitted work it never committed                 |
-| `looping`             | 3        | `looping.md`, rendered from the repeated command | the agent kept repeating one command                        |
-| `blocked`             | 1        | `blocked.md`                                     | the agent's own `message`, verbatim                         |
-| `modified-worktree`   | 4        | `modified-worktree.md`                           | the agent wrote to the worktree during design or planning   |
-
-Scoping:
-
-- every issue names one fragment, whatever it fires from, because the words do not depend on the state
-- `modified-assignment` is the exception, and is one file per state: each names the section that state may append, and the reviewers are told they may write nothing at all
-- attempts are counted per issue per dispatch, not per settle — an agent that edits the assignment twice and then stops without a result has spent two of one budget and one of another
-
-### Why four attempts
-
-- the failures these catch are ordinary and recoverable: a result tool call with the wrong arguments, a turn that ran out of context before the final call was made, a section not yet appended
-- each retry costs one turn against a session that already has the whole task in it
-- the alternative — a hold — costs a person
-- escalating to the most expensive resource in the system after a single misplaced brace is the wrong trade
-
-### `missing-result` gets eight
-
-- it is the only issue where the agent has nothing to redo: the work is done and the one thing left is the call that reports it
-- the causes are the ones a nudge is actually good at clearing — prose instead of a call, a turn that ran out of context, an aborted turn — and a compaction between attempts changes the conditions the next one runs under
-- holding here throws away a finished stage over a missing sentence, so the budget is worth twice what a broken rule gets
-
-### `looping` is the exception
-
-- it is the one issue not raised from a settle, because the agent it catches never settles
-- ten identical tool calls in a row — same tool, same arguments, byte for byte — and the stream flags it, `PiProcess` aborts the turn on the spot, and the settle that the abort produces raises the issue
-- consecutive and within one turn: a command run ten times across ten turns is an agent checking its work, and a run broken by anything else starts the count again
-- ten, because a handful of repeats is a retry and a screenful is an agent that has stopped reading
-
-The reaction matters more than the number:
-
-- a loop is not a failed submit, so the fragment does not correct anything
-- it says the command was repeated, that the answer is not in its output, and that the cause may sit outside the diff entirely — in the environment rather than the code
-- then it offers the two ways out: try something else, or send `{"type": "blocked", "message": ...}` and say what the wall is
-- handing the agent straight to a person would throw away a session that still has the whole task in it, and would hand over "it kept running `zig build`" instead of the blocker the agent can write in one line
-- three attempts rather than four, because each one costs ten tool calls to reach, and an agent that loops three times is not going to read its way out on the fourth
-
-### `blocked` keeps its single attempt
-
-- for the opposite reason: it is not a failure, the agent stated an outcome
-- the second look is there to catch the one confusion the fragment can resolve — a reviewer that hit nothing worse than work outside the task, a worker that could route around the wall
-- if the agent says it again, it means it, and asking a third time is arguing with the answer
-
-### Why they are named
-
-- `server.log` says which issue and how many of its attempts are gone
-- `held_reason` says which one won
-- each fragment is a file that can be rewritten without touching the server
+`looping` is the only issue not raised from a settle, because the agent it catches never settles: ten identical tool calls in a row — same tool, same args, byte for byte, consecutive, within one turn — and the stream flags it, the process aborts the turn, and the resulting settle raises it. Across turns is an agent checking its work, and any other call restarts the count; ten because a handful is a retry and a screenful is an agent that stopped reading. The fragment corrects nothing — the answer is not in that command's output and the cause may be the environment rather than the diff — it offers the two ways out: try something else, or send `blocked` with what the wall is. Handing straight to a person would throw away a session holding the whole task and hand over "it kept running `zig build`" instead of a one-line blocker. 3 attempts, because each costs ten tool calls to reach.
 
 ## A submit has to be in the git history
 
-`uncommitted` is one of two issues that reads something other than `ASSIGNMENT.md`.
+`uncommitted` and `modified-worktree` are the same check inverted: designer, planner and their reviewers must leave the worktree as found, a worker must have committed. Two cheap facts before `submit` applies: `git status --porcelain` empty, and at least one commit over the base.
 
-- `modified-worktree` is the other, and it is the same check with the requirements inverted
-- the designer, the design reviewer, the planner and the plan reviewer must leave the worktree exactly as they found it, so any dirty file or any commit is an issue for them
-- a worker is required to have both
-- `uncommitted` is the one that catches the most expensive lie a worker can tell
+Not a judgement, hence the server's: everything downstream is a commit range — checks run in the workspace, the reviewer gets the range, the merge is a fast-forward. A dirty submit hands all three the wrong thing: checks pass against files nobody sees again, the reviewer reads an empty diff, the work goes when the worktree does. `ASSIGNMENT.md` is outside the tree, so anything `git status` reports is real work left behind, untracked files included; unignored build output showing up here is fixed by a project `.gitignore`, not a looser check.
 
-Two facts are checked in the workspace before the `submit` is applied, both cheap:
+The fragment quotes the first `git status` entries into the session that still holds every reason the agent had, so the usual outcome is one `git commit` and a second `submit`. The prompt already said to commit as you go; the check exists because that is an instruction and a fast-forward needs a fact.
 
-- `git status --porcelain` is empty — `ASSIGNMENT.md` sits outside the tree, so anything reported here is real work the agent left behind
-- `refs/remotes/origin/<base>..HEAD` counts at least one commit, so the branch carries something of the agent's own
+## Applying a work review
 
-Neither is a judgement, which is why it is the server's to enforce:
-
-- everything downstream is a commit range — the checks run in the workspace, the reviewer is given `<base>..HEAD`, and the merge is a fast-forward of the branch
-- a submit with a dirty tree hands all three the wrong thing: the checks pass against files nobody will ever see again, the reviewer reads an empty diff, and the work goes when the worktree does
-- the base is read as a remote-tracking ref for the reason every base read inside a workspace is — see [The workspace is a clone](workspace.md#the-workspace-is-a-clone)
-
-The fragment:
-
-- quotes the `git status` output back — the first 20 entries, because a prompt is not a place to paste a thousand paths
-- lands in the session that still holds every reason the agent had for what it wrote, so the usual outcome is one `git commit` and a second `submit`
-- the agent was told this in `prompts/WORK.md` before it started; the check is there because "commit as you go" is an instruction, and a fast-forward merge needs a fact
-
-Untracked counts, which is the point:
-
-- a new file the agent wrote and never `git add`ed is the failure this catches most often
-- the cost is build output the project does not ignore coming back as uncommitted work
-- the fix for that is a `.gitignore` entry in the project, rather than a looser check here
-
-## Applying a review
-
-```text
-when a reviewer settles in WORK_REVIEW:
-    call ← the last result tool called this turn
-
-    if the assignment changed at all:
-        restore it, raise "modified-assignment",
-        stay in WORK_REVIEW (past its attempts → hold)
-
-    findings ← result.findings
-    if the branch changed anything under tasks/:
-        findings += "the diff writes to tasks/ …"
-
-    if findings is empty → submit                (→ MANAGER_REVIEW)
-    else → feedback with the findings, which appends them to the body
-           under # Review findings, plus a fresh ## Implementation Notes
-           heading; the findings are also queued to the worker's
-           session                                    (→ WORK)
-    the second rejection of the same review skips the bounce and
-    holds instead, with the findings as the reason      (→ HELD_WORK)
-```
+Empty findings submit to `MANAGER_REVIEW`; otherwise feedback appends them to the body under `# Review findings` with a fresh `## Implementation Notes` heading and queues them to the worker — and the [second consecutive rejection holds instead](states.md#reviews-are-split-in-two).

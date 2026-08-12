@@ -1,114 +1,84 @@
 # The dictionary
 
-Every noun the orchestrator uses, once. One thing has one name — in the code, in
-the documents, in the views and in this directory. Two words for one thing means
-one of them is wrong.
+One thing, one name — in code, docs, views and prompts. Two words for one thing means one is wrong.
 
-## The graph
+## Graph
 
-| Term          | What it names                                                                       | Carried by                             |
-| ------------- | ----------------------------------------------------------------------------------- | -------------------------------------- |
-| task          | one unit of work with an id, from `NEW` to `CLOSED`                                 | `TaskId`, `TaskMeta`                   |
-| task document | the markdown file the task lives in: frontmatter, then body                         | `<id>.md` in the task directory        |
-| frontmatter   | the typed fields at the head of the document — the whole machine-readable task      | `TaskMeta`, `FIELD_ORDER`              |
-| body          | the prose under the frontmatter: purpose, criteria, design, todos                   | `body`                                 |
-| state         | where a task sits, one of the thirteen                                              | `TaskState`, `state`                   |
-| stage         | a row of the stage table: a state plus the role, guard, section and tools behind it | `Stage`, `STAGES`, `STAGE_OF`          |
-| phase         | design, plan or work — the three a task can be held from                            | `Phase`, `HELD_OF`                     |
-| role          | designer, planner, worker or reviewer: what a stage needs an agent to be            | `Role`, `ALL_ROLES`                    |
-| transition    | a named move between states: submit, pass, fail, hold, resume, feedback, abort      | `TransitionName`, `decide`             |
-| claim         | the field saying which slot is holding a task, and its pid                          | `claimed_by`, `claimed_pid`, `Claim…`  |
-| dependency    | a task that must close before this one leaves `BLOCKED`                             | `depends_on`                           |
-| blocking      | the transitive count of tasks waiting on this one                                   | `blocking`, `blockingCounts`           |
-| findings      | what a review sends back, verbatim                                                  | `findings`, `findings.json`, `Reviews` |
-| held reason   | why a task was parked, for the manager to read                                      | `held_reason`                          |
-| check         | one declared shell command the server runs in the worktree                          | `checks`, `RunningCheck`               |
+| Term          | Is                                                      |
+| ------------- | ------------------------------------------------------- |
+| task          | one unit of work, `NEW` → `CLOSED`                      |
+| task document | the markdown file a task lives in                       |
+| frontmatter   | its typed head — the whole machine-readable task        |
+| body          | prose under the frontmatter; also the assignment        |
+| state         | the document field saying where a task sits             |
+| stage         | a row of the stage table (`STAGE_OF`), keyed by state   |
+| phase         | design, plan or work — what a task can be held from     |
+| role          | designer, planner, worker, reviewer                     |
+| transition    | an edge of the state machine                            |
+| claim         | which slot holds a task, and its pid                    |
+| dependency    | a task that must close before this one leaves `BLOCKED` |
+| blocking      | transitive count of tasks waiting on this one           |
+| findings      | what a review sends back, verbatim                      |
+| held reason   | why a task was parked, for the manager                  |
+| check         | one declared shell command the server runs              |
 
-- a **stage** is the table row; a **state** is what is written in the document.
-  A field holding `"WORK"` is a state, whatever it is derived from.
+## Pipeline
 
-## The pipeline
+| Term            | Is                                                           |
+| --------------- | ------------------------------------------------------------ |
+| agent           | one `agents.json` entry: a model on a provider               |
+| slot            | one concurrent seat of an agent, `type-provider-model-index` |
+| pool            | every slot, idle included                                    |
+| runner          | the pool's live state for one slot                           |
+| run             | a runner that has a process, task and checkout               |
+| process         | the `pi` subprocess and its rpc channel                      |
+| session         | the pi session file, one per task and role                   |
+| assignment      | `ASSIGNMENT.md`                                              |
+| prompt fragment | one file under `prompts/`, rendered with vars                |
+| template        | `template.md`, what a new task document is created from      |
+| workspace       | a task's branch, worktree, slot and session                  |
+| worktree        | the per-task clone on disk                                   |
+| branch          | `task/<id>`, the only place agent commits land               |
+| base            | the branch a worktree is cut from and lands onto             |
+| checkout        | what a runner was handed                                     |
+| message queue   | what the next agent on a task is told at dispatch            |
+| dispatch        | clone, write, claim, spawn, prompt                           |
+| candidate       | a dispatchable task with its rank                            |
+| settle          | reading what a finished turn meant, and acting on it         |
+| issue           | a named way a turn was wrong, with a retry budget            |
+| guard           | what a stage requires of its worktree                        |
+| harvest         | fetching a worktree's branch back into the repo              |
+| land            | rebase, recheck, fast-forward onto the base                  |
 
-| Term            | What it names                                                                         | Carried by                    |
-| --------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
-| agent           | one entry in `agents.json`: a model on a provider, with roles and a write list        | `AgentEntry`, `agentName`     |
-| slot            | one concurrent seat of an agent, named `type-provider-model-index`                    | `Slot`, `slotName`, `SlotRow` |
-| pool            | every slot the server has, idle ones included                                         | `Pool`                        |
-| runner          | the pool's live state for one slot: its process, task, role, issues and backoff       | `Runner`                      |
-| run             | a runner that actually has a process, a task and a checkout                           | `Run`, `runOf`                |
-| process         | the `pi` subprocess behind a runner, and the rpc channel to it                        | `AgentProcess`, `PiProcess`   |
-| session         | the pi session file a turn is recorded in, one per task and role                      | `session`                     |
-| assignment      | `ASSIGNMENT.md` — the whole of what an agent is told, and where it answers            | `Assignments`                 |
-| prompt fragment | one file under `prompts/`, rendered with vars into a thing an agent is sent           | `Prompts.fragment`, `render`  |
-| template        | `template.md` — the document a new task is created from                               | `templatePath`                |
-| workspace       | what a task keeps its work in: branch, worktree, slot and session                     | `Workspace`                   |
-| worktree        | the per-task clone of the repo on disk                                                | `worktree`                    |
-| branch          | `task/<id>`, the only thing an agent's commits land on                                | `branchName`                  |
-| base            | the branch a worktree is cut from and lands back onto                                 | `base`                        |
-| checkout        | what a runner was handed: branch, worktree, head, and the assignment as dispatched    | `Checkout`                    |
-| message queue   | what the next agent on a task is told at dispatch — a failing check, and nothing else | `Messages`, `messages/`       |
-| dispatch        | handing one candidate to one slot: clone, write, claim, spawn, prompt                 | `Dispatcher`, `Dispatch`      |
-| candidate       | a task the scheduler could dispatch, with its rank                                    | `Candidate`, `candidates`     |
-| rank            | the scheduler's order over candidates                                                 | `Rank`, `RANKS`               |
-| settle          | reading what an agent's finished turn meant, and acting on it                         | `Settler`, `decideSettle`     |
-| issue           | a named way an agent's turn was wrong, with a retry budget                            | `IssueName`, `ISSUES`         |
-| guard           | what a stage requires of its worktree: untouched, committed, or nothing               | `Guard`, `worktreeIssue`      |
-| harvest         | fetching a worktree's branch back into the repo                                       | `harvest`                     |
-| land            | rebasing, re-checking and fast-forwarding a task's branch onto the base               | `Lander`                      |
+An **agent** is configured, a **slot** is dispatched to, a **runner** is that slot now.
 
-- an **agent** is configured, a **slot** is dispatched to, a **runner** is what
-  the pool remembers about that slot right now. `claimed_by`, `workspace.slot`
-  and `prefer_slot` all hold a slot name.
+## Surfaces
 
-## The surfaces
+| Term              | Is                                                             |
+| ----------------- | -------------------------------------------------------------- |
+| manager           | the Claude Code session that owns the server and judges        |
+| server            | the process owning the graph, the pool and the checks          |
+| console           | the read-only TUI over the views                               |
+| view              | one of five JSON snapshots: slots, checks, tasks, inbox, queue |
+| inbox             | what waits on the manager, in rank order                       |
+| queue             | what the scheduler would dispatch next                         |
+| transition log    | one line per applied transition, carrying the view cursor      |
+| runtime directory | `/tmp/task-graph-server/<repo>/`                               |
+| task directory    | `~/task-graph/<key>/` — documents, pool, overrides             |
+| command channel   | the one file the console writes back on                        |
+| port              | what the application needs, one file in `app/ports/`           |
+| adapter           | the one implementation of a port that touches the world        |
 
-| Term              | What it names                                                               | Carried by                     |
-| ----------------- | --------------------------------------------------------------------------- | ------------------------------ |
-| manager           | the Claude Code session that owns the server and makes the judgements       | `Manager`                      |
-| server            | the process that owns the graph, the pool and the checks                    | `Server`                       |
-| console           | the read-only TUI over the views                                            | `ConsoleView`, `tui.ts`        |
-| view              | one of the five JSON snapshots: slots, checks, tasks, inbox, queue          | `Views`, `ViewName`            |
-| inbox             | what is waiting on the manager, in rank order                               | `InboxRow`, `inbox.json`       |
-| queue             | what the scheduler would dispatch next                                      | `Candidate`, `queue.json`      |
-| transition log    | one line per applied transition, with the cursor the views stamp            | `Transitions`, `TransitionLog` |
-| runtime directory | `/tmp/task-graph-server/<repo>/` — everything the server knows, on disk     | `Runtime`, `Paths`             |
-| task directory    | `~/task-graph/<key>/` — the task documents, `agents.json` and the overrides | `tasksDir`                     |
-| command channel   | the one file the console writes back on                                     | `CommandChannel`, `Command`    |
-| port              | what the application needs, one file per port in `app/ports/`               | `Tasks`, `Workspaces`, …       |
-| adapter           | the one implementation of a port that touches the outside world             | `TaskDocuments`, `git.ts`, …   |
+## Rejected synonyms
 
-## Words that are not used
+journal → transition log · worker (pool member) → runner · agent (seat) → slot · a task's own inbox → message queue · prompt queue → message queue · stage as a value → state · clone (directory) → worktree · session (a process) → process · template (a prompt file) → fragment.
 
-| Not this                    | This           | Why                                                                            |
-| --------------------------- | -------------- | ------------------------------------------------------------------------------ |
-| journal                     | transition log | one log, one name; the port is `Transitions`                                   |
-| worker (a member of a pool) | runner         | `worker` is a role, and a runner can be any of the four                        |
-| agent (a seat in the pool)  | slot           | an agent is the `agents.json` entry; its seats are slots                       |
-| inbox (a task's own)        | message queue  | the inbox is the manager's, and only the manager's                             |
-| prompt queue                | message queue  | it carries messages; prompts are the fragments an agent is dispatched with     |
-| stage (a value like `WORK`) | state          | a stage is a table row, a state is a document field                            |
-| clone (the directory)       | worktree       | `git clone` is how one is made, not what it is called afterwards               |
-| session (a pi process)      | process        | a session is the file; the process is `AgentProcess`                           |
-| template (a prompt file)    | fragment       | the template is the one a task is created from; `fragment.ts` renders the rest |
-
-## How identifiers are spelled
+## Identifiers
 
 - `PascalCase` types, `camelCase` values, `SCREAMING_SNAKE` module constants
-- `snake_case` **only** for fields that are serialized — task frontmatter, view
-  rows, the transition log, the paths report. A field that never leaves memory
-  is `camelCase`, in the same object as its serialized neighbours if it must be
-- ports are plural nouns for the capability (`Tasks`, `Messages`, `Reviews`);
-  adapters are named for the thing they actually are (`TaskDocuments`,
-  `TransitionLog`, `CheckRunner`), and each declares `implements` on its port
-- application modules are nouns, one per file, and the file is the noun in
-  kebab-case: `dispatcher.ts` holds `Dispatcher`, `settler.ts` holds `Settler`
-- `xOf(y)` derives an `x` from a `y` (`agentOf`, `tailOf`, `runOf`, `varsOf`)
-- `isX` and `hasX` are predicates; `requireX` throws instead of returning undefined
-- `XRow` is a projection that exists only to be published in a view
-- a serialized row is one zod schema and the type inferred from it, under the
-  same name (`SlotRow`, `TaskRow`, `Command`, `TransitionEntry`); anything read
-  back off disk or off the wire is parsed through it, never asserted
-- `as` is not how a value is typed: `memberOf` narrows a string to the union it
-  belongs to, `tableOf` builds a table keyed by one, `requireX` throws on what
-  an agent sent, and the two assertions the compiler cannot prove for itself are
-  both in [`domain/lookup.ts`](../orchestrator/domain/lookup.ts)
+- `snake_case` **only** for serialized fields — frontmatter, view rows, transition log, paths report
+- ports are plural capability nouns (`Tasks`); adapters are named for what they are (`TaskDocuments`) and declare `implements`
+- app modules are one noun per file: `dispatcher.ts` holds `Dispatcher`
+- `xOf(y)` derives, `isX`/`hasX` predicates, `requireX` throws, `XRow` is a view projection
+- anything off disk or wire is one zod schema plus its inferred type of the same name, parsed and never asserted
+- no `as`: `memberOf` narrows, `tableOf` keys, `requireX` throws; the two unprovable assertions live in [`domain/lookup.ts`](../orchestrator/domain/lookup.ts)
