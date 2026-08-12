@@ -135,17 +135,15 @@ export class Pool {
       }
     }
 
-    const healthy = new Set<string>();
     for (const [provider, probe] of probes) {
-      if (await probe) {
-        healthy.add(provider);
-      }
-      await this.noteHealth(provider, healthy.has(provider));
+      await this.noteHealth(provider, await probe);
     }
 
-    return idle.filter(
-      (slot) => !slot.healthCheck || healthy.has(slot.provider),
-    );
+    return idle.filter((slot) => this.reachable(slot));
+  }
+
+  private reachable(slot: Slot): boolean {
+    return !slot.healthCheck || !this.unreachable.has(slot.provider);
   }
 
   private async noteHealth(provider: string, healthy: boolean): Promise<void> {
@@ -320,12 +318,13 @@ export class Pool {
 
   private rowOf(runner: Runner): SlotRow {
     const enabled = !this.disabled.has(runner.slot.agent);
+    const reachable = this.reachable(runner.slot);
     if (runner.state === "IDLE") {
-      return idleRow(runner.slot, enabled);
+      return idleRow(runner.slot, enabled, reachable);
     }
 
     return {
-      ...idleRow(runner.slot, enabled),
+      ...idleRow(runner.slot, enabled, reachable),
       state: runner.state,
       task_id: runner.taskId,
       role: runner.role,

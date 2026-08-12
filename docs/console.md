@@ -36,6 +36,7 @@ tool: bash — bun test │ thinking (12s)        │
 
 - one queue line at the top: the scheduler switch, the head of the queue with each task's rank, and the total
 - four header lines per pane: identity and state, task detail, current activity, token rate and context — `xN` after the context percentage counts how many times this agent has compacted on its current task
+- a slot whose provider failed its [health check](agents.md#checking-the-provider-is-up-first) reads `unreachable` in red where the elapsed time would be, with `provider not answering` in place of the task detail, and its switch stays on: the agent is enabled, it is the provider that is not there
 - then the transcript, scrolling
 - panes divide the terminal evenly; below `MIN_PANE_WIDTH` (24 columns each) the console refuses to draw and says how many columns it needs, rather than rendering something unreadable
 - with no agents in the pool there are no panes: the queue line stays and the path of the pool file is centred below it, so a person knows which file to edit

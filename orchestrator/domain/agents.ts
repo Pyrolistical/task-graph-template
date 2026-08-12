@@ -98,6 +98,7 @@ export function parseAgents(
 export const SlotState = z.enum([
   "IDLE",
   "DISABLED",
+  "UNREACHABLE",
   "SPAWNING",
   "BUSY",
   "WAITING",
@@ -147,7 +148,14 @@ export const SlotsViewOfAnyServer = z.looseObject({
   slots: z.array(SlotRow.strip()),
 });
 
-export function idleRow(slot: Slot, enabled = true): SlotRow {
+function idleState(enabled: boolean, reachable: boolean): SlotState {
+  if (!enabled) {
+    return "DISABLED";
+  }
+  return reachable ? "IDLE" : "UNREACHABLE";
+}
+
+export function idleRow(slot: Slot, enabled = true, reachable = true): SlotRow {
   return {
     name: slot.name,
     agent: slot.agent,
@@ -156,7 +164,7 @@ export function idleRow(slot: Slot, enabled = true): SlotRow {
     model: slot.model,
     index: slot.index,
     enabled,
-    state: enabled ? "IDLE" : "DISABLED",
+    state: idleState(enabled, reachable),
     task_id: undefined,
     role: undefined,
     pid: undefined,

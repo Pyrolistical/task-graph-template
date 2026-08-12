@@ -190,6 +190,9 @@ function stateLine(pane: Pane, nowMs: number): string {
 
 export function detailLine(pane: Pane): string {
   const { slot, task } = pane;
+  if (slot.state === "UNREACHABLE") {
+    return "provider not answering";
+  }
   if (!slot.task_id) {
     return "no task";
   }
@@ -240,6 +243,7 @@ export function header(
 ): Line[] {
   const enabled = toggle(pane.slot.enabled, "");
   const right = stateLine(pane, nowMs);
+  const unreachable = pane.slot.state === "UNREACHABLE";
   const room = width - spanWidth(enabled) - textWidth(right) - 1;
   const left = clip([{ text: ` ${identity(pane.slot)}` }], room);
   const gap = Math.max(
@@ -281,10 +285,15 @@ export function header(
   })();
   return [
     clip(
-      [...enabled, ...left, { text: " ".repeat(gap) }, { text: right }],
+      [
+        ...enabled,
+        ...left,
+        { text: " ".repeat(gap) },
+        { text: right, sgr: unreachable ? RED : undefined },
+      ],
       width,
     ),
-    clip([{ text: detailLine(pane), sgr: DIM }], width),
+    clip([{ text: detailLine(pane), sgr: unreachable ? RED : DIM }], width),
     activityRow,
     clip([{ text: statsLine(pane, rate), sgr: DIM }], width),
   ];

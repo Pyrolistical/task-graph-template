@@ -130,8 +130,9 @@ Five snapshots, one per question a reader asks.
 }
 ```
 
-- `state` is one of `IDLE`, `DISABLED`, `SPAWNING`, `BUSY`, `WAITING`, `ABORTING`, `SETTLED` — the [agent state machine](agents.md#the-agent-state-machine)
+- `state` is one of `IDLE`, `DISABLED`, `UNREACHABLE`, `SPAWNING`, `BUSY`, `WAITING`, `ABORTING`, `SETTLED` — the [agent state machine](agents.md#the-agent-state-machine)
 - an idle slot is a row with no task in it, never a missing row; the pool is fixed at load and the view shows all of it
+- `UNREACHABLE` is an idle slot of an agent asking for a [health check](agents.md#checking-the-provider-is-up-first) whose provider did not answer the last one: enabled, holding nothing, and not offered to the dispatcher
 - `enabled` is the agent's toggle, not the slot's: false on every slot of a disabled agent, including the ones still finishing a task, which read as `BUSY` with `enabled` false until released
 - `retry` is absent unless the slot is backing off, when it carries the time of the next attempt and how many have been made
 - `tokens` and `context_percent` come from `get_session_stats`

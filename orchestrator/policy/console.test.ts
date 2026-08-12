@@ -122,6 +122,17 @@ describe("Feature: joining a slot to the task it is running", () => {
     expect(at(drawn, 0).slot.name).toBe(SLOTS[1].name);
   });
 
+  test("an unreachable slot says why it is holding no task", () => {
+    // Given a view whose only slot is idle because its provider failed its health check
+    const view = { slots: [idleRow(SLOTS[1], true, false)] };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it says the provider is what is holding the slot, not that there is no work
+    expect(detail).toBe("provider not answering");
+  });
+
   test("an idle slot shows no task, no check and no clock", () => {
     // Given a view whose only slot is idle
     const view = { slots: [idleRow(SLOTS[1])] };
@@ -1188,6 +1199,19 @@ describe("Feature: the switches on a pane header", () => {
     // Then the identity is what gives way, and the row still fills the pane
     expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
     expect(textWidth(bare(line))).toBe(30);
+  });
+
+  test("a slot of a provider that is down reads as unreachable, in red", () => {
+    // Given an idle slot whose provider failed its health check
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], true, false)] });
+
+    // When its header is drawn
+    const line = renderLine(at(header(pane, 60, 1000), 0));
+
+    // Then the switch is still on, because the agent is enabled, and the state is red
+    expect(line).toBe(
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1       \x1b[31munreachable\x1b[0m",
+    );
   });
 
   test("a disabled slot reads as idle behind an off switch", () => {

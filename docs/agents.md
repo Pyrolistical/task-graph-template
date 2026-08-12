@@ -92,6 +92,7 @@ Restricting does not promise capacity:
 - `healthCheck` defaults to false and is a property of the agent, like `enabled`
 - with it off, a slot is dispatched to and the provider is discovered to be down by the agent failing against it
 - with it on, the provider is asked before the slot leaves the free list, and a provider that does not answer takes its slots out of the pool for that tick
+- an idle slot held back that way reads `UNREACHABLE` rather than `IDLE`, so the console says why the queue is not moving instead of showing free capacity that never takes anything
 
 What is asked, and where:
 
@@ -106,6 +107,7 @@ What it costs, and does not:
 - one request per provider per scheduling tick, not one per slot: three slots of the same model ask once
 - only slots that are otherwise free and enabled are checked, so nothing is asked about a provider whose agents are all busy
 - the outage is one line in the server log when it starts and one when it clears, not a line a tick
+- the reading is refreshed on every scheduling tick and holds while the scheduler is off, because nothing is being dispatched to check against
 
 This is for the local inference server that is not always running:
 
@@ -174,8 +176,11 @@ stateDiagram-v2
     BUSY --> IDLE : the process died without settling
     IDLE --> DISABLED : its agent is disabled
     DISABLED --> IDLE : its agent is enabled
+    IDLE --> UNREACHABLE : its provider failed its health check
+    UNREACHABLE --> IDLE : its provider answered again
 ```
 
+- `UNREACHABLE` is `IDLE` with a failed health check against it: the slot holds nothing, its agent is still enabled, and the only thing that changes is that the dispatcher is not offered it. `WAITING` is the same shortage arrived at from the other side — a slot that already holds a task and cannot reach the provider to make progress on it.
 - a slot in `WAITING` is **not free**. Backpressure on a provider outage has to show up as reduced capacity, not as a queue of dispatches into a wall.
 - `DISABLED` is only entered from `IDLE`, which is what makes disabling safe to do at any moment: the transition is "this slot will not be offered again", never "drop what you are holding". A slot disabled mid-task takes the `→ IDLE` edge it would have taken anyway and lands in `DISABLED` from there.
 - `BUSY → IDLE` is the death of a `pi` process without `agent_settled` — an OOM kill, a segfault, a runaway tool filling the disk. The stream fails when stdout closes, the worker stops rather than trying to prompt a corpse, and the slot is released; the reaper releases the claim on the next tick, since the task is still `WORK` under a pid that no longer exists.

@@ -180,6 +180,63 @@ describe("Feature: the pool of agent slots", () => {
     );
   });
 
+  test("an idle slot of a provider that is down reads as unreachable", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given the provider behind it does not answer
+    const { pool } = aPool([aSlot({ healthCheck: true })], true, () => false);
+    await pool.freeSlots();
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then the slot is drawn as unreachable rather than as idle capacity
+    expect(row.state).toBe("UNREACHABLE");
+    expect(row.enabled).toBe(true);
+  });
+
+  test("a slot still holding a task keeps its own state while its provider is down", async () => {
+    // Given a pool of two slots of one agent, both asking for a health check
+    // Given one of them is busy with a task and the other is idle
+    const slots = [1, 2].map((index) =>
+      aSlot({ name: `pi-fake-fake-${index}`, index, healthCheck: true }),
+    );
+    const { pool } = aPool(slots, true, () => false);
+    const busy = pool.runner("pi-fake-fake-1");
+    busy.state = "BUSY";
+    busy.taskId = "000042";
+
+    // When the provider behind them fails its health check
+    await pool.freeSlots();
+
+    // Then only the idle slot reads as unreachable, because the outage gates dispatch, not work in flight
+    expect(pool.rows().map((row) => row.state)).toEqual([
+      "BUSY",
+      "UNREACHABLE",
+    ]);
+  });
+
+  test("an idle slot of an agent that asks for no health check reads as idle", async () => {
+    // Given a pool of two agents that share a provider
+    // Given only one of them asks for a health check, and that provider is down
+    const checked = aSlot({ name: "pi-fake-fake-1", healthCheck: true });
+    const unchecked = aSlot({
+      name: "pi-fake-other-1",
+      agent: "pi-fake-other",
+      model: "other",
+    });
+    const { pool } = aPool([checked, unchecked], true, () => false);
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then the agent that asked to be checked is held back and the other is untouched
+    expect(free.map((slot) => slot.name)).toEqual(["pi-fake-other-1"]);
+    expect(pool.rows().map((row) => row.state)).toEqual([
+      "UNREACHABLE",
+      "IDLE",
+    ]);
+  });
+
   test("an agent the pool never loaded cannot be toggled", () => {
     // Given a pool that holds one agent
     const { pool } = aPool();
