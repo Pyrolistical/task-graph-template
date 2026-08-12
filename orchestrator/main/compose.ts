@@ -17,7 +17,7 @@ import * as git from "../adapters/git.ts";
 import { GitWorkspaces } from "../adapters/git-workspaces.ts";
 import { PiAgents } from "../adapters/pi-agents.ts";
 import { PromptFiles } from "../adapters/prompt-files.ts";
-import { Runtime, defaultAgentsPath } from "../adapters/runtime.ts";
+import { type Runtime, defaultAgentsPath } from "../adapters/runtime.ts";
 import {
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
@@ -34,19 +34,19 @@ import { ViewFiles } from "../adapters/view-files.ts";
 const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
 
 export interface WiringOptions {
-  repo: string;
+  runtime: Runtime;
   tasksDir: string;
   agentsPath?: string;
   orchestratorDir?: string;
   overridesDir?: string;
-  serverRoot?: string;
   piCommand?: string;
   sandboxCommand?: string;
   base?: string;
 }
 
 export async function wire(options: WiringOptions): Promise<Server> {
-  const repo = path.resolve(options.repo);
+  const runtime = options.runtime;
+  const repo = runtime.repo;
   if (!(await git.isRepo(repo))) {
     throw new Error(`${repo} is not a git repository`);
   }
@@ -71,7 +71,6 @@ export async function wire(options: WiringOptions): Promise<Server> {
     },
   };
 
-  const runtime = await Runtime.open(repo, options.serverRoot);
   const piCommand = options.piCommand ?? "pi";
   const sandboxCommand = options.sandboxCommand ?? SANDBOX_COMMAND;
   const slots = await loadAgents(config.agentsPath);

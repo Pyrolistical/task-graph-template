@@ -314,19 +314,22 @@ export async function boot(options: WiringOptions): Promise<Boot> {
   }
 }
 
-function start(): Promise<Boot> {
-  const repo = process.cwd();
+function start(runtime: Runtime): Promise<Boot> {
   return boot({
-    repo,
+    runtime,
     tasksDir: !process.argv[2]
-      ? defaultTasksDir(repo)
+      ? defaultTasksDir(runtime.repo)
       : path.resolve(process.argv[2]),
-    serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
   });
 }
 
-async function main(log: (line: string) => void): Promise<void> {
-  const startup = await start();
+async function main(runtime: Runtime): Promise<void> {
+  const log = (line: string): void => {
+    void runtime.log(line).catch((err: unknown) => {
+      console.error(`log failed: ${messageOf(err)}`);
+    });
+  };
+  const startup = await start(runtime);
 
   if (!startup.server) {
     log(startup.error ?? "the server failed to start");
@@ -367,11 +370,7 @@ if (import.meta.main) {
     process.env.TASK_GRAPH_SERVER_ROOT,
   );
   try {
-    await main((line) => {
-      void runtime.log(line).catch((err: unknown) => {
-        console.error(`log failed: ${messageOf(err)}`);
-      });
-    });
+    await main(runtime);
   } catch (err) {
     await runtime.log(`the server crashed: ${messageOf(err)}`);
     throw err;

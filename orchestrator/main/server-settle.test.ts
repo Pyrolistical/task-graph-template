@@ -72,7 +72,7 @@ describe("Feature: what a reviewer sends back to the worker", () => {
       expect(body).toContain("- the null case is untested");
 
       // Then it is also left where the next dispatch will pick it up
-      expect(await (await filesOf(fixture)).findings(id)).toEqual([
+      expect(await filesOf(fixture).findings(id)).toEqual([
         "the null case is untested",
       ]);
 
@@ -281,7 +281,7 @@ describe("Feature: a review that fails twice", () => {
       );
 
       // Then the failure is counted and the work only bounced back
-      expect(await (await filesOf(fixture)).failures(id)).toBe(1);
+      expect(await filesOf(fixture).failures(id)).toBe(1);
       expect(await stateOf(server, id)).toBe("WORK");
 
       await server.shutdown();
@@ -336,9 +336,7 @@ describe("Feature: a review that fails twice", () => {
 
       // Then the count file is gone and the findings wait for the resume
       expect(await fs.exists(pathsOf(server).reviewFailures(id))).toBe(false);
-      expect(await (await filesOf(fixture)).findings(id)).toEqual([
-        "finding two",
-      ]);
+      expect(await filesOf(fixture).findings(id)).toEqual(["finding two"]);
 
       await server.shutdown();
     },
@@ -490,7 +488,7 @@ describe("Feature: a review that fails twice", () => {
       // When the redo fails once
       await until(
         server,
-        async () => (await (await filesOf(fixture)).failures(id)) === 1,
+        async () => (await filesOf(fixture).failures(id)) === 1,
       );
 
       // Then one failure only bounces it, never holds it again

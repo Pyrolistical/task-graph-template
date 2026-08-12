@@ -22,7 +22,6 @@ import {
   pathsOf,
   reaches,
   runOnce,
-  runtimeOf,
   serverFor,
   stateOf,
   until,
@@ -318,7 +317,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
 
       // Then the session is reopened where the document says it lies
       expect(await stateOf(server, id)).toBe("WORK");
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(at(view.slots, 0).state).toBe("BUSY");
       expect(at(view.slots, 0).session).toBe(legacy);
       expect((await workspaceOf(server, id)).session).toBe(legacy);
@@ -520,7 +519,7 @@ describe("Feature: landing or abandoning finished work", () => {
 
       // Then it stays gone once it falls off the end of the recent list
       expect(await fs.exists(pathsOf(server).taskRoot(id))).toBe(false);
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },
     60000,

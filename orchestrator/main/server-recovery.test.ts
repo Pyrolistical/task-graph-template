@@ -5,7 +5,6 @@ import path from "node:path";
 import { takeClaim } from "../adapters/task-documents.ts";
 import { branchName } from "../domain/workspace.ts";
 import { activeTaskPath, graphLock, lockPath } from "../adapters/task-store.ts";
-import { Runtime } from "../adapters/runtime.ts";
 import * as git from "../adapters/git.ts";
 import {
   type Fixture,
@@ -47,8 +46,7 @@ describe("Feature: picking a project back up at startup", () => {
 
       // Then it is refused, and leaves no runtime lock behind to wedge a retry
       await expect(attempt()).rejects.toThrow(/already in use by server/);
-      const runtime = await Runtime.open(fixture.repo, fixture.serverRoot);
-      expect(await runtime.lockHolder()).toBeUndefined();
+      expect(await fixture.runtime.lockHolder()).toBeUndefined();
     },
     30000,
   );

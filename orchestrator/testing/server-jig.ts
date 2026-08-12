@@ -12,7 +12,7 @@ import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import { Server } from "../app/server.ts";
 import { PromptFiles } from "../adapters/prompt-files.ts";
-import { Runtime } from "../adapters/runtime.ts";
+import type { Runtime } from "../adapters/runtime.ts";
 import { TaskFiles } from "../adapters/task-files.ts";
 import { TransitionLog } from "../adapters/transition-log.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
@@ -31,7 +31,7 @@ export async function startServer(
   const server = await (await wire(options)).start();
   const orchestratorDir = options.orchestratorDir ?? ORCHESTRATOR_DIR;
   RIGS.set(server, {
-    runtime: await Runtime.open(options.repo, options.serverRoot),
+    runtime: options.runtime,
     prompts: await PromptFiles.open(
       orchestratorDir,
       options.overridesDir ?? options.tasksDir,
@@ -60,22 +60,17 @@ export function transitionsOf(server: Server): Promise<TransitionLog> {
   return TransitionLog.open(pathsOf(server).transitionLog);
 }
 
-export function runtimeOf(fixture: Fixture): Promise<Runtime> {
-  return Runtime.open(fixture.repo, fixture.serverRoot);
-}
-
-export async function filesOf(fixture: Fixture): Promise<TaskFiles> {
-  return new TaskFiles(await runtimeOf(fixture));
+export function filesOf(fixture: Fixture): TaskFiles {
+  return new TaskFiles(fixture.runtime);
 }
 
 export function serverFor(fixture: Fixture): Promise<Server> {
   return startServer({
-    repo: fixture.repo,
+    runtime: fixture.runtime,
     agentsPath: fixture.agentsPath,
     tasksDir: fixture.tasksDir,
     orchestratorDir: fixture.orchestratorDir,
     overridesDir: fixture.overridesDir,
-    serverRoot: fixture.serverRoot,
     piCommand: fixture.piCommand,
     base: "master",
   });

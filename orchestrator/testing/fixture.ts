@@ -11,6 +11,7 @@ import {
 import { applyTransition } from "../adapters/task-documents.ts";
 import { takeClaim } from "../adapters/task-documents.ts";
 import { git, gitOrThrow } from "../adapters/git.ts";
+import { Runtime } from "../adapters/runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
 
@@ -393,7 +394,7 @@ export interface Fixture {
   orchestratorDir: string;
   overridesDir: string;
   agentsPath: string;
-  serverRoot: string;
+  runtime: Runtime;
   piCommand: string;
   planPath: string;
 }
@@ -443,7 +444,7 @@ export async function makeFixture(slots = 1): Promise<Fixture> {
     orchestratorDir,
     overridesDir,
     agentsPath,
-    serverRoot: await tempDir("orchestrator-root-"),
+    runtime: await Runtime.open(repo, await tempDir("orchestrator-root-")),
     piCommand,
     planPath,
   };

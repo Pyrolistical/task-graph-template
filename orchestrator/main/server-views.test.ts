@@ -23,7 +23,6 @@ import {
   transitionsOf,
   pathsOf,
   reaches,
-  runtimeOf,
   serverFor,
   settle,
   stateOf,
@@ -44,7 +43,7 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then every slot is a row, so the console shows the whole pool
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(view.slots).toHaveLength(2);
       expect(at(view.slots, 0).state).toBe("IDLE");
       expect(at(view.slots, 0).task_id).toBeUndefined();
@@ -72,7 +71,7 @@ describe("Feature: the views the console and the manager read", () => {
       await server.tick();
 
       // Then its row names the task, the role, the process and what it is doing
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       const busy = present(
         view.slots.find((agent) => agent.task_id === id),
         `a slot row for task `,
@@ -148,7 +147,7 @@ describe("Feature: the views the console and the manager read", () => {
       await server.writeViews();
 
       // Then its row says how much it blocks and what it is waiting on
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       const row = present(
         view.tasks.find((task) => task.id === dep),
         `a task row for `,
@@ -185,7 +184,7 @@ describe("Feature: the queue view", () => {
       await server.writeViews();
 
       // Then the queue holds only what could be dispatched, with its own rank
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(view.scheduling).toBe(false);
       expect(view.queue).toHaveLength(1);
       expect(at(view.queue, 0).task_id).toBe(first);
@@ -195,7 +194,7 @@ describe("Feature: the queue view", () => {
       // Then the switch in the view follows the scheduler it draws
       await server.setSchedulerEnabled(true);
       await server.writeViews();
-      expect((await readView(await runtimeOf(fixture))).scheduling).toBe(true);
+      expect((await readView(fixture.runtime)).scheduling).toBe(true);
 
       await server.shutdown();
     },
@@ -241,7 +240,7 @@ describe("Feature: a pool with no agents in it", () => {
       await server.writeViews();
 
       // Then the task is queued, waiting for an agent to be added
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(view.queue.map((one) => one.task_id)).toEqual([id]);
       expect(view.slots).toEqual([]);
 
@@ -292,7 +291,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       await server.tick();
 
       // Then the console can show how much context is left and where to read it
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       const busy = present(
         view.slots.find((agent) => agent.task_id === id),
         `a slot row for task `,
@@ -368,7 +367,7 @@ describe("Feature: what the slots view says about a running agent", () => {
 
       // Then the closed task is still shown, so the manager sees what just landed
       await server.writeViews();
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       const row = present(
         view.tasks.find((task) => task.id === id),
         `a task row for `,
@@ -934,9 +933,8 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const id = await readyTask(fixture, "A task");
 
       const alive = Bun.spawn(["sleep", "30"]);
-      const runtime = await runtimeOf(fixture);
       await writeAtomic(
-        runtime.slotsView,
+        fixture.runtime.slotsView,
         viewJson(
           1,
           "slots",
@@ -970,7 +968,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       await settle(second, 1);
 
       // Then the slot is reattached rather than dispatched to again
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(at(view.slots, 0).state).toBe("BUSY");
       expect(at(view.slots, 0).pid).toBe(alive.pid);
       expect(await stateOf(second, id)).toBe("WORK");

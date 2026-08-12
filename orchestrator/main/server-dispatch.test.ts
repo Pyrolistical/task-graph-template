@@ -40,7 +40,6 @@ import {
   pathsOf,
   promptsOf,
   reaches,
-  runtimeOf,
   serverFor,
   settle,
   settleTo,
@@ -64,9 +63,8 @@ describe("Feature: where a project's task graph is found", () => {
 
         // When a server is started against it with a graph that is not there yet
         const server = await startServer({
-          repo: fixture.repo,
+          runtime: fixture.runtime,
           tasksDir,
-          serverRoot: fixture.serverRoot,
           piCommand: fixture.piCommand,
           base: "master",
         });
@@ -96,12 +94,11 @@ describe("Feature: where a project's task graph is found", () => {
 
       // When a server is started against it without being told a base
       const server = await startServer({
-        repo: fixture.repo,
+        runtime: fixture.runtime,
         agentsPath: fixture.agentsPath,
         tasksDir: fixture.tasksDir,
         orchestratorDir: fixture.orchestratorDir,
         overridesDir: fixture.overridesDir,
-        serverRoot: fixture.serverRoot,
         piCommand: fixture.piCommand,
       });
 
@@ -870,7 +867,7 @@ describe("Feature: the design and planning phases", () => {
       await server.tick();
 
       // Then work outranks planning, and a review outranks its own fresh stage
-      const view = await readView(await runtimeOf(fixture));
+      const view = await readView(fixture.runtime);
       expect(view.queue.map((one) => one.rank)).toEqual([
         "WORK_FRESH",
         "PLAN_REVIEW",
@@ -925,10 +922,9 @@ describe("Feature: handing a task to an agent", () => {
 
       // Given a driven project with no orchestrator directory of its own
       const server = await startServer({
-        repo: fixture.repo,
+        runtime: fixture.runtime,
         agentsPath: fixture.agentsPath,
         tasksDir: fixture.tasksDir,
-        serverRoot: fixture.serverRoot,
         piCommand: fixture.piCommand,
         base: "master",
       });

@@ -63,9 +63,8 @@ async function connect(fixture: Fixture) {
   }
 
   const started = await boot({
-    repo: fixture.repo,
+    runtime: fixture.runtime,
     tasksDir: fixture.tasksDir,
-    serverRoot: fixture.serverRoot,
   });
   if (started.server) {
     openServers.push(started.server);
@@ -232,7 +231,7 @@ describe("Feature: the tool surface the manager works through", () => {
       expect(body).toContain("- the null case is untested");
 
       // Then the finding is also left where the next dispatch will read it
-      const found = await (await filesOf(fixture)).findings(id);
+      const found = await filesOf(fixture).findings(id);
       expect(found).toEqual(["the null case is untested"]);
 
       await client.close();
