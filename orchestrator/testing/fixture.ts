@@ -13,7 +13,7 @@ import { takeClaim } from "../adapters/task-documents.ts";
 import { git, gitOrThrow } from "../adapters/git.ts";
 import { Runtime } from "../adapters/runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
-import type { ClaimState } from "../domain/state-machine.ts";
+import type { ClaimState, EntryName } from "../domain/state-machine.ts";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 
@@ -465,9 +465,10 @@ export async function setPlan(fixture: Fixture, plan: Plan): Promise<void> {
   process.env.FAKE_PI_PLAN = fixture.planPath;
 }
 
-export async function unplannedTask(
+export async function enteredTask(
   fixture: Fixture,
   title: string,
+  name: EntryName,
   checks: string[] = [],
 ): Promise<string> {
   const { id } = await createTask(
@@ -481,10 +482,18 @@ export async function unplannedTask(
     meta.checks = [...checks];
     await writeTaskFile(filePath, meta, body);
   }
-  await applyTransition(fixture.tasksDir, id, "submit", {});
+  await applyTransition(fixture.tasksDir, id, name, {});
   await gitOrThrow(fixture.repo, ["add", "-A"]);
   await gitOrThrow(fixture.repo, ["commit", "-q", "-m", `add task ${id}`]);
   return id;
+}
+
+export function unplannedTask(
+  fixture: Fixture,
+  title: string,
+  checks: string[] = [],
+): Promise<string> {
+  return enteredTask(fixture, title, "submit_designing", checks);
 }
 
 export async function readyTask(

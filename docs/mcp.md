@@ -5,7 +5,8 @@ One stdio server calling the application in process. There is no CLI path into t
 Tools, beyond what their names say ([who may call what](authority.md)):
 
 - `task_create` returns a path; authoring is then editing that file — checks and dependencies are frontmatter, not tools
-- `task_submit` spans `NEW`, `BLOCKED` and `MANAGER_REVIEW` because they are one judgement; from `MANAGER_REVIEW` it lands the branch first ([Integration](workspace.md#integration))
+- `task_submit` is the close: from `MANAGER_REVIEW` only, landing the branch first ([Integration](workspace.md#integration))
+- `task_submit_designing` / `task_submit_planning` / `task_submit_working` take a task out of `NEW`/`BLOCKED_*` into that phase — one tool per entry, because "skip the design" is a judgement and an argument would hide it
 - `task_write_body` exists for rewriting a body the manager does **not** hold
 - `disable_scheduler` / `disable_agent` are one verb at two scopes — the whole pool, or one model on one provider that is misbehaving; running work still settles, and both return what is draining
 - `slot_abort` is the one place a slot is the unit ([why](agents.md#aborting-one-tool-call))
@@ -23,4 +24,4 @@ A document is the manager's to edit with ordinary file writes wherever the manag
 
 ## The manager loop
 
-Idle → work the [inbox](scheduler.md#the-manager-inbox) head: `MANAGER_REVIEW` → submit/abort/feedback; a held state → resume or abort; `NEW` or an empty inbox → author. That order is the inbox's.
+Idle → work the [inbox](scheduler.md#the-manager-inbox) head: `MANAGER_REVIEW` → submit/abort/feedback; a held state → resume or abort; `NEW` or an empty inbox → author, then one of the `submit_*` entries. That order is the inbox's.

@@ -463,7 +463,7 @@ describe("Feature: what is waiting on the manager", () => {
       task({ id: "000001", state: "WORK" }),
       task({ id: "000002", state: "WORK", claimed_by: "pi-1", claimed_pid: 1 }),
       task({ id: "000003", state: "WORK_REVIEW" }),
-      task({ id: "000004", state: "BLOCKED", depends_on: ["000001"] }),
+      task({ id: "000004", state: "BLOCKED_DESIGN", depends_on: ["000001"] }),
     );
 
     // When the inbox is built
@@ -478,7 +478,7 @@ describe("Feature: what is waiting on the manager", () => {
     const tasks = graph(
       task({ id: "000001", state: "MANAGER_REVIEW" }),
       task({ id: "000002", state: "MANAGER_REVIEW" }),
-      task({ id: "000003", state: "BLOCKED", depends_on: ["000002"] }),
+      task({ id: "000003", state: "BLOCKED_DESIGN", depends_on: ["000002"] }),
     );
 
     // When the inbox is built

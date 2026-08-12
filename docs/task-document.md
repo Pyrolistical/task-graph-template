@@ -40,5 +40,5 @@ Reading uses `Bun.YAML.parse`; writing does not use an emitter, because the poin
 ## Closing, cycles, liveness
 
 - `CLOSED` tasks move to `closed/`, so an id resolves forever and the active directory lists exactly the open graph
-- `detectCycles` runs on `task_submit` before a task leaves `NEW`/`BLOCKED` and names the edges; a dependency on a nonexistent id is not an edge, so a missing task blocks nothing
+- `detectCycles` runs on every `task_submit_*` before a task leaves `NEW`/`BLOCKED_*` and names the edges; a dependency on a nonexistent id is not an edge, so a missing task blocks nothing
 - `isProcessAlive` is `kill(pid, 0)` plus rejecting state `Z` in `/proc/<pid>/stat`, because an unreaped `pi` zombie answers "alive" and would leave a claim forever

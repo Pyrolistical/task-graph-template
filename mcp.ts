@@ -5,6 +5,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { messageOf } from "./orchestrator/domain/errors.ts";
 import { isValidId } from "./orchestrator/domain/task.ts";
+import type { EntryName } from "./orchestrator/domain/state-machine.ts";
 import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
 import type { Awaitable } from "./orchestrator/domain/awaitable.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
@@ -84,10 +85,40 @@ export function build(startup: Startup): McpServer {
     "task_submit",
     {
       description:
-        "Say the task is done with the stage it is in and move it forward. From NEW or BLOCKED it is dispatched — NEW → DESIGN, or BLOCKED while dependencies remain; BLOCKED → DESIGN once they are gone. From MANAGER_REVIEW the work is landed first (rebase, recheck, fast-forward), then the task closes.",
+        "Close a task from MANAGER_REVIEW: the work is landed first (rebase, recheck, fast-forward), then the task closes.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => json(await applied((manager) => manager.submit(id))),
+  );
+
+  function entry(tool: string, name: EntryName, description: string) {
+    mcp.registerTool(
+      tool,
+      {
+        description: `${description} Dependencies still open park it in that phase's blocked state instead, and it enters the phase when they are gone.`,
+        inputSchema: z.object({ id: taskId }),
+      },
+      async ({ id }) =>
+        json(await applied((manager) => manager.enter(id, name))),
+    );
+  }
+
+  entry(
+    "task_submit_designing",
+    "submit_designing",
+    "Dispatch a task out of NEW or a blocked state into DESIGN, to be designed, planned and worked.",
+  );
+
+  entry(
+    "task_submit_planning",
+    "submit_planning",
+    "Dispatch a task out of NEW or a blocked state into PLAN, skipping design because the body already carries one. Nothing checks that it does.",
+  );
+
+  entry(
+    "task_submit_working",
+    "submit_working",
+    "Dispatch a task out of NEW or a blocked state into WORK, skipping design and planning because the body already carries both. Nothing checks that it does.",
   );
 
   mcp.registerTool(
@@ -110,7 +141,7 @@ export function build(startup: Startup): McpServer {
     "task_resume",
     {
       description:
-        "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in BLOCKED instead, and a task that unblocks starts again at DESIGN.",
+        "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in that phase's blocked state instead, and the last dependency to close releases it into the phase.",
       inputSchema: z.object({ id: taskId }),
     },
     async ({ id }) => json(await applied((manager) => manager.resume(id))),
@@ -229,7 +260,7 @@ export function build(startup: Startup): McpServer {
       "everything waiting on the manager, most nearly closed first. Ranks and how to handle them:",
       "MANAGER_REVIEW: the work is done and the work review passed; task_submit to land it, task_feedback with findings to send it back to work, or task_abort. The document is yours to edit directly. Task graph changes the close needs are made by editing the graph yourself, at any time.",
       "HELD_DESIGN/HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
-      "NEW: author the task (edit the file: body, checks, dependencies), then task_submit.",
+      "NEW: author the task (edit the file: body, checks, dependencies), then task_submit_designing — or task_submit_planning if the body already carries the design, task_submit_working if it carries the design and the plan.",
     ].join(" "),
   );
 

@@ -58,7 +58,7 @@ describe("Feature: a task that waits on other tasks", () => {
       // Given a new task nothing was edited into
       const { dir, id } = await newTask();
       // When the task is submitted
-      const result = await run(dir, id, "submit");
+      const result = await run(dir, id, "submit_designing");
       // Then it enters the design phase straight away
       expect(result.to).toBe("DESIGN");
     },
@@ -72,9 +72,9 @@ describe("Feature: a task that waits on other tasks", () => {
       const dep = at(ids, 1);
       await addDeps(dir, main, dep);
       // When the task is submitted
-      const result = await run(dir, main, "submit");
+      const result = await run(dir, main, "submit_designing");
       // Then it waits, still carrying the dependency it is waiting on
-      expect(result.to).toBe("BLOCKED");
+      expect(result.to).toBe("BLOCKED_DESIGN");
       expect((await metaOf(dir, main)).depends_on).toEqual([dep]);
     },
   );
@@ -86,12 +86,12 @@ describe("Feature: a task that waits on other tasks", () => {
       const main = at(ids, 0);
       const dep = at(ids, 1);
       await addDeps(dir, main, dep);
-      await run(dir, main, "submit");
+      await run(dir, main, "submit_designing");
       // When it is submitted again
-      const result = await run(dir, main, "submit");
+      const result = await run(dir, main, "submit_designing");
       // Then the machine moves it nowhere, and it keeps waiting
       expect(result.to).toBeUndefined();
-      expect((await metaOf(dir, main)).state).toBe("BLOCKED");
+      expect((await metaOf(dir, main)).state).toBe("BLOCKED_DESIGN");
     },
   );
   testInTempDirs(
@@ -103,17 +103,17 @@ describe("Feature: a task that waits on other tasks", () => {
       const first = at(ids, 1);
       const second = at(ids, 2);
       await addDeps(dir, main, first, second);
-      await run(dir, main, "submit");
+      await run(dir, main, "submit_designing");
       await editTask(dir, main, (meta) => {
         meta.depends_on = [first];
       });
-      expect((await run(dir, main, "submit")).to).toBeUndefined();
+      expect((await run(dir, main, "submit_designing")).to).toBeUndefined();
       // Given the last dependency edited out of it
       await editTask(dir, main, (meta) => {
         meta.depends_on = [];
       });
       // When it is submitted with its dependencies gone
-      const result = await run(dir, main, "submit");
+      const result = await run(dir, main, "submit_designing");
       // Then it starts, because nothing is left for it to wait on
       expect(result.to).toBe("DESIGN");
     },
@@ -125,14 +125,14 @@ describe("Feature: a task that waits on other tasks", () => {
       const dir = await makeTasksDir();
       const main = await writeTask(dir, {
         id: "000001",
-        state: "BLOCKED",
+        state: "BLOCKED_DESIGN",
         depends_on: ["000999"],
       });
       await editTask(dir, main, (meta) => {
         meta.depends_on = [];
       });
       // When the task is submitted
-      const result = await run(dir, main, "submit");
+      const result = await run(dir, main, "submit_designing");
       // Then it starts, rather than waiting on something that will never close
       expect(result.to).toBe("DESIGN");
       expect((await metaOf(dir, main)).depends_on).toEqual([]);
@@ -185,7 +185,7 @@ describe("Feature: taking and clearing a claim", () => {
     async () => {
       // Given a task claimed by an agent whose process has exited
       const { dir, id } = await newTask();
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       await claim(dir, id, "dead-agent", await deadPid());
       // When the claim is cleared
       await unclaim(dir, id);
@@ -219,7 +219,7 @@ describe("Feature: taking and clearing a claim", () => {
     async () => {
       // Given a task ready to be claimed
       const { dir, id } = await newTask();
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       // When a claim is made under a name of two spaces, with the process 12
       const attempt = async () => await claim(dir, id, "  ", 12);
       // Then it is refused for the empty name, and the task is left unclaimed in DESIGN
@@ -234,7 +234,7 @@ describe("Feature: taking and clearing a claim", () => {
   testInTempDirs("a claim carrying the process zero is refused", async () => {
     // Given a task ready to be claimed
     const { dir, id } = await newTask();
-    await run(dir, id, "submit");
+    await run(dir, id, "submit_designing");
     // When the agent a claims it with the process 0
     const attempt = async () => await claim(dir, id, "a", 0);
     // Then it is refused for the process, and the task is left unclaimed in DESIGN
@@ -248,7 +248,7 @@ describe("Feature: taking and clearing a claim", () => {
     async () => {
       // Given a task ready to be claimed
       const { dir, id } = await newTask();
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       // When the agent a claims it with the process 1.5
       const attempt = async () => await claim(dir, id, "a", 1.5);
       // Then it is refused for the process, and the task is left unclaimed in DESIGN
@@ -428,7 +428,7 @@ describe("Feature: the checks a task carries", () => {
         meta.checks = ["bun test"];
       });
       // When the task is submitted
-      const result = await run(dir, id, "submit");
+      const result = await run(dir, id, "submit_designing");
       // Then it starts with the checks it will be held to
       expect(result.to).toBe("DESIGN");
       expect((await metaOf(dir, id)).checks).toEqual(["bun test"]);
@@ -519,7 +519,7 @@ describe("Feature: closing a task", () => {
     async () => {
       // Given a task in the design phase
       const { dir, id } = await newTask("the wrong shape");
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       expect((await metaOf(dir, id)).state).toBe("DESIGN");
       // When the manager aborts it
       const attempt = async () => await run(dir, id, "abort");
@@ -530,7 +530,7 @@ describe("Feature: closing a task", () => {
   testInTempDirs("a task held out of design can then be aborted", async () => {
     // Given a task in the design phase, held by the manager
     const { dir, id } = await newTask("the wrong shape");
-    await run(dir, id, "submit");
+    await run(dir, id, "submit_designing");
     await run(dir, id, "hold", "abandoning");
     expect((await metaOf(dir, id)).state).toBe("HELD_DESIGN");
     // When the manager aborts it
@@ -560,7 +560,9 @@ describe("Feature: closing a task", () => {
       const dep = (await createTask(dir, ORCHESTRATOR_DIR, "dependency")).id;
       const main = (await createTask(dir, ORCHESTRATOR_DIR, "main")).id;
       await addDeps(dir, main, dep);
-      expect((await run(dir, main, "submit")).to).toBe("BLOCKED");
+      expect((await run(dir, main, "submit_designing")).to).toBe(
+        "BLOCKED_DESIGN",
+      );
       // When the dependency is closed
       const result = await closeTask(dir, dep);
       // Then the dependency is edited out of it and it starts
@@ -568,6 +570,22 @@ describe("Feature: closing a task", () => {
       expect(result.unblocked).toEqual([main]);
       expect((await metaOf(dir, main)).depends_on).toEqual([]);
       expect((await metaOf(dir, main)).state).toBe("DESIGN");
+    },
+  );
+  testInTempDirs(
+    "a freed task starts at the phase it was submitted for",
+    async () => {
+      // Given a task the manager designed and planned itself, blocked behind a dependency
+      const dir = await makeTasksDir();
+      const dep = (await createTask(dir, ORCHESTRATOR_DIR, "dependency")).id;
+      const main = (await createTask(dir, ORCHESTRATOR_DIR, "main")).id;
+      await addDeps(dir, main, dep);
+      expect((await run(dir, main, "submit_working")).to).toBe("BLOCKED_WORK");
+      // When the dependency is closed
+      const result = await closeTask(dir, dep);
+      // Then it starts at WORK, rather than being designed over again
+      expect(result.unblocked).toEqual([main]);
+      expect((await metaOf(dir, main)).state).toBe("WORK");
     },
   );
   testInTempDirs(
@@ -581,12 +599,12 @@ describe("Feature: closing a task", () => {
       ).id;
       const main = (await createTask(dir, ORCHESTRATOR_DIR, "main")).id;
       await addDeps(dir, main, dep, other);
-      await run(dir, main, "submit");
+      await run(dir, main, "submit_designing");
       // When one of them is closed
       const result = await closeTask(dir, dep);
       // Then it is not unblocked, and still names what it is waiting on
       expect(result.unblocked).toEqual([]);
-      expect((await metaOf(dir, main)).state).toBe("BLOCKED");
+      expect((await metaOf(dir, main)).state).toBe("BLOCKED_DESIGN");
       expect((await metaOf(dir, main)).depends_on).toEqual([other]);
     },
   );
@@ -707,7 +725,7 @@ describe("Feature: what changes as a task walks the pipeline", () => {
       const filePath = activeTaskPath(dir, id);
       const original = await bodyOf(filePath);
       const steps: [string[], TransitionName, string[], string][] = [
-        [[], "submit", [], original],
+        [[], "submit_designing", [], original],
         [["designer"], "submit", [], original],
         [["design-reviewer"], "submit", ["\n# accepted"], "\n# accepted"],
         [["planner"], "submit", [], "\n# accepted"],
@@ -738,11 +756,11 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     const main = at(ids, 0);
     const dep = at(ids, 1);
     await addDeps(dir, main, dep);
-    await run(dir, main, "submit");
+    await run(dir, main, "submit_designing");
     const before = await enteredAt(dir, main);
     await Bun.sleep(5);
     // When it is submitted again and stays blocked
-    expect((await run(dir, main, "submit")).to).toBeUndefined();
+    expect((await run(dir, main, "submit_designing")).to).toBeUndefined();
     // Then the clock still moved, so the inbox shows how long it has waited
     expect(await enteredAt(dir, main)).toBeGreaterThan(before);
   });
@@ -752,14 +770,14 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     const main = at(ids, 0);
     const dep = at(ids, 1);
     await addDeps(dir, main, dep);
-    await run(dir, main, "submit");
+    await run(dir, main, "submit_designing");
     const before = await enteredAt(dir, main);
     await Bun.sleep(5);
     await editTask(dir, main, (meta) => {
       meta.depends_on = [];
     });
     // When the task is submitted
-    expect((await run(dir, main, "submit")).to).toBe("DESIGN");
+    expect((await run(dir, main, "submit_designing")).to).toBe("DESIGN");
     // Then the clock is stamped with the moment it entered its new state
     expect(await enteredAt(dir, main)).toBeGreaterThan(before);
   });
@@ -769,7 +787,7 @@ describe("Feature: the workspace a task is worked in", () => {
     // Given a task that has entered the pipeline but been dispatched to nobody
     const { dir, id } = await newTask();
     // When it is submitted into the design phase
-    await run(dir, id, "submit");
+    await run(dir, id, "submit_designing");
     // Then it carries no workspace, because none has been cloned for it
     expect((await metaOf(dir, id)).workspace).toBeUndefined();
   });
@@ -798,7 +816,7 @@ describe("Feature: the workspace a task is worked in", () => {
   testInTempDirs("only the working session is worth recording", async () => {
     // Given a task in the design phase
     const { dir, id } = await newTask();
-    await run(dir, id, "submit");
+    await run(dir, id, "submit_designing");
     // When a designer claims it, naming its own session
     await claim(dir, id, "designer", process.pid, {
       branch: "work/000001",
@@ -840,7 +858,7 @@ describe("Feature: the workspace a task is worked in", () => {
     async () => {
       // Given a task claimed with a workspace
       const { dir, id } = await newTask();
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       await claim(dir, id, "pi-1", process.pid, {
         branch: "work/000001",
         worktree: "/tmp/wt",
@@ -867,7 +885,7 @@ describe("Feature: the workspace a task is worked in", () => {
   testInTempDirs("a branch with no worktree beside it is refused", async () => {
     // Given a task in the design phase
     const { dir, id } = await newTask();
-    await run(dir, id, "submit");
+    await run(dir, id, "submit_designing");
     // When it is claimed with a branch but no worktree
     const attempt = async () =>
       await claim(dir, id, "pi-1", process.pid, { branch: "work/000001" });
@@ -908,7 +926,7 @@ describe("Feature: the workspace a task is worked in", () => {
       // Given a task walked all the way to the manager with a workspace
       const dir = await makeTasksDir();
       const id = (await createTask(dir, ORCHESTRATOR_DIR, "a task")).id;
-      await run(dir, id, "submit");
+      await run(dir, id, "submit_designing");
       for (const agent of ["d", "dr", "p", "pr"]) {
         await claim(dir, id, agent);
         await run(dir, id, "submit");

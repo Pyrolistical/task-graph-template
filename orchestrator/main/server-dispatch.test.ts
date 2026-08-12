@@ -23,6 +23,7 @@ import { defaultTasksDir } from "../adapters/runtime.ts";
 import * as git from "../adapters/git.ts";
 import {
   commitGraph,
+  enteredTask,
   makeFixture,
   promptsTo,
   readyTask,
@@ -192,6 +193,54 @@ describe("Feature: measuring how fast an agent writes", () => {
 });
 
 describe("Feature: the design and planning phases", () => {
+  testInTempDirs(
+    "a task the manager has designed and planned itself goes straight to a worker",
+    async () => {
+      const fixture = await makeFixture();
+      const id = await enteredTask(
+        fixture,
+        "Add a greeting",
+        "submit_working",
+        ["test -f hello.txt"],
+      );
+
+      await setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "wrote hello.txt and ran the check",
+              commit: { path: "hello.txt", contents: "hello\n" },
+            },
+          ],
+          WORK_REVIEW: [{ submit: true }],
+        },
+      });
+
+      // Given a task the manager submitted into the work phase on trust
+      const server = await serverFor(fixture);
+
+      // When the scheduler runs it as far as the manager
+      await walkTo(server, id, "MANAGER_REVIEW");
+
+      // Then the work phase is all the server ever ran on it
+      const applied = (await (await transitionsOf(server)).read()).filter(
+        (e) => e.task_id === id,
+      );
+      expect(
+        applied.map((e) => `${e.transition}: ${e.from} -> ${e.to}`),
+      ).toEqual([
+        "submit: WORK -> CHECK",
+        "pass: CHECK -> WORK_REVIEW",
+        "submit: WORK_REVIEW -> MANAGER_REVIEW",
+      ]);
+
+      await server.shutdown();
+      await server.drain();
+    },
+    30000,
+  );
+
   testInTempDirs(
     "a plan is written, reviewed and accepted before the work starts",
     async () => {

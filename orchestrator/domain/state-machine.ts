@@ -11,7 +11,9 @@ export type Role = (typeof ALL_ROLES)[number];
 
 export const VALID_STATES = [
   "NEW",
-  "BLOCKED",
+  "BLOCKED_DESIGN",
+  "BLOCKED_PLAN",
+  "BLOCKED_WORK",
   "HELD_DESIGN",
   "HELD_PLAN",
   "HELD_WORK",
@@ -211,11 +213,31 @@ export const RESUME_TARGETS: Record<HeldState, StageState> = {
   HELD_WORK: "WORK",
 };
 
-export const ENTRY_STATE: StageState = "DESIGN";
+export const BLOCKED_STATES = [
+  "BLOCKED_DESIGN",
+  "BLOCKED_PLAN",
+  "BLOCKED_WORK",
+] as const;
+
+export type BlockedState = (typeof BLOCKED_STATES)[number];
+
+export const BLOCKED_OF: Record<Phase, BlockedState> = {
+  design: "BLOCKED_DESIGN",
+  plan: "BLOCKED_PLAN",
+  work: "BLOCKED_WORK",
+};
+
+export const UNBLOCK_TARGETS: Record<BlockedState, StageState> = {
+  BLOCKED_DESIGN: "DESIGN",
+  BLOCKED_PLAN: "PLAN",
+  BLOCKED_WORK: "WORK",
+};
 
 export const isValidState = memberOf(VALID_STATES);
 
 export const isHeld = memberOf(HELD_STATES);
+
+export const isBlocked = memberOf(BLOCKED_STATES);
 
 export function isStage(state: TaskState): state is StageState {
   return state in STAGE_OF;
@@ -225,8 +247,23 @@ export const isClaimState = memberOf(CLAIM_STATES);
 
 export const isReviewState = memberOf(REVIEW_STATES);
 
+export const ENTRY_NAMES = [
+  "submit_designing",
+  "submit_planning",
+  "submit_working",
+] as const;
+
+export type EntryName = (typeof ENTRY_NAMES)[number];
+
+export const ENTRY_OF: Record<EntryName, StageState> = {
+  submit_designing: "DESIGN",
+  submit_planning: "PLAN",
+  submit_working: "WORK",
+};
+
 export const TRANSITION_NAMES = [
   "submit",
+  ...ENTRY_NAMES,
   "pass",
   "fail",
   "hold",
@@ -238,8 +275,10 @@ export const TRANSITION_NAMES = [
 export type TransitionName = (typeof TRANSITION_NAMES)[number];
 
 const OFF_STAGE: Record<Exclude<ValidState, StageState>, TransitionName[]> = {
-  NEW: ["submit"],
-  BLOCKED: ["submit"],
+  NEW: [...ENTRY_NAMES],
+  BLOCKED_DESIGN: [...ENTRY_NAMES],
+  BLOCKED_PLAN: [...ENTRY_NAMES],
+  BLOCKED_WORK: [...ENTRY_NAMES],
   HELD_DESIGN: ["resume", "abort"],
   HELD_PLAN: ["resume", "abort"],
   HELD_WORK: ["resume", "abort"],
@@ -351,13 +390,18 @@ function mutate(
   body: string,
 ): Decision {
   switch (name) {
+    case "submit_designing":
+    case "submit_planning":
+    case "submit_working": {
+      const entry = ENTRY_OF[name];
+      if (meta.depends_on.length > 0) {
+        const waiting = BLOCKED_OF[STAGE_OF[entry].phase];
+        return state === waiting ? stay() : move(waiting);
+      }
+      return move(entry);
+    }
+
     case "submit": {
-      if (state === "NEW") {
-        return move(meta.depends_on.length > 0 ? "BLOCKED" : "DESIGN");
-      }
-      if (state === "BLOCKED") {
-        return meta.depends_on.length > 0 ? stay() : move(ENTRY_STATE);
-      }
       if (state === "MANAGER_REVIEW") {
         return move("CLOSED");
       }
@@ -388,10 +432,11 @@ function mutate(
       if (!isHeld(state)) {
         throw new Error(`Task "${meta.id}" is not held`);
       }
+      const target = RESUME_TARGETS[state];
       if (meta.depends_on.length > 0) {
-        return move("BLOCKED");
+        return move(BLOCKED_OF[STAGE_OF[target].phase]);
       }
-      return move(RESUME_TARGETS[state]);
+      return move(target);
     }
 
     case "feedback": {

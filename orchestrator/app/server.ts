@@ -18,6 +18,7 @@ import { Queue } from "../domain/queue.ts";
 import type { SlotRow } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import type {
+  EntryName,
   TransitionArgs,
   TransitionName,
   TransitionResult,
@@ -155,17 +156,18 @@ export class Server implements Manager {
     return await this.graph.writeBody(taskId, body);
   }
 
-  async submit(taskId: TaskId): Promise<TransitionResult> {
+  submit(taskId: TaskId): Promise<TransitionResult> {
+    return this.lander.merge(taskId);
+  }
+
+  async enter(taskId: TaskId, name: EntryName): Promise<TransitionResult> {
     const tasks = await this.tasks();
-    if (tasks.get(taskId)?.state === "MANAGER_REVIEW") {
-      return this.lander.merge(taskId);
-    }
     if (detectCycles(tasks).includes(taskId)) {
       throw new Error(
         `task "${taskId}" is part of a dependency cycle through ${tasks.get(taskId)?.depends_on.join(", ")}; it could never unblock`,
       );
     }
-    return this.transition(taskId, "submit", {}, "manager");
+    return this.transition(taskId, name, {}, "manager");
   }
 
   hold(taskId: TaskId, reason: string): Promise<TransitionResult> {

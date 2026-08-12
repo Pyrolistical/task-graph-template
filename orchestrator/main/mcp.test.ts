@@ -131,6 +131,9 @@ describe("Feature: the tool surface the manager works through", () => {
         "task_hold",
         "task_resume",
         "task_submit",
+        "task_submit_designing",
+        "task_submit_planning",
+        "task_submit_working",
         "task_write_body",
       ]);
 
@@ -389,11 +392,11 @@ describe("Feature: the tool surface the manager works through", () => {
         meta.checks = ["bun test"];
       });
 
-      // When the manager submits it
+      // When the manager submits it for designing
       const done = JSON.parse(
         textOf(
           await client.callTool({
-            name: "task_submit",
+            name: "task_submit_designing",
             arguments: { id: created.id },
           }),
         ),
@@ -427,18 +430,18 @@ describe("Feature: the tool surface the manager works through", () => {
         meta.depends_on = [dep];
       });
 
-      // When the manager submits it
+      // When the manager submits it for designing
       const done = JSON.parse(
         textOf(
           await client.callTool({
-            name: "task_submit",
+            name: "task_submit_designing",
             arguments: { id: created.id },
           }),
         ),
       );
       // Then it waits rather than being dispatched
       expect(done.from).toBe("NEW");
-      expect(done.to).toBe("BLOCKED");
+      expect(done.to).toBe("BLOCKED_DESIGN");
 
       await client.close();
     },
@@ -446,7 +449,7 @@ describe("Feature: the tool surface the manager works through", () => {
   );
 
   testInTempDirs(
-    "task_submit refuses a task that depends on itself in a loop",
+    "task_submit_designing refuses a task that depends on itself in a loop",
     async () => {
       // Given two tasks edited to depend on each other
       const fixture = await makeFixture();
@@ -476,7 +479,7 @@ describe("Feature: the tool surface the manager works through", () => {
 
       // When the manager submits one of them
       const refused = await client.callTool({
-        name: "task_submit",
+        name: "task_submit_designing",
         arguments: { id: first.id },
       });
 

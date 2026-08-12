@@ -14,8 +14,9 @@ import {
   type TransitionName,
   type TransitionResult,
   CLAIM_STATES,
-  ENTRY_STATE,
+  UNBLOCK_TARGETS,
   decide,
+  isBlocked,
   isClaimState,
   isHeld,
   isValidState,
@@ -94,8 +95,8 @@ async function propagateClose(
     meta.depends_on = meta.depends_on.filter((d) => d !== closedId);
     dependentsUpdated.push(meta.id);
 
-    if (meta.state === "BLOCKED" && meta.depends_on.length === 0) {
-      meta.state = ENTRY_STATE;
+    if (isBlocked(meta.state) && meta.depends_on.length === 0) {
+      meta.state = UNBLOCK_TARGETS[meta.state];
       unblocked.push(meta.id);
     }
     meta.state_entered = now;

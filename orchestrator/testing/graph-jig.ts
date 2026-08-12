@@ -184,7 +184,7 @@ export async function newTasks(
 
 export async function toDesign(): Promise<{ dir: string; id: string }> {
   const { dir, id } = await newTask();
-  await run(dir, id, "submit");
+  await run(dir, id, "submit_designing");
   return { dir, id };
 }
 
@@ -242,7 +242,7 @@ export async function toManagerReview(): Promise<{ dir: string; id: string }> {
 }
 
 export async function toClosing(dir: string, id: string): Promise<void> {
-  await run(dir, id, "submit");
+  await run(dir, id, "submit_designing");
   await claim(dir, id, "d");
   await run(dir, id, "submit");
   await claim(dir, id, "dr");

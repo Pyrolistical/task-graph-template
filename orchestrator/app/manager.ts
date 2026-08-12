@@ -2,7 +2,7 @@ import type { ViewName } from "./ports/publisher.ts";
 import type { CreatedTask } from "./ports/tasks.ts";
 import type { SlotRow } from "../domain/agents.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
-import type { TransitionResult } from "../domain/state-machine.ts";
+import type { EntryName, TransitionResult } from "../domain/state-machine.ts";
 
 export interface PathReport {
   repo: string;
@@ -23,6 +23,7 @@ export interface Manager {
   writeBody(id: TaskId, body: string): Promise<string>;
   tasks(): Promise<Map<TaskId, TaskMeta>>;
   submit(id: TaskId): Promise<TransitionResult>;
+  enter(id: TaskId, name: EntryName): Promise<TransitionResult>;
   feedback(
     id: TaskId,
     findings: string[],

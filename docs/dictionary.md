@@ -4,23 +4,23 @@ One thing, one name — in code, docs, views and prompts. Two words for one thin
 
 ## Graph
 
-| Term          | Is                                                      |
-| ------------- | ------------------------------------------------------- |
-| task          | one unit of work, `NEW` → `CLOSED`                      |
-| task document | the markdown file a task lives in                       |
-| frontmatter   | its typed head — the whole machine-readable task        |
-| body          | prose under the frontmatter; also the assignment        |
-| state         | the document field saying where a task sits             |
-| stage         | a row of the stage table (`STAGE_OF`), keyed by state   |
-| phase         | design, plan or work — what a task can be held from     |
-| role          | designer, planner, worker, reviewer                     |
-| transition    | an edge of the state machine                            |
-| claim         | which slot holds a task, and its pid                    |
-| dependency    | a task that must close before this one leaves `BLOCKED` |
-| blocking      | transitive count of tasks waiting on this one           |
-| findings      | what a review sends back, verbatim                      |
-| held reason   | why a task was parked, for the manager                  |
-| check         | one declared shell command the server runs              |
+| Term          | Is                                                        |
+| ------------- | --------------------------------------------------------- |
+| task          | one unit of work, `NEW` → `CLOSED`                        |
+| task document | the markdown file a task lives in                         |
+| frontmatter   | its typed head — the whole machine-readable task          |
+| body          | prose under the frontmatter; also the assignment          |
+| state         | the document field saying where a task sits               |
+| stage         | a row of the stage table (`STAGE_OF`), keyed by state     |
+| phase         | design, plan or work — what a task can be held from       |
+| role          | designer, planner, worker, reviewer                       |
+| transition    | an edge of the state machine                              |
+| claim         | which slot holds a task, and its pid                      |
+| dependency    | a task that must close before this one leaves `BLOCKED_*` |
+| blocking      | transitive count of tasks waiting on this one             |
+| findings      | what a review sends back, verbatim                        |
+| held reason   | why a task was parked, for the manager                    |
+| check         | one declared shell command the server runs                |
 
 ## Pipeline
 

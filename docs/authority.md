@@ -8,7 +8,9 @@ Every one is fully determined by an observed fact: a result tool was called, a c
 
 ## Judgement — the manager only, through [MCP tools](mcp.md)
 
-Nothing here is derivable from an observation: creating a task, submitting it out of `NEW`/`BLOCKED`/`MANAGER_REVIEW`, deciding a finding is real, holding, aborting, resuming.
+Nothing here is derivable from an observation: creating a task, entering it into a phase out of `NEW`/`BLOCKED_*`, closing it out of `MANAGER_REVIEW`, deciding a finding is real, holding, aborting, resuming.
+
+A task entered at `PLAN` or `WORK` claims a design, or a design and a plan, that nothing verifies. That is the point: the manager is the judgement authority, so its word about its own body is a fact the server has no better source for.
 
 One tool per judgement, named for it. A generic `task_transition` would make every judgement look alike, put the manager one typo from one it did not mean, and move validation from schema to string parsing.
 

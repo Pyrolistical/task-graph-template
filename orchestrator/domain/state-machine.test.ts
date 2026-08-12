@@ -29,6 +29,9 @@ function aTask(state: ValidState, overrides: Partial<TaskMeta> = {}): TaskMeta {
 
 const ARGS: Record<TransitionName, TransitionArgs> = {
   submit: { body: BODY },
+  submit_designing: {},
+  submit_planning: {},
+  submit_working: {},
   pass: {},
   fail: {},
   hold: { reason: "the staging database is down" },
@@ -42,26 +45,59 @@ function landed(decision: Decision, from: ValidState): string {
 }
 
 describe("Feature: where every transition lands", () => {
-  test("a task in NEW that submits lands in DESIGN", () => {
+  test("a task in NEW submitted for designing lands in DESIGN", () => {
     // Given a new task with nothing holding it back
     const meta = aTask("NEW");
 
-    // When a submit is decided on it
-    const decided = decide(meta, BODY, "submit", ARGS.submit);
+    // When a submit_designing is decided on it
+    const decided = decide(meta, BODY, "submit_designing", {});
 
     // Then the task lands in DESIGN
     expect(landed(decided, "NEW")).toBe("DESIGN");
   });
 
-  test("a task in BLOCKED that submits lands in DESIGN", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in NEW submitted for planning lands in PLAN", () => {
+    // Given a new task the manager has already designed
+    const meta = aTask("NEW");
 
-    // When a submit is decided on it
-    const decided = decide(meta, BODY, "submit", ARGS.submit);
+    // When a submit_planning is decided on it
+    const decided = decide(meta, BODY, "submit_planning", {});
+
+    // Then the task lands in PLAN, its design taken on trust
+    expect(landed(decided, "NEW")).toBe("PLAN");
+  });
+
+  test("a task in NEW submitted for working lands in WORK", () => {
+    // Given a new task the manager has already designed and planned
+    const meta = aTask("NEW");
+
+    // When a submit_working is decided on it
+    const decided = decide(meta, BODY, "submit_working", {});
+
+    // Then the task lands in WORK, its design and plan taken on trust
+    expect(landed(decided, "NEW")).toBe("WORK");
+  });
+
+  test("a task in BLOCKED_DESIGN submitted for designing lands in DESIGN", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
+
+    // When a submit_designing is decided on it
+    const decided = decide(meta, BODY, "submit_designing", {});
 
     // Then the task lands in DESIGN
-    expect(landed(decided, "BLOCKED")).toBe("DESIGN");
+    expect(landed(decided, "BLOCKED_DESIGN")).toBe("DESIGN");
+  });
+
+  test("a task in BLOCKED_WORK submitted for working lands in WORK", () => {
+    // Given a task waiting to be worked, with nothing left to wait on
+    const meta = aTask("BLOCKED_WORK");
+
+    // When a submit_working is decided on it
+    const decided = decide(meta, BODY, "submit_working", {});
+
+    // Then the task lands in WORK
+    expect(landed(decided, "BLOCKED_WORK")).toBe("WORK");
   });
 
   test("a task in HELD_DESIGN that resumes lands in DESIGN", () => {
@@ -429,70 +465,70 @@ describe("Feature: the transitions a task turns away", () => {
     expect(attempt).toThrow(/not valid from state "NEW"/);
   });
 
-  test("a task in BLOCKED will not take a pass", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take a pass", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When a pass is decided on it
     const attempt = () => decide(meta, BODY, "pass", ARGS.pass);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
-  test("a task in BLOCKED will not take a fail", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take a fail", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When a fail is decided on it
     const attempt = () => decide(meta, BODY, "fail", ARGS.fail);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
-  test("a task in BLOCKED will not take a hold", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take a hold", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When a hold is decided on it
     const attempt = () => decide(meta, BODY, "hold", ARGS.hold);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
-  test("a task in BLOCKED will not take a resume", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take a resume", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When a resume is decided on it
     const attempt = () => decide(meta, BODY, "resume", ARGS.resume);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
-  test("a task in BLOCKED will not take feedback", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take feedback", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When feedback is decided on it
     const attempt = () => decide(meta, BODY, "feedback", ARGS.feedback);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
-  test("a task in BLOCKED will not take an abort", () => {
-    // Given a blocked task with nothing left to wait on
-    const meta = aTask("BLOCKED");
+  test("a task in BLOCKED_DESIGN will not take an abort", () => {
+    // Given a task waiting to be designed, with nothing left to wait on
+    const meta = aTask("BLOCKED_DESIGN");
 
     // When an abort is decided on it
     const attempt = () => decide(meta, BODY, "abort", ARGS.abort);
 
-    // Then it is turned away as not valid from BLOCKED
-    expect(attempt).toThrow(/not valid from state "BLOCKED"/);
+    // Then it is turned away as not valid from BLOCKED_DESIGN
+    expect(attempt).toThrow(/not valid from state "BLOCKED_DESIGN"/);
   });
 
   test("a task in HELD_DESIGN will not take a submit", () => {
@@ -1047,37 +1083,59 @@ describe("Feature: the transitions a task turns away", () => {
 });
 
 describe("Feature: the edges that read the task itself", () => {
-  test("a new task with dependencies is submitted into BLOCKED", () => {
+  test("a new task with dependencies is submitted into BLOCKED_DESIGN", () => {
     // Given a new task that depends on another
     const meta = aTask("NEW", { depends_on: ["000001"] });
 
     // When the task is submitted into the pipeline
-    const decided = decide(meta, BODY, "submit", {});
+    const decided = decide(meta, BODY, "submit_designing", {});
 
-    // Then it waits in BLOCKED rather than entering the design phase
-    expect(landed(decided, "NEW")).toBe("BLOCKED");
+    // Then it waits in BLOCKED_DESIGN rather than entering the design phase
+    expect(landed(decided, "NEW")).toBe("BLOCKED_DESIGN");
+  });
+
+  test("a new task with dependencies submitted for working waits in BLOCKED_WORK", () => {
+    // Given a new task that depends on another, designed and planned already
+    const meta = aTask("NEW", { depends_on: ["000001"] });
+
+    // When the task is submitted into the pipeline at the work phase
+    const decided = decide(meta, BODY, "submit_working", {});
+
+    // Then it waits in BLOCKED_WORK, remembering the phase it will start at
+    expect(landed(decided, "NEW")).toBe("BLOCKED_WORK");
   });
 
   test("a blocked task that still has dependencies stays where it is", () => {
-    // Given a blocked task whose dependency has not closed
-    const meta = aTask("BLOCKED", { depends_on: ["000001"] });
+    // Given a task waiting to be designed whose dependency has not closed
+    const meta = aTask("BLOCKED_DESIGN", { depends_on: ["000001"] });
 
     // When the task is submitted into the pipeline
-    const decided = decide(meta, BODY, "submit", {});
+    const decided = decide(meta, BODY, "submit_designing", {});
 
     // Then the machine moves it nowhere at all
     expect(decided).toEqual({ kind: "stay" });
   });
 
-  test("a held task that gained a dependency resumes into BLOCKED", () => {
-    // Given a held task that was given a dependency while it was parked
+  test("a blocked task submitted for another phase waits for that one instead", () => {
+    // Given a task waiting to be designed whose dependency has not closed
+    const meta = aTask("BLOCKED_DESIGN", { depends_on: ["000001"] });
+
+    // When the manager submits it for working while it waits
+    const decided = decide(meta, BODY, "submit_working", {});
+
+    // Then it waits in BLOCKED_WORK, so the last dependency releases it into WORK
+    expect(landed(decided, "BLOCKED_DESIGN")).toBe("BLOCKED_WORK");
+  });
+
+  test("a held task that gained a dependency resumes into its phase's blocked state", () => {
+    // Given a task held out of the work phase, given a dependency while parked
     const meta = aTask("HELD_WORK", { depends_on: ["000001"] });
 
     // When the task is resumed off its hold
     const decided = decide(meta, BODY, "resume", {});
 
-    // Then it waits in BLOCKED instead of returning to its phase
-    expect(landed(decided, "HELD_WORK")).toBe("BLOCKED");
+    // Then it waits in BLOCKED_WORK, so it returns to the work phase when freed
+    expect(landed(decided, "HELD_WORK")).toBe("BLOCKED_WORK");
   });
 });
 
