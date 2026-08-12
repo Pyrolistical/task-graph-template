@@ -49,6 +49,7 @@ const MessageEnd = z.looseObject({
 
 export const SessionStats = z.looseObject({
   tokens: z.looseObject({ total: z.number().optional() }).optional(),
+  cost: z.number().optional(),
   contextUsage: z.looseObject({ percent: z.number().optional() }).optional(),
 });
 

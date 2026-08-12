@@ -26,6 +26,7 @@ export interface AgentProcess {
   abortBash(): void;
   stats(): Awaitable<{
     tokens?: number;
+    cost?: number;
     contextPercent?: number;
   }>;
   lastAssistantText(): Awaitable<string | undefined>;

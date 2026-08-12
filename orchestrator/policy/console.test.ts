@@ -192,6 +192,28 @@ describe("Feature: the numbers on a pane header", () => {
     expect(stats).toBe("1.2k tok/s ctx 42%");
   });
 
+  test("a session that has spent money has its cost after the context", () => {
+    // Given a pane whose agent has spent forty-five cents on its session
+    const pane = paneOf({ slots: [busyRow({ cost: 0.45 })] });
+
+    // When the stats line is drawn
+    const stats = statsLine(pane, undefined);
+
+    // Then the cost follows the context percentage, rounded to cents
+    expect(stats).toBe("ctx 42% $0.45");
+  });
+
+  test("a session that has spent nothing shows no cost", () => {
+    // Given a pane whose agent runs a provider that charges nothing
+    const pane = paneOf({ slots: [busyRow({ cost: 0 })] });
+
+    // When the stats line is drawn
+    const stats = statsLine(pane, undefined);
+
+    // Then no cost is drawn, because a zero is a column spent on nothing
+    expect(stats).toBe("ctx 42%");
+  });
+
   test("an agent that has compacted has the count after its context", () => {
     // Given a pane whose agent has compacted three times on this task
     const pane = paneOf({ slots: [busyRow({ compactions: 3 })] });

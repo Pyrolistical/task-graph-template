@@ -5,17 +5,17 @@
 A **reader**: no state the server needs, no rpc channel, startable and killable while agents run. Everything drawn comes from the JSON views and the session `.jsonl` they point at. Laid out the same way the server is — text and session records in `domain/`, panes, frame, scroll anchor and key decoding in `policy/`, tailing and the tty in `adapters/tui.ts`.
 
 ```text
-[─●] scheduler │ 000042 WORK 000057 WORK_REVIEW        2 queued
-──────────────────────┬───────────────────────┬──────────────────────
-[─●] pi anthropic/cl… │ [─●] pi anthropic/cl… │ [●─] pi llama.cpp-r…
-task 000042 worker W… │ task 000057 reviewer … │ no task
-tool: bash — bun test │ thinking (12s)        │
-3.4k tok/s ctx 30%    │ 1.1k tok/s ctx 8% x2  │
-──────────────────────┼───────────────────────┼──────────────────────
-01:58:02 bash: bun te…│ 02:09:44 read: src/a… │
+[─●] scheduler │ 000042 WORK 000057 WORK_REVIEW              2 queued
+──────────────────────────┬──────────────────────────┬──────────────────────────
+[─●] pi anthropic/claude… │ [─●] pi anthropic/claude…│ [●─] pi llama.cpp-remote…
+task 000042 worker WORK   │ task 000057 reviewer WOR…│ no task
+tool: bash — bun test     │ thinking (12s)           │
+3.4k tok/s ctx 30% $1.20  │ 820 tok/s ctx 8% x2 $0.31│
+──────────────────────────┼──────────────────────────┼──────────────────────────
+01:58:02 bash: bun test   │ 02:09:44 read: src/app.ts│
 ```
 
-- one queue line (scheduler switch, queue head with ranks, total) and four header lines per pane; `xN` counts compactions on the current task
+- one queue line (scheduler switch, queue head with ranks, total) and four header lines per pane; `xN` counts compactions on the current task and `$` the session's cost, drawn only when the provider charges
 - each pane joins three sources by slot: its `slots.json` row, the `tasks.json` row for the task it holds, and that task's `checks.json` row — a running check displaces the activity line, because a task in `CHECK` has no agent doing anything
 - a slot whose provider failed its [health check](agents.md#healthcheck) reads `unreachable` with its switch still on: the agent is enabled, the provider is not there
 - panes divide the terminal evenly; below a minimum width it refuses to draw and says how many columns it needs. With no agents there are no panes, only the pool file's path

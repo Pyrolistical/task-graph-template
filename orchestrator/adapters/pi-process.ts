@@ -170,12 +170,14 @@ export class PiProcess implements AgentProcess {
 
   async stats(): Promise<{
     tokens?: number;
+    cost?: number;
     contextPercent?: number;
   }> {
     const response = await this.send({ type: "get_session_stats" });
     const stats = SessionStats.parse(response.data ?? {});
     return {
       tokens: stats.tokens?.total,
+      cost: stats.cost,
       contextPercent: stats.contextUsage?.percent,
     };
   }

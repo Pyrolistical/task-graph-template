@@ -273,7 +273,7 @@ describe("Feature: a pool with no agents in it", () => {
 
 describe("Feature: what the slots view says about a running agent", () => {
   testInTempDirs(
-    "tokens, context and the session file reach the view",
+    "tokens, cost, context and the session file reach the view",
     async () => {
       const fixture = await makeFixture();
       const id = await readyTask(fixture, "A task");
@@ -299,7 +299,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       expect(busy.state).toBe("BUSY");
       expect(busy.tokens).toBe(105000);
       expect(busy.context_percent).toBe(30);
-      expect(busy).not.toHaveProperty("cost");
+      expect(busy.cost).toBe(0.45);
       expect(busy.session).toContain("session/worker");
 
       await server.shutdown();

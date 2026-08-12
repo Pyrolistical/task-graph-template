@@ -232,6 +232,9 @@ export function statsLine(pane: Pane, rate?: number): string {
   if (pane.slot.context_percent) {
     parts.push(`ctx ${Math.round(pane.slot.context_percent)}%${compactions}`);
   }
+  if (pane.slot.cost) {
+    parts.push(`$${pane.slot.cost.toFixed(2)}`);
+  }
   return parts.join(" ");
 }
 

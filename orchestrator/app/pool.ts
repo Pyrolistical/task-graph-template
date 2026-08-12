@@ -38,6 +38,7 @@ export interface Runner {
   detachedPid?: number;
   session?: string;
   tokens?: number;
+  cost?: number;
   contextPercent?: number;
   compactions: number;
   results: ResultCall[];
@@ -59,6 +60,7 @@ function freshRunner(slot: Slot): Runner {
     detachedPid: undefined,
     session: undefined,
     tokens: undefined,
+    cost: undefined,
     contextPercent: undefined,
     compactions: 0,
     results: [],
@@ -332,6 +334,7 @@ export class Pool {
       started_at: runner.startedAt,
       activity: runner.process?.stream.state.activity ?? { kind: "none" },
       tokens: runner.tokens,
+      cost: runner.cost,
       context_percent: runner.contextPercent,
       compactions: runner.compactions,
       session: runner.session,
@@ -350,6 +353,7 @@ export class Pool {
           return;
         }
         runner.tokens = stats.tokens ?? runner.tokens;
+        runner.cost = stats.cost ?? runner.cost;
         runner.contextPercent = stats.contextPercent ?? runner.contextPercent;
       }),
     );
