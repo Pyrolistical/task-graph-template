@@ -10,6 +10,7 @@ function poolSchema(defaultWrite: string[]) {
     model: z.string().min(1),
     slots: z.int().min(1).default(1),
     enabled: z.boolean().default(true),
+    healthCheck: z.boolean().default(false),
     write: z.array(z.string().min(1)).default(() => [...defaultWrite]),
     roles: z.array(z.enum(ALL_ROLES)).default(() => [...ALL_ROLES]),
   });
@@ -36,6 +37,7 @@ export interface AgentEntry {
   model: string;
   slots: number;
   enabled: boolean;
+  healthCheck: boolean;
   write: string[];
   roles: Role[];
 }
@@ -48,6 +50,7 @@ export interface Slot {
   model: string;
   index: number;
   enabled: boolean;
+  healthCheck: boolean;
   write: string[];
   roles: Role[];
 }
@@ -82,6 +85,7 @@ export function parseAgents(
         model: entry.model,
         index,
         enabled: entry.enabled,
+        healthCheck: entry.healthCheck,
         write: entry.write,
         roles: entry.roles,
       });

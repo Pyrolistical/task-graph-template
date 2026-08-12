@@ -144,7 +144,7 @@ The repository the server drives is the directory it is started in, so `claude` 
 
 ### The agent pool
 
-`agents.json` is read from the task directory — `~/task-graph/my-project/agents.json`. It is seeded with one disabled placeholder; give it a real provider and model, set `enabled` to true, and add as many slots as the pool should run.
+`agents.json` is read from the task directory — `~/task-graph/my-project/agents.json`. It is seeded with one disabled placeholder; give it a real provider and model, set `enabled` to true, and add as many slots as the pool should run. A provider that is not always running — a local inference server — takes `"healthCheck": true`, which asks it whether it is up before a slot of that agent is dispatched to. See [Agents configuration](docs/agents.md).
 
 ```json
 {

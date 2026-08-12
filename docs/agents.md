@@ -23,17 +23,19 @@
       "model": "rocm",
       "slots": 1,
       "roles": ["worker"],
-      "enabled": false
+      "enabled": false,
+      "healthCheck": true
     }
   ]
 }
 ```
 
-Seven keys, and no more. An entry is:
+Eight keys, and no more. An entry is:
 
 - a model on a provider
 - how many of it may run at once
 - whether it may run at all
+- whether its provider is asked if it is up before a slot is handed work
 - what it may write outside its worktree
 - which roles it may take
 
@@ -84,6 +86,32 @@ Restricting does not promise capacity:
 - a path that does not exist on the host is dropped, because `bwrap` cannot overlay what is not there
 - the paths are resolved at spawn, not at load, so a cache created after startup is picked up
 - see [The sandbox](sandbox.md) for what the array actually buys and why every entry is an overlay rather than a bind
+
+## Checking the provider is up first
+
+- `healthCheck` defaults to false and is a property of the agent, like `enabled`
+- with it off, a slot is dispatched to and the provider is discovered to be down by the agent failing against it
+- with it on, the provider is asked before the slot leaves the free list, and a provider that does not answer takes its slots out of the pool for that tick
+
+What is asked, and where:
+
+- the base url and the api come from pi itself — the `ModelRuntime` the server opens at startup reads the same `models.json` the agents are spawned against, so there is no second copy of the endpoint to keep in step
+- the api decides the url: `openai-completions` and its relatives are asked for `<baseUrl>/models`, `anthropic-messages` for `<baseUrl>/v1/models`
+- the credential pi would stream with is the credential the check authenticates with, in the header that api takes — `authorization: Bearer`, `x-api-key`, `x-goog-api-key`
+- an api with no model list to ask for, `bedrock-converse-stream` among them, is refused by name rather than guessed at
+- anything but a 2xx is down, and so is a refused connection or five seconds of silence
+
+What it costs, and does not:
+
+- one request per provider per scheduling tick, not one per slot: three slots of the same model ask once
+- only slots that are otherwise free and enabled are checked, so nothing is asked about a provider whose agents are all busy
+- the outage is one line in the server log when it starts and one when it clears, not a line a tick
+
+This is for the local inference server that is not always running:
+
+- a llama.cpp box that is up on Tuesdays is a provider whose slots should simply not be offered while it is down, rather than a task dispatched into a wall
+- a hosted provider that is up as a rule wants it off: a hosted outage is what the backoff below is for, and a health check against it is a request per tick that buys nothing
+- it is a gate on dispatch, never on a task in flight — a provider that goes down mid-turn is still the backoff's problem
 
 ## Turning an agent off
 
@@ -154,6 +182,7 @@ stateDiagram-v2
 
 ## When the provider is down
 
+- a provider with `healthCheck` on is never dispatched to while it is down, so what follows is about the provider that was up when the slot was handed out
 - `pi` retries inside a turn on its own; the server sees that as `auto_retry_start` and does nothing
 - what the server handles is `pi` giving up and settling with `stopReason: error`, and a local inference server not answering at all
 

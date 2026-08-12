@@ -36,6 +36,7 @@ export function aSlot(overrides: Partial<Slot> = {}): Slot {
     model: "fake",
     index: 1,
     enabled: true,
+    healthCheck: false,
     write: [],
     roles: ["worker", "reviewer", "planner", "designer"],
     ...overrides,
@@ -449,10 +450,12 @@ export function fakePaths(): Paths {
 export function fakeAgents(
   slots: Slot[],
   session: () => AgentProcess = () => aSession(),
+  healthy: (slot: Slot) => Awaitable<boolean> = () => true,
 ): Agents {
   return {
     slots: () => slots,
     hasSession: (_path: string) => yielded(true),
+    healthy,
     spawn: () => yielded(session()),
   };
 }

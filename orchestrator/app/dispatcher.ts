@@ -53,7 +53,7 @@ export class Dispatcher {
       tasks,
       await this.resumable(tasks),
       blocking,
-      this.pool.freeSlots(),
+      await this.pool.freeSlots(),
       this.pool.rates.rateOf,
     )) {
       const task = tasks.get(candidate.task_id);

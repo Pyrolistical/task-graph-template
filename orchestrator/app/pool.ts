@@ -90,6 +90,7 @@ export class Pool {
 
   private readonly byName = new Map<string, Runner>();
   private readonly disabled = new Set<string>();
+  private readonly unreachable = new Set<string>();
   private readonly tracked = new Set<Promise<void>>();
 
   constructor(
@@ -119,13 +120,48 @@ export class Pool {
     return runner;
   }
 
-  freeSlots(): Slot[] {
-    return this.runners()
+  async freeSlots(): Promise<Slot[]> {
+    const idle = this.runners()
       .filter(
         (runner) =>
           runner.state === "IDLE" && !this.disabled.has(runner.slot.agent),
       )
       .map((runner) => runner.slot);
+
+    const probes = new Map<string, Awaitable<boolean>>();
+    for (const slot of idle) {
+      if (slot.healthCheck && !probes.has(slot.provider)) {
+        probes.set(slot.provider, this.agents.healthy(slot));
+      }
+    }
+
+    const healthy = new Set<string>();
+    for (const [provider, probe] of probes) {
+      if (await probe) {
+        healthy.add(provider);
+      }
+      await this.noteHealth(provider, healthy.has(provider));
+    }
+
+    return idle.filter(
+      (slot) => !slot.healthCheck || healthy.has(slot.provider),
+    );
+  }
+
+  private async noteHealth(provider: string, healthy: boolean): Promise<void> {
+    if (healthy === !this.unreachable.has(provider)) {
+      return;
+    }
+    if (healthy) {
+      this.unreachable.delete(provider);
+    } else {
+      this.unreachable.add(provider);
+    }
+    await this.publisher.log(
+      healthy
+        ? `provider ${provider} answered its health check: its slots are dispatchable again`
+        : `provider ${provider} failed its health check: its slots are held back`,
+    );
   }
 
   busyTasks(): Set<TaskId | undefined> {

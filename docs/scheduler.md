@@ -6,6 +6,8 @@ Right to left across the state machine: capacity goes to whatever is closest to 
 
 ```text
 every tick, while the scheduler is running:
+    free ← every idle slot of an enabled agent, less the slots of any
+        agent asking for a healthCheck whose provider did not answer
     queue ← every task in a stage with a role and nothing holding it, ranked
         1  resume            — WORK with a queued check failure
                                and a session file still on disk
@@ -41,6 +43,7 @@ every tick, while the scheduler is running:
 - there is no rank for held tasks and no rule that skips them: `HELD_DESIGN`, `HELD_PLAN` and `HELD_WORK` are not stages with a role, so the dispatcher never sees one
 - `claimed_by` is the first thing `rankOf` reads: a task an agent holds is not a candidate
 - a pool with no slots at all cannot be started: the switch is refused with the path of the pool file, because a running scheduler with nothing to dispatch to is a queue that never moves
+- a provider held back by its [health check](agents.md#checking-the-provider-is-up-first) is not free capacity for that tick: the slots exist, they are simply not offered, and the queue waits rather than dispatching into a server that is not listening
 
 ## Which free slot, when several will do
 

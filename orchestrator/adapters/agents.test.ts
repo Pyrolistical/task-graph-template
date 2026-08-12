@@ -242,6 +242,7 @@ describe("Feature: loading the pool of agents", () => {
         model: "m",
         index: 1,
         enabled: true,
+        healthCheck: false,
         write: DEFAULT_WRITE,
         roles: ["worker", "reviewer", "planner", "designer"],
       });

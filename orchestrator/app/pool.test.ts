@@ -11,15 +11,29 @@ import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
 import { at } from "../testing/present.ts";
 
-function aPool(slots: Slot[] = [aSlot()], alive = true) {
+function aPool(
+  slots: Slot[] = [aSlot()],
+  alive = true,
+  health: () => boolean = () => true,
+) {
   const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
-  const pool = new Pool(fakeAgents(slots), workspaces, publisher, () => alive);
+  const probed: string[] = [];
+  const agents = fakeAgents(
+    slots,
+    () => aSession(),
+    (slot) => {
+      probed.push(slot.provider);
+      return health();
+    },
+  );
+  const pool = new Pool(agents, workspaces, publisher, () => alive);
   return {
     pool,
     log: publisher.lines,
     harvested: workspaces.harvested,
     workspaces,
+    probed,
   };
 }
 
@@ -49,13 +63,13 @@ describe("Feature: the pool of agent slots", () => {
   test("disabling an agent takes its slots out of the free list", async () => {
     // Given a pool with one idle slot
     const { pool } = aPool();
-    expect(pool.freeSlots()).toHaveLength(1);
+    expect(await pool.freeSlots()).toHaveLength(1);
 
     // When the agent behind it is disabled
     await pool.setAgentEnabled("pi-fake-fake", false);
 
     // Then nothing is left for the scheduler to dispatch to
-    expect(pool.freeSlots()).toEqual([]);
+    expect(await pool.freeSlots()).toEqual([]);
   });
 
   test("enabling an agent puts its slots back in the free list", async () => {
@@ -67,9 +81,103 @@ describe("Feature: the pool of agent slots", () => {
     await pool.setAgentEnabled("pi-fake-fake", true);
 
     // Then its slot is dispatchable once more
-    expect(pool.freeSlots().map((slot) => slot.name)).toEqual([
+    expect((await pool.freeSlots()).map((slot) => slot.name)).toEqual([
       "pi-fake-fake-1",
     ]);
+  });
+
+  test("a slot whose agent asks for no health check is offered unasked", async () => {
+    // Given a pool whose only agent leaves healthCheck off
+    const { pool, probed } = aPool([aSlot()], true, () => false);
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then the slot is offered and its provider was never reached for
+    expect(free.map((slot) => slot.name)).toEqual(["pi-fake-fake-1"]);
+    expect(probed).toEqual([]);
+  });
+
+  test("a slot whose provider answers its health check is offered", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given the provider behind it answers
+    const { pool } = aPool([aSlot({ healthCheck: true })], true, () => true);
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then the slot is dispatchable
+    expect(free.map((slot) => slot.name)).toEqual(["pi-fake-fake-1"]);
+  });
+
+  test("a slot whose provider fails its health check is held back", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given the provider behind it does not answer
+    const { pool, log } = aPool(
+      [aSlot({ healthCheck: true })],
+      true,
+      () => false,
+    );
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then nothing is dispatched into a provider that is down, and the log says which one
+    expect(free).toEqual([]);
+    expect(log).toEqual([
+      "provider fake failed its health check: its slots are held back",
+    ]);
+  });
+
+  test("the provider behind several slots is asked once", async () => {
+    // Given a pool of three slots of one agent, all asking for a health check
+    const slots = [1, 2, 3].map((index) =>
+      aSlot({ name: `pi-fake-fake-${index}`, index, healthCheck: true }),
+    );
+    const { pool, probed } = aPool(slots);
+
+    // When the scheduler asks what is free
+    await pool.freeSlots();
+
+    // Then the provider was reached for once, not once per slot
+    expect(probed).toEqual(["fake"]);
+  });
+
+  test("a provider that stays down is named once, not once a tick", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given the provider behind it has already been found down
+    const { pool, log } = aPool(
+      [aSlot({ healthCheck: true })],
+      true,
+      () => false,
+    );
+    await pool.freeSlots();
+
+    // When the scheduler asks what is free again
+    await pool.freeSlots();
+
+    // Then the outage is still one line in the log
+    expect(log).toEqual([
+      "provider fake failed its health check: its slots are held back",
+    ]);
+  });
+
+  test("a provider that comes back is said to be dispatchable again", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given the provider behind it has already been found down
+    let up = false;
+    const { pool, log } = aPool([aSlot({ healthCheck: true })], true, () => up);
+    await pool.freeSlots();
+    up = true;
+
+    // When the scheduler asks what is free again
+    const free = await pool.freeSlots();
+
+    // Then the slot is offered once more and the log says the provider answered
+    expect(free.map((slot) => slot.name)).toEqual(["pi-fake-fake-1"]);
+    expect(at(log, 1)).toBe(
+      "provider fake answered its health check: its slots are dispatchable again",
+    );
   });
 
   test("an agent the pool never loaded cannot be toggled", () => {

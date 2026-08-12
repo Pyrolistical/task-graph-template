@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Dispatcher } from "../app/dispatcher.ts";
 import { Lander } from "../app/lander.ts";
 import { Pool } from "../app/pool.ts";
@@ -96,6 +97,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
   const agents = new PiAgents(
     runtime,
     slots,
+    await ModelRuntime.create(),
     repo,
     orchestratorDir,
     piCommand,

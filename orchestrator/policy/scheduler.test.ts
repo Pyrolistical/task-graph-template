@@ -69,6 +69,7 @@ describe("Feature: which task is dispatched next", () => {
     model: "m",
     index: 1,
     enabled: true,
+    healthCheck: false,
     write: ["~/.cache/zig"],
     roles: [...ALL_ROLES],
   });
