@@ -10,7 +10,7 @@ import type { Awaitable } from "./orchestrator/domain/awaitable.ts";
 import type { Manager } from "./orchestrator/app/manager.ts";
 import { Server } from "./orchestrator/app/server.ts";
 import { Paced } from "./orchestrator/adapters/paced.ts";
-import { Runtime } from "./orchestrator/adapters/runtime.ts";
+import { Runtime, defaultTasksDir } from "./orchestrator/adapters/runtime.ts";
 import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
 
 const TICK_MS = 500;
@@ -315,24 +315,18 @@ export async function boot(options: WiringOptions): Promise<Boot> {
 }
 
 function start(): Promise<Boot> {
+  const repo = process.cwd();
   return boot({
-    repo: process.cwd(),
-    tasksDir: !process.argv[2] ? undefined : path.resolve(process.argv[2]),
+    repo,
+    tasksDir: !process.argv[2]
+      ? defaultTasksDir(repo)
+      : path.resolve(process.argv[2]),
     serverRoot: process.env.TASK_GRAPH_SERVER_ROOT,
   });
 }
 
-async function main(): Promise<void> {
+async function main(log: (line: string) => void): Promise<void> {
   const startup = await start();
-  const runtime: Runtime = await Runtime.open(
-    process.cwd(),
-    process.env.TASK_GRAPH_SERVER_ROOT,
-  );
-  const log = (line: string) => {
-    void runtime.log(line).catch((err: unknown) => {
-      console.error(`log failed: ${messageOf(err)}`);
-    });
-  };
 
   if (!startup.server) {
     log(startup.error ?? "the server failed to start");
@@ -368,13 +362,17 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
+  const runtime: Runtime = await Runtime.open(
+    process.cwd(),
+    process.env.TASK_GRAPH_SERVER_ROOT,
+  );
   try {
-    await main();
+    await main((line) => {
+      void runtime.log(line).catch((err: unknown) => {
+        console.error(`log failed: ${messageOf(err)}`);
+      });
+    });
   } catch (err) {
-    const runtime = await Runtime.open(
-      process.cwd(),
-      process.env.TASK_GRAPH_SERVER_ROOT,
-    );
     await runtime.log(`the server crashed: ${messageOf(err)}`);
     throw err;
   }

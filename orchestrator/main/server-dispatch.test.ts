@@ -53,7 +53,7 @@ import {
 
 describe("Feature: where a project's task graph is found", () => {
   testInTempDirs(
-    "with no tasks dir the server resolves ~/task-graph/<key> and seeds the graph",
+    "a tasks dir that is not there yet is seeded from the template",
     async () => {
       const fixture = await makeFixture();
       const root = await tempDir("task-graph-root-");
@@ -62,16 +62,16 @@ describe("Feature: where a project's task graph is found", () => {
         // Given a project that has never had a task graph
         const tasksDir = defaultTasksDir(fixture.repo);
 
-        // When a server is started against it with no task directory named
+        // When a server is started against it with a graph that is not there yet
         const server = await startServer({
           repo: fixture.repo,
+          tasksDir,
           serverRoot: fixture.serverRoot,
           piCommand: fixture.piCommand,
           base: "master",
         });
 
-        // Then it resolves the graph from the project's path and seeds it
-        expect(server.config.tasksDir).toBe(tasksDir);
+        // Then it seeds the graph and takes its overrides from there
         expect(server.config.promptDirs.overrides).toBe(
           path.join(tasksDir, "prompts"),
         );

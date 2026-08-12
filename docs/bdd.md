@@ -4128,11 +4128,11 @@ tests, not this file. How one is written is [Behaviour tests](bdd-tests.md).
 
 ### Feature: where a project's task graph is found
 
-#### with no tasks dir the server resolves ~/task-graph/<key> and seeds the graph
+#### a tasks dir that is not there yet is seeded from the template
 
 - **Given** a project that has never had a task graph
-- **When** a server is started against it with no task directory named
-- **Then** it resolves the graph from the project's path and seeds it
+- **When** a server is started against it with a graph that is not there yet
+- **Then** it seeds the graph and takes its overrides from there
 
 #### with no base named the server lands work on the branch the repo is on
 

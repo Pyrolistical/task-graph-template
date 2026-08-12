@@ -12,15 +12,12 @@ import { Queue } from "../domain/queue.ts";
 import { branchName } from "../domain/workspace.ts";
 import { loadAgents } from "../adapters/agent-pool.ts";
 import { CommandFile } from "../adapters/command.ts";
+import { exists } from "../adapters/files.ts";
 import * as git from "../adapters/git.ts";
 import { GitWorkspaces } from "../adapters/git-workspaces.ts";
 import { PiAgents } from "../adapters/pi-agents.ts";
 import { PromptFiles } from "../adapters/prompt-files.ts";
-import {
-  Runtime,
-  defaultAgentsPath,
-  defaultTasksDir,
-} from "../adapters/runtime.ts";
+import { Runtime, defaultAgentsPath } from "../adapters/runtime.ts";
 import {
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
@@ -38,8 +35,8 @@ const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
 
 export interface WiringOptions {
   repo: string;
+  tasksDir: string;
   agentsPath?: string;
-  tasksDir?: string;
   orchestratorDir?: string;
   overridesDir?: string;
   serverRoot?: string;
@@ -54,11 +51,10 @@ export async function wire(options: WiringOptions): Promise<Server> {
     throw new Error(`${repo} is not a git repository`);
   }
 
-  const tasksDir = options.tasksDir ?? defaultTasksDir(repo);
-  if (!options.tasksDir) {
+  const tasksDir = options.tasksDir;
+  if (!(await exists(tasksDir))) {
     await fs.cp(path.join(ORCHESTRATOR_DIR, "..", "tasks"), tasksDir, {
       recursive: true,
-      force: false,
     });
   }
 
