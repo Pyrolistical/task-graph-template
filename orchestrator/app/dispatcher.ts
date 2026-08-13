@@ -21,6 +21,8 @@ import { branchName } from "../domain/workspace.ts";
 import { type Candidate, schedule } from "../policy/scheduler.ts";
 
 export class Dispatcher {
+  private scheduling = false;
+
   constructor(
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
@@ -31,7 +33,22 @@ export class Dispatcher {
     private readonly paths: Paths,
     private readonly publisher: Publisher,
     private readonly base: string,
+    private readonly agentsPath: string,
   ) {}
+
+  get enabled(): boolean {
+    return this.scheduling;
+  }
+
+  async setEnabled(enabled: boolean): Promise<void> {
+    if (enabled && this.pool.slots.length === 0) {
+      throw new Error(
+        `no agents to dispatch to; add one to ${this.agentsPath}`,
+      );
+    }
+    this.scheduling = enabled;
+    await this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
+  }
 
   async resumable(tasks: Map<TaskId, TaskMeta>): Promise<Set<TaskId>> {
     const ids = new Set<TaskId>();
@@ -50,6 +67,10 @@ export class Dispatcher {
   }
 
   async run({ tasks, blocking }: Snapshot): Promise<void> {
+    if (!this.scheduling) {
+      return;
+    }
+
     for (const { candidate, slot } of schedule(
       tasks,
       await this.resumable(tasks),

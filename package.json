@@ -9,6 +9,7 @@
   "scripts": {
     "test": "bun test",
     "bdd": "bun orchestrator/testing/bdd-doc.ts",
+    "import-graph": "bun orchestrator/testing/import-graph.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint --fix ."
   },

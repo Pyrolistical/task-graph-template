@@ -17,6 +17,7 @@ import {
 import type { Cost } from "../domain/costs.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import {
+  type EntryName,
   type TaskState,
   type TransitionArgs,
   type TransitionName,
@@ -62,8 +63,9 @@ export class TaskGraph {
     return this.edits.settled();
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.edits.close();
+    await this.transitions.close();
   }
 
   takeLock(): Awaitable<void> {
@@ -129,7 +131,35 @@ export class TaskGraph {
   }
 
   create(title: string): Promise<CreatedTask> {
-    return this.edit(() => this.tasks.create(title));
+    return this.edit(async () => {
+      const created = await this.tasks.create(title);
+      await this.transitions.append({
+        task_id: created.id,
+        transition: "create",
+        from: "NEW",
+        to: "NEW",
+        by: "manager",
+      });
+      return created;
+    });
+  }
+
+  async enter(taskId: TaskId, name: EntryName): Promise<TransitionResult> {
+    const tasks = await this.list();
+    if (detectCycles(tasks).includes(taskId)) {
+      throw new Error(
+        `task "${taskId}" is part of a dependency cycle through ${tasks.get(taskId)?.depends_on.join(", ")}; it could never unblock`,
+      );
+    }
+    return this.transition(taskId, name, {}, "manager");
+  }
+
+  hold(taskId: TaskId, reason: string): Promise<TransitionResult> {
+    return this.transition(taskId, "hold", { reason }, "manager");
+  }
+
+  resume(taskId: TaskId): Promise<TransitionResult> {
+    return this.transition(taskId, "resume", {}, "manager");
   }
 
   writeBody(taskId: TaskId, body: string): Promise<string> {

@@ -37,10 +37,10 @@ describe("Feature: the views the console and the manager read", () => {
     async () => {
       // Given a pool of two slots the scheduler has dispatched nothing to
       const fixture = await makeFixture(2);
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the views are published
-      await server.writeViews();
+      await app.views.write();
 
       // Then every slot is a row, so the console shows the whole pool
       const view = await readView(fixture.runtime);
@@ -49,7 +49,7 @@ describe("Feature: the views the console and the manager read", () => {
       expect(at(view.slots, 0).task_id).toBeUndefined();
       expect(at(view.slots, 1).name).toBe("pi-fake-fake-2");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -62,13 +62,13 @@ describe("Feature: the views the console and the manager read", () => {
       await setPlan(fixture, { [id]: { WORK: [{ notes: "still going" }] } });
 
       // Given a task the scheduler is about to dispatch
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the agent is dispatched and the views are published
-      await server.tick();
+      await app.server.tick();
 
       // Then its row names the task, the role, the process and what it is doing
       const view = await readView(fixture.runtime);
@@ -82,8 +82,8 @@ describe("Feature: the views the console and the manager read", () => {
       expect(busy.role).toBe("worker");
       expect(busy.pid).toBeGreaterThan(0);
 
-      await server.drain();
-      await server.shutdown();
+      await app.server.drain();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -95,26 +95,26 @@ describe("Feature: the views the console and the manager read", () => {
       await readyTask(fixture, "Do a thing");
 
       // Given a server with a task in its graph
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the views are published
-      await server.writeViews();
+      await app.views.write();
 
       // Then every one of them is stamped with the same cursor
       const seqs = [];
       for (const file of [
-        pathsOf(server).slotsView,
-        pathsOf(server).checksView,
-        pathsOf(server).tasksView,
-        pathsOf(server).inboxView,
+        pathsOf(app).slotsView,
+        pathsOf(app).checksView,
+        pathsOf(app).tasksView,
+        pathsOf(app).inboxView,
       ]) {
         seqs.push(JSON.parse(await fs.readFile(file, "utf-8")).seq);
       }
 
       expect(new Set(seqs).size).toBe(1);
-      expect(seqs[0]).toBe((await transitionsOf(server)).cursor);
+      expect(seqs[0]).toBe((await transitionsOf(app)).cursor);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -134,9 +134,9 @@ describe("Feature: the views the console and the manager read", () => {
       await applyTransition(fixture.tasksDir, held, "resume", {});
 
       // Given a task another task waits on, held on something only a person can fix
-      const server = await serverFor(fixture);
-      await server.claim(dep, { slotName: "a", pid: process.pid });
-      await server.transition(
+      const app = await serverFor(fixture);
+      await app.graph.claim(dep, { slotName: "a", pid: process.pid });
+      await app.graph.transition(
         dep,
         "hold",
         { reason: "waiting on a person" },
@@ -144,7 +144,7 @@ describe("Feature: the views the console and the manager read", () => {
       );
 
       // When the views are published
-      await server.writeViews();
+      await app.views.write();
 
       // Then its row says how much it blocks and what it is waiting on
       const view = await readView(fixture.runtime);
@@ -156,7 +156,7 @@ describe("Feature: the views the console and the manager read", () => {
       expect(row.held_reason).toBe("waiting on a person");
       expect(row.state).toBe("HELD_WORK");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -178,10 +178,10 @@ describe("Feature: the queue view", () => {
       await applyTransition(fixture.tasksDir, second, "resume", {});
 
       // Given one queued task and one blocked behind it
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the views are published with the scheduler paused
-      await server.writeViews();
+      await app.views.write();
 
       // Then the queue holds only what could be dispatched, with its own rank
       const view = await readView(fixture.runtime);
@@ -192,11 +192,11 @@ describe("Feature: the queue view", () => {
       expect(at(view.queue, 0).blocking).toBe(1);
 
       // Then the switch in the view follows the scheduler it draws
-      await server.setSchedulerEnabled(true);
-      await server.writeViews();
+      await app.dispatcher.setEnabled(true);
+      await app.views.write();
       expect((await readView(fixture.runtime)).scheduling).toBe(true);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -215,17 +215,17 @@ describe("Feature: a pool with no agents in it", () => {
       // Given a server whose pool file declares no agents
       const fixture = await emptyPoolFixture();
       const id = await readyTask(fixture, "Do a thing");
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the views are published
-      await server.writeViews();
+      await app.views.write();
 
       // Then the task is queued, waiting for an agent to be added
       const view = await readView(fixture.runtime);
       expect(view.queue.map((one) => one.task_id)).toEqual([id]);
       expect(view.slots).toEqual([]);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -235,18 +235,18 @@ describe("Feature: a pool with no agents in it", () => {
     async () => {
       // Given a server whose pool file declares no agents
       const fixture = await emptyPoolFixture();
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the views are published
-      await server.writeViews();
+      await app.views.write();
 
       // Then the slots view carries the path of that file
       expect(
-        JSON.parse(await fs.readFile(pathsOf(server).slotsView, "utf-8"))
+        JSON.parse(await fs.readFile(pathsOf(app).slotsView, "utf-8"))
           .agents_file,
       ).toBe(fixture.agentsPath);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -263,13 +263,13 @@ describe("Feature: what the slots view says about a running agent", () => {
       });
 
       // Given a task the scheduler is about to dispatch
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the agent is dispatched and the views are published
-      await server.tick();
+      await app.server.tick();
 
       // Then the console can show how much context is left and where to read it
       const view = await readView(fixture.runtime);
@@ -283,7 +283,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       expect(busy.cost).toBe(0.45);
       expect(busy.session).toContain("session/worker");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -300,21 +300,18 @@ describe("Feature: what the slots view says about a running agent", () => {
       });
 
       // Given an agent that will compact part way through its turn
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When it is dispatched and runs until it compacts
-      await ticksUntil(
-        server,
-        async () => (await compactionsOf(server, id)) === 1,
-      );
+      await ticksUntil(app, async () => (await compactionsOf(app, id)) === 1);
 
       // Then the console can see how often it has compacted on this task
-      expect(await compactionsOf(server, id)).toBe(1);
+      expect(await compactionsOf(app, id)).toBe(1);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -338,16 +335,16 @@ describe("Feature: what the slots view says about a running agent", () => {
       });
 
       // Given work that has been reviewed and is waiting on the manager
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
 
       // When the manager merges it
-      await server.submit(id);
+      await app.lander.merge(id);
 
       // Then the closed task is still shown, so the manager sees what just landed
-      await server.writeViews();
+      await app.views.write();
       const view = await readView(fixture.runtime);
       const row = present(
         view.tasks.find((task) => task.id === id),
@@ -357,7 +354,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       expect(row.title).toBe("A task");
       expect(row.claimed_by).toBeUndefined();
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -383,13 +380,13 @@ describe("Feature: the log of every transition applied", () => {
       });
 
       // Given a task worked on, checked and reviewed
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When it runs to the manager
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then every transition is one numbered line, in the order it happened
-      const entries = await (await transitionsOf(server)).read();
+      const entries = await (await transitionsOf(app)).read();
       expect(entries.map((e) => e.seq)).toEqual(entries.map((_, i) => i + 1));
 
       // Then each line says where the task came from, went to, and who moved it
@@ -402,7 +399,7 @@ describe("Feature: the log of every transition applied", () => {
       expect(submit.by).toBe("pi-fake-fake-1");
       expect(entries.some((e) => e.by === "server")).toBe(true);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -414,32 +411,32 @@ describe("Feature: commands the console writes for the server", () => {
     async () => {
       // Given a running server watching for console commands
       const fixture = await makeFixture();
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the console writes the first of the three commands
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "scheduler",
         enabled: true,
       });
 
       // Then each is applied and the file is consumed rather than reapplied
-      await ticksUntil(server, () => server.schedulerEnabled);
-      expect(await fs.exists(pathsOf(server).consoleCommand)).toBe(false);
+      await ticksUntil(app, () => app.dispatcher.enabled);
+      expect(await fs.exists(pathsOf(app).consoleCommand)).toBe(false);
 
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "agent",
         agent: "pi-fake-fake",
         enabled: false,
       });
-      await ticksUntil(server, () => !at(server.slotRows(), 0).enabled);
+      await ticksUntil(app, () => !at(app.pool.rows(), 0).enabled);
 
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "scheduler",
         enabled: false,
       });
-      await ticksUntil(server, () => !server.schedulerEnabled);
+      await ticksUntil(app, () => !app.dispatcher.enabled);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -450,7 +447,7 @@ describe("Feature: commands the console writes for the server", () => {
       // Given a command written while no server was listening
       const fixture = await makeFixture();
       const first = await serverFor(fixture);
-      await first.shutdown();
+      await first.server.shutdown();
       await writeCommand(pathsOf(first), {
         command: "scheduler",
         enabled: true,
@@ -460,10 +457,10 @@ describe("Feature: commands the console writes for the server", () => {
       const second = await serverFor(fixture);
 
       // Then it applies the waiting command and consumes it
-      expect(second.schedulerEnabled).toBe(true);
+      expect(second.dispatcher.enabled).toBe(true);
       expect(await fs.exists(pathsOf(second).consoleCommand)).toBe(false);
 
-      await second.shutdown();
+      await second.server.shutdown();
     },
     30000,
   );
@@ -473,27 +470,27 @@ describe("Feature: commands the console writes for the server", () => {
     async () => {
       // Given a running server watching for console commands
       const fixture = await makeFixture();
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the console names an agent that is not in the pool
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "agent",
         agent: "pi-nobody-nothing",
         enabled: false,
       });
 
       // Then the refusal is logged and the server carries on running
-      await ticksUntil(server, async () =>
-        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+      await ticksUntil(app, async () =>
+        (await fs.readFile(pathsOf(app).serverLog, "utf-8")).includes(
           "refused",
         ),
       );
-      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+      expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
         "no agent named",
       );
-      expect(at(server.slotRows(), 0).enabled).toBe(true);
+      expect(at(app.pool.rows(), 0).enabled).toBe(true);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -518,20 +515,20 @@ describe("Feature: turning an agent off and on", () => {
       await setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
 
       // Given a queued task and a pool whose only agent is turned off
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the scheduler runs over the graph
-      await settle(server);
+      await settle(app);
 
       // Then nothing is dispatched, and the console says why
-      expect(await stateOf(server, id)).toBe("WORK");
-      expect(at(server.slotRows(), 0).state).toBe("DISABLED");
-      expect(at(server.slotRows(), 0).enabled).toBe(false);
+      expect(await stateOf(app, id)).toBe("WORK");
+      expect(at(app.pool.rows(), 0).state).toBe("DISABLED");
+      expect(at(app.pool.rows(), 0).enabled).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -546,23 +543,23 @@ describe("Feature: turning an agent off and on", () => {
       ]);
 
       // Given a pool of two agents, one of them with three slots
-      const server = await serverFor(fixture);
-      expect(server.slotRows().every((row) => row.enabled)).toBe(true);
+      const app = await serverFor(fixture);
+      expect(app.pool.rows().every((row) => row.enabled)).toBe(true);
 
       // When one of them is disabled
-      const rows = await server.setAgentEnabled("pi-fake-fake", false);
+      const rows = await app.pool.setAgentEnabled("pi-fake-fake", false);
 
       // Then every slot of that agent is disabled, and the other agent is not
       expect(rows).toHaveLength(3);
       expect(rows.every((row) => row.state === "DISABLED")).toBe(true);
 
-      const untouched = server
-        .slotRows()
+      const untouched = app.pool
+        .rows()
         .filter((row) => row.agent === "pi-other-other");
       expect(untouched).toHaveLength(1);
       expect(at(untouched, 0).state).toBe("IDLE");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -586,19 +583,19 @@ describe("Feature: turning an agent off and on", () => {
       });
 
       // Given a queued task and an agent that has been disabled
-      const server = await serverFor(fixture);
-      await server.setAgentEnabled("pi-fake-fake", false);
-      await server.setSchedulerEnabled(true);
-      await settle(server);
-      expect(await stateOf(server, id)).toBe("WORK");
+      const app = await serverFor(fixture);
+      await app.pool.setAgentEnabled("pi-fake-fake", false);
+      await app.dispatcher.setEnabled(true);
+      await settle(app);
+      expect(await stateOf(app, id)).toBe("WORK");
 
       // When the agent is enabled again
-      await server.setAgentEnabled("pi-fake-fake", true);
+      await app.pool.setAgentEnabled("pi-fake-fake", true);
 
       // Then the task it could not take is dispatched and worked to the manager
-      await reaches(server, id, "MANAGER_REVIEW");
+      await reaches(app, id, "MANAGER_REVIEW");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -622,13 +619,13 @@ describe("Feature: turning an agent off and on", () => {
       });
 
       // Given an agent part way through a task
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await server.tick();
-      expect(await stateOf(server, id)).toBe("WORK");
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await app.server.tick();
+      expect(await stateOf(app, id)).toBe("WORK");
 
       // When its agent is disabled
-      const disabled = await server.setAgentEnabled("pi-fake-fake", false);
+      const disabled = await app.pool.setAgentEnabled("pi-fake-fake", false);
 
       // Then the slot keeps its task, showing as running under a disabled agent
       const row = at(disabled, 0);
@@ -637,13 +634,13 @@ describe("Feature: turning an agent off and on", () => {
       expect(row.task_id).toBe(id);
 
       // Then it finishes the work before the slot is taken out of the pool
-      await server.drain();
-      await settle(server);
-      expect(at(server.slotRows(), 0).state).toBe("DISABLED");
-      expect(at(server.slotRows(), 0).task_id).toBeUndefined();
-      expect(await stateOf(server, id)).toBe("WORK_REVIEW");
+      await app.server.drain();
+      await settle(app);
+      expect(at(app.pool.rows(), 0).state).toBe("DISABLED");
+      expect(at(app.pool.rows(), 0).task_id).toBeUndefined();
+      expect(await stateOf(app, id)).toBe("WORK_REVIEW");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -669,30 +666,26 @@ describe("Feature: aborting the command an agent is running", () => {
       });
 
       // Given an agent stuck inside a long-running command
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await server.tick();
-      const row = at(server.slotRows(), 0);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await app.server.tick();
+      const row = at(app.pool.rows(), 0);
       expect(row.state).toBe("BUSY");
       expect(row.activity.kind).toBe("tool-call");
 
       // When the manager aborts that command
-      await server.abortSlot(row.name);
+      await app.pool.abortSlot(row.name);
 
       // Then the command is killed and the agent finishes its turn from there
-      await server.setSchedulerEnabled(false);
-      await server.drain();
-      await until(
-        server,
-        async () => (await stateOf(server, id)) !== "WORK",
-        20,
-      );
-      expect(await stateOf(server, id)).not.toBe("WORK");
-      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+      await app.dispatcher.setEnabled(false);
+      await app.server.drain();
+      await until(app, async () => (await stateOf(app, id)) !== "WORK", 20);
+      expect(await stateOf(app, id)).not.toBe("WORK");
+      expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
         "aborted bash: git status",
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -716,35 +709,31 @@ describe("Feature: aborting the command an agent is running", () => {
       });
 
       // Given an agent stuck inside a long-running command
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await server.tick();
-      expect(await stateOf(server, id)).toBe("WORK");
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await app.server.tick();
+      expect(await stateOf(app, id)).toBe("WORK");
 
       // When the console writes an abort for that slot
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "slot_abort",
         slot: "pi-fake-fake-1",
       });
 
       // Then the command is killed, exactly as the manager's own abort would
-      await ticksUntil(server, async () =>
-        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+      await ticksUntil(app, async () =>
+        (await fs.readFile(pathsOf(app).serverLog, "utf-8")).includes(
           "aborted bash",
         ),
       );
-      await server.setSchedulerEnabled(false);
-      await server.drain();
-      await until(
-        server,
-        async () => (await stateOf(server, id)) !== "WORK",
-        20,
-      );
-      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+      await app.dispatcher.setEnabled(false);
+      await app.server.drain();
+      await until(app, async () => (await stateOf(app, id)) !== "WORK", 20);
+      expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
         "aborted bash: git status",
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -754,25 +743,25 @@ describe("Feature: aborting the command an agent is running", () => {
     async () => {
       // Given a slot the scheduler has dispatched nothing to
       const fixture = await makeFixture();
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the console writes an abort for that slot
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "slot_abort",
         slot: "pi-fake-fake-1",
       });
 
       // Then the refusal is logged and the server carries on running
-      await ticksUntil(server, async () =>
-        (await fs.readFile(pathsOf(server).serverLog, "utf-8")).includes(
+      await ticksUntil(app, async () =>
+        (await fs.readFile(pathsOf(app).serverLog, "utf-8")).includes(
           "refused",
         ),
       );
-      expect(await fs.readFile(pathsOf(server).serverLog, "utf-8")).toContain(
+      expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
         "not running",
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -784,30 +773,30 @@ describe("Feature: a manager that exits while its agents run on", () => {
     async () => {
       // Given a running server that has applied a console command already
       const fixture = await makeFixture();
-      const server = await serverFor(fixture);
-      await writeCommand(pathsOf(server), {
+      const app = await serverFor(fixture);
+      await writeCommand(pathsOf(app), {
         command: "scheduler",
         enabled: true,
       });
-      await ticksUntil(server, () => server.schedulerEnabled);
-      expect(server.schedulerEnabled).toBe(true);
+      await ticksUntil(app, () => app.dispatcher.enabled);
+      expect(app.dispatcher.enabled).toBe(true);
 
       // When the manager detaches from it
-      await server.detach();
+      await app.server.detach();
 
       // Then a command written afterwards is neither consumed nor applied
-      await writeCommand(pathsOf(server), {
+      await writeCommand(pathsOf(app), {
         command: "scheduler",
         enabled: false,
       });
       await Bun.sleep(200);
-      expect(await fs.exists(pathsOf(server).consoleCommand)).toBe(true);
-      expect(server.schedulerEnabled).toBe(true);
+      expect(await fs.exists(pathsOf(app).consoleCommand)).toBe(true);
+      expect(app.dispatcher.enabled).toBe(true);
 
       // Then the views it published are left on disk for the next manager
-      expect(await fs.exists(pathsOf(server).slotsView)).toBe(true);
+      expect(await fs.exists(pathsOf(app).slotsView)).toBe(true);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -848,7 +837,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       const second = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await second.setSchedulerEnabled(true);
+      await second.dispatcher.setEnabled(true);
 
       // When a new server starts and ticks with the scheduler on
       await settle(second, 1);
@@ -860,7 +849,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
       expect(await stateOf(second, id)).toBe("WORK");
 
       alive.kill();
-      await second.shutdown();
+      await second.server.shutdown();
     },
     30000,
   );

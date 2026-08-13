@@ -26,6 +26,7 @@ Invariants everything else rests on:
 | [ASSIGNMENT.md](assignment.md)            | the agent interface                                    |
 | [MCP surface](mcp.md)                     | tools, resources, startup failure                      |
 | [Layers](architecture.md)                 | domain · policy · app · adapters · main, and the ports |
+| [Import graph](import-graph.md)           | every value import between modules, generated          |
 | [Runtime directory](runtime-directory.md) | views, transition log, retention                       |
 | [Server](server.md)                       | startup, tick order, pause, detach                     |
 | [Scheduler](scheduler.md)                 | dispatch order, slot choice, inbox order               |

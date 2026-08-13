@@ -14,6 +14,8 @@ Tools, beyond what their names say ([who may call what](authority.md)):
 
 Resources: the five [views](runtime-directory.md#the-views) served as they sit on disk, plus `paths`, `workspace_path` for file watchers, and `error`.
 
+Each tool is one call on the module that owns the state — the graph, the lander, the pool, the dispatcher — followed by a view write, so what the manager reads next is what its call just did. There is no application interface in between restating those verbs ([Structure](architecture.md#structure)).
+
 ## When the server cannot start
 
 A startup crash would be a crash loop — the client restarts it, it reads the same broken config, it dies again. So it does not die: a failure while wiring or starting is caught and kept, the process still serves the tool surface, and every tool and other resource returns that message instead of the connection dropping. `error` is where the manager reads it, and where later failures (a tick, publishing views) show up — a running server that hits one refuses its tools and views the same way until [a tick comes round cleanly](server.md#when-a-tick-fails). If serving `error` is itself what crashes, the process dies with the reason in `server.log`.

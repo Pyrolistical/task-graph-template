@@ -22,9 +22,68 @@ The pipeline is mostly **decisions**: what to dispatch, what a settled turn mean
 
 ## Structure
 
-`app/server.ts` holds the lifecycle and ticks the modules in order; `main/compose.ts` constructs them in dependency order and hands each port to the module that names it — no dependency bag. `dispatcher` → `settler` → `pool`/`task-graph`; `lander` → `checker`; nothing points back.
+```mermaid
+flowchart TB
+  subgraph procs["main/ — the two processes"]
+    mcpTs["mcp.ts<br/>tools · resources"]
+    consoleTs["console.ts<br/>reader"]
+  end
 
-`app/manager.ts` declares what a protocol adapter may ask of the application, so `mcp.ts` holds a `Manager` and cannot reach a store, a path or a prompt through it. Every adapter is a class declaring `implements`, so it is checked where it is written.
+  subgraph life["app/ — the lifecycle"]
+    server["server<br/>start · tick · drain · shutdown"]
+  end
+
+  subgraph ticked["app/ — the modules a tick drives, in order"]
+    direction LR
+    recovery["recovery<br/>reap · reattach"]
+    checker["checker<br/>run the checks"]
+    settler["settler<br/>apply a settled turn"]
+    dispatcher["dispatcher<br/>who runs next"]
+  end
+
+  subgraph held["app/ — what holds state"]
+    taskGraph["task-graph<br/>every edit, one at a time"]
+    pool["pool<br/>the slots"]
+    lander["lander<br/>rebase · recheck · merge"]
+    views["views<br/>publish · report"]
+    health["health<br/>last failure"]
+  end
+
+  mcpTs -->|task verbs| taskGraph
+  mcpTs -->|submit · abort| lander
+  mcpTs -->|agents · slots| pool
+  mcpTs -->|scheduler| dispatcher
+  mcpTs -->|read · write| views
+  mcpTs -->|refuse while set| health
+  mcpTs -->|reload prompts| server
+  consoleTs -.->|reads the files| views
+
+  server --> recovery
+  server --> checker
+  server --> settler
+  server --> dispatcher
+  server --> views
+  server --> health
+
+  dispatcher --> settler
+  settler --> pool
+  settler --> taskGraph
+  dispatcher --> pool
+  dispatcher --> taskGraph
+  checker --> taskGraph
+  recovery --> pool
+  recovery --> taskGraph
+  lander --> checker
+  lander --> taskGraph
+  views --> taskGraph
+  views --> pool
+```
+
+`main/compose.ts` constructs them in dependency order and hands each port to the module that names it — no dependency bag. It returns the modules as an `App`, which is what `mcp.ts` holds: there is no interface restating the application for the protocol to talk through, so a verb is added to the module that owns the state and nowhere else. Every adapter is a class declaring `implements`, so it is checked where it is written.
+
+`app/server.ts` owns only what a process owns — the locks, the tick order, the console channel, the shutdown — and nothing in `app/` imports it back. The scheduler's on switch lives on the `dispatcher` it gates, the failure on `health`, the five view files on `views`.
+
+[The import graph](import-graph.md) is the same picture drawn from the modules themselves, generated rather than kept by hand.
 
 ## What the layers are not
 

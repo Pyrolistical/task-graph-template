@@ -8,8 +8,7 @@ import { isValidId } from "./orchestrator/domain/task.ts";
 import type { EntryName } from "./orchestrator/domain/state-machine.ts";
 import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
 import type { Awaitable } from "./orchestrator/domain/awaitable.ts";
-import type { Manager } from "./orchestrator/app/manager.ts";
-import { Server } from "./orchestrator/app/server.ts";
+import type { App } from "./orchestrator/main/compose.ts";
 import { Paced } from "./orchestrator/adapters/paced.ts";
 import { Runtime, defaultTasksDir } from "./orchestrator/adapters/runtime.ts";
 import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
@@ -17,7 +16,7 @@ import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
 const TICK_MS = 500;
 
 export interface Startup {
-  server?: Manager;
+  app?: App;
   error?: string;
 }
 
@@ -39,29 +38,27 @@ export function build(startup: Startup): McpServer {
     { capabilities: { tools: {}, resources: {} } },
   );
 
-  function started(): Manager {
-    if (!startup.server) {
+  function started(): App {
+    if (!startup.app) {
       throw new Error(
         startup.error ?? "the server did not start, and said nothing about why",
       );
     }
-    return startup.server;
+    return startup.app;
   }
 
-  function live(): Manager {
-    const manager = started();
-    if (manager.lastError) {
-      throw new Error(manager.lastError);
+  function live(): App {
+    const app = started();
+    if (app.health.lastError) {
+      throw new Error(app.health.lastError);
     }
-    return manager;
+    return app;
   }
 
-  async function applied<T>(
-    work: (manager: Manager) => Promise<T>,
-  ): Promise<T> {
-    const manager = live();
-    const value = await work(manager);
-    await manager.writeViews();
+  async function applied<T>(work: (app: App) => Promise<T>): Promise<T> {
+    const app = live();
+    const value = await work(app);
+    await app.views.write();
     return value;
   }
 
@@ -72,8 +69,7 @@ export function build(startup: Startup): McpServer {
         "Create a new task and return the path of its document. The document is yours to edit directly until it leaves NEW.",
       inputSchema: z.object({ title: z.string().min(1) }),
     },
-    async ({ title }) =>
-      json(await applied((manager) => manager.createTask(title))),
+    async ({ title }) => json(await applied((app) => app.graph.create(title))),
   );
 
   mcp.registerTool(
@@ -85,7 +81,7 @@ export function build(startup: Startup): McpServer {
     },
     async ({ id, body }) =>
       json({
-        filePath: await applied((manager) => manager.writeBody(id, body)),
+        filePath: await applied((app) => app.graph.writeBody(id, body)),
       }),
   );
 
@@ -96,7 +92,7 @@ export function build(startup: Startup): McpServer {
         "Close a task from MANAGER_REVIEW: the work is landed first (rebase, recheck, fast-forward), then the task closes.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => json(await applied((manager) => manager.submit(id))),
+    async ({ id }) => json(await applied((app) => app.lander.merge(id))),
   );
 
   function entry(tool: string, name: EntryName, description: string) {
@@ -106,8 +102,7 @@ export function build(startup: Startup): McpServer {
         description: `${description} Dependencies still open park it in that phase's blocked state instead, and it enters the phase when they are gone.`,
         inputSchema: z.object({ id: taskId }),
       },
-      async ({ id }) =>
-        json(await applied((manager) => manager.enter(id, name))),
+      async ({ id }) => json(await applied((app) => app.graph.enter(id, name))),
     );
   }
 
@@ -140,9 +135,7 @@ export function build(startup: Startup): McpServer {
       }),
     },
     async ({ id, findings }) =>
-      json(
-        await applied((manager) => manager.feedback(id, findings, "manager")),
-      ),
+      json(await applied((app) => app.graph.feedback(id, findings, "manager"))),
   );
 
   mcp.registerTool(
@@ -152,7 +145,7 @@ export function build(startup: Startup): McpServer {
         "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in that phase's blocked state instead, and the last dependency to close releases it into the phase.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => json(await applied((manager) => manager.resume(id))),
+    async ({ id }) => json(await applied((app) => app.graph.resume(id))),
   );
 
   mcp.registerTool(
@@ -163,7 +156,7 @@ export function build(startup: Startup): McpServer {
       inputSchema: z.object({ id: taskId, reason: z.string().min(1) }),
     },
     async ({ id, reason }) =>
-      json(await applied((manager) => manager.hold(id, reason))),
+      json(await applied((app) => app.graph.hold(id, reason))),
   );
 
   mcp.registerTool(
@@ -173,14 +166,14 @@ export function build(startup: Startup): McpServer {
         "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
       inputSchema: z.object({ id: taskId }),
     },
-    async ({ id }) => json(await applied((manager) => manager.abort(id))),
+    async ({ id }) => json(await applied((app) => app.lander.abort(id))),
   );
 
   mcp.registerTool(
     "enable_scheduler",
     { description: "Begin dispatching queued work. Returns immediately." },
     async () => {
-      await applied((manager) => manager.setSchedulerEnabled(true));
+      await applied((app) => app.dispatcher.setEnabled(true));
       return text("the scheduler is dispatching");
     },
   );
@@ -192,7 +185,7 @@ export function build(startup: Startup): McpServer {
         "Start nothing new. Run processes are still settled and their slots still released.",
     },
     async () => {
-      await applied((manager) => manager.setSchedulerEnabled(false));
+      await applied((app) => app.dispatcher.setEnabled(false));
       return text("the scheduler is paused; running work still settles");
     },
   );
@@ -204,7 +197,7 @@ export function build(startup: Startup): McpServer {
         "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
       inputSchema: z.object({}),
     },
-    async () => json(await applied((manager) => manager.reloadPrompts())),
+    async () => json(await applied((app) => app.server.reloadPrompts())),
   );
 
   mcp.registerTool(
@@ -215,7 +208,7 @@ export function build(startup: Startup): McpServer {
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
     async ({ agent }) =>
-      json(await applied((manager) => manager.setAgentEnabled(agent, true))),
+      json(await applied((app) => app.pool.setAgentEnabled(agent, true))),
   );
 
   mcp.registerTool(
@@ -226,7 +219,7 @@ export function build(startup: Startup): McpServer {
       inputSchema: z.object({ agent: z.string().min(1) }),
     },
     async ({ agent }) =>
-      json(await applied((manager) => manager.setAgentEnabled(agent, false))),
+      json(await applied((app) => app.pool.setAgentEnabled(agent, false))),
   );
 
   mcp.registerTool(
@@ -236,8 +229,7 @@ export function build(startup: Startup): McpServer {
         "Kill the bash command a slot is running right now. Names a slot (with the trailing number), and is refused unless that slot is inside a bash tool call. The command dies, the turn does not: the agent reads the failed tool result and carries on, keeping its session, its claim and its slot.",
       inputSchema: z.object({ slot: z.string().min(1) }),
     },
-    async ({ slot }) =>
-      json(await applied((manager) => manager.abortSlot(slot))),
+    async ({ slot }) => json(await applied((app) => app.pool.abortSlot(slot))),
   );
 
   function resource(
@@ -258,7 +250,7 @@ export function build(startup: Startup): McpServer {
       `orchestrator://${name}`,
       description,
       "application/json",
-      () => live().view(name),
+      () => live().views.read(name),
     );
   }
 
@@ -288,7 +280,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () => JSON.stringify(started().pathReport(), undefined, 2),
+    () => JSON.stringify(started().views.report(), undefined, 2),
   );
 
   resource(
@@ -298,7 +290,7 @@ export function build(startup: Startup): McpServer {
     "application/json",
     () =>
       JSON.stringify(
-        { error: startup.error ?? startup.server?.lastError },
+        { error: startup.error ?? startup.app?.health.lastError },
         undefined,
         2,
       ),
@@ -309,28 +301,26 @@ export function build(startup: Startup): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => started().pathReport().runtime_root,
+    () => started().views.report().runtime_root,
   );
 
   return mcp;
 }
 
-export interface Boot extends Startup {
-  server?: Server;
-}
+export type Boot = Startup;
 
 export interface Ticking {
   done: Promise<void>;
   stop(): Promise<void>;
 }
 
-export function startTicking(server: Server): Ticking {
-  const ticker: Paced = new Paced(TICK_MS, server.pending);
+export function startTicking(app: App): Ticking {
+  const ticker: Paced = new Paced(TICK_MS, app.server.pending);
   const done = ticker.run(async () => {
     try {
-      await server.tick();
+      await app.server.tick();
     } catch (err) {
-      await server.fail(`tick failed: ${messageOf(err)}`);
+      await app.health.fail(`tick failed: ${messageOf(err)}`);
     }
   });
   return {
@@ -344,10 +334,12 @@ export function startTicking(server: Server): Ticking {
 
 export async function boot(options: WiringOptions): Promise<Boot> {
   try {
-    return { server: await (await wire(options)).start(), error: undefined };
+    const app = await wire(options);
+    await app.server.start();
+    return { app, error: undefined };
   } catch (err) {
     return {
-      server: undefined,
+      app: undefined,
       error: `the server failed to start: ${messageOf(err)}`,
     };
   }
@@ -370,7 +362,7 @@ async function main(runtime: Runtime): Promise<void> {
   };
   const startup = await start(runtime);
 
-  if (!startup.server) {
+  if (!startup.app) {
     log(startup.error ?? "the server failed to start");
     serveStdio(() => build(startup), {
       onerror: (err) => log(`mcp failed: ${err.message}`),
@@ -378,13 +370,13 @@ async function main(runtime: Runtime): Promise<void> {
     return;
   }
 
-  const server = startup.server;
-  const ticking = startTicking(server);
+  const app = startup.app;
+  const ticking = startTicking(app);
 
   const detach = async () => {
     try {
       await ticking.stop();
-      await server.detach();
+      await app.server.detach();
     } catch (err) {
       console.error(`the manager could not detach: ${messageOf(err)}`);
     }

@@ -1,6 +1,6 @@
 # The server
 
-One `bun` process, started by the manager over stdio, owning every mutation of the graph.
+One `bun` process, started by the manager over stdio, owning every mutation of the graph. `app/server.ts` is the lifecycle only: the locks, the tick, the console channel, detach and shutdown. What it used to front — the task verbs, the slots, the views, the scheduler switch — belongs to the modules it ticks ([Structure](architecture.md#structure)).
 
 ## Starting
 

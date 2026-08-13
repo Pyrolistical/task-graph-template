@@ -15,7 +15,7 @@ import {
   readyTask,
   setPlan,
 } from "../testing/fixture.ts";
-import { Server } from "../app/server.ts";
+import type { App } from "../main/compose.ts";
 import {
   dispatchOnce,
   transitionsOf,
@@ -53,22 +53,22 @@ describe("Feature: running a task's checks", () => {
       });
 
       // Given a task whose only check writes to stderr and fails
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the work is done and the check runs against it
-      await dispatchOnce(server);
+      await dispatchOnce(app);
 
       // Then the task goes back to work with the failure queued for the agent
-      const task = await taskOf(server, id);
+      const task = await taskOf(app, id);
       expect(task.state).toBe("WORK");
       const queued = await fs.readFile(
-        pathsOf(server).messageFile(id, "WORK"),
+        pathsOf(app).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("echo boom >&2; exit 3");
       expect(queued).toContain("boom");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -95,20 +95,20 @@ describe("Feature: running a task's checks", () => {
       });
 
       // Given a task with three checks, the first and last of which fail
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the work is done and the checks run against it
-      await dispatchOnce(server);
+      await dispatchOnce(app);
 
       // Then the agent is told about both failures, not only the first
       const queued = await fs.readFile(
-        pathsOf(server).messageFile(id, "WORK"),
+        pathsOf(app).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("(exit 1)");
       expect(queued).toContain("(exit 2)");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -132,15 +132,15 @@ describe("Feature: running a task's checks", () => {
       });
 
       // Given a task with two checks that both pass
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the work is done and the checks run against it
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // Then the task moves on to the agent review
-      await reaches(server, id, "WORK_REVIEW");
+      await reaches(app, id, "WORK_REVIEW");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -165,20 +165,20 @@ describe("Feature: running a task's checks", () => {
       });
 
       // Given a task whose check writes to its output
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the work is done and the check runs against it
-      await until(server, () => fs.exists(pathsOf(server).checkLog(id, 0)));
+      await until(app, () => fs.exists(pathsOf(app).checkLog(id, 0)));
 
       // Then the output is on disk in the task's own directory
       expect(
-        await fs.readFile(pathsOf(server).checkLog(id, 0), "utf-8"),
+        await fs.readFile(pathsOf(app).checkLog(id, 0), "utf-8"),
       ).toContain("written-to-the-log");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -209,26 +209,26 @@ describe("Feature: sending a task back to the agent that did it", () => {
       });
 
       // Given a task whose check failed once and whose session was kept
-      const server = await serverFor(fixture);
-      await dispatchOnce(server);
-      const afterFailure = await taskOf(server, id);
+      const app = await serverFor(fixture);
+      await dispatchOnce(app);
+      const afterFailure = await taskOf(app, id);
       expect(afterFailure.state).toBe("WORK");
       expect(requireWorkspace(afterFailure).session).not.toBeUndefined();
 
       // When the agent is dispatched again and finishes the work
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the assignment was never rotated, because the session was resumed
-      const history = await fs.readdir(pathsOf(server).history(id));
+      const history = await fs.readdir(pathsOf(app).history(id));
       expect(history).toHaveLength(0);
 
       // Then the check failed exactly once, so the second attempt passed
-      const failures = (await (await transitionsOf(server)).read()).filter(
+      const failures = (await (await transitionsOf(app)).read()).filter(
         (e) => e.transition === "fail" && e.to === "WORK",
       );
       expect(failures).toHaveLength(1);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -257,14 +257,14 @@ describe("Feature: sending a task back to the agent that did it", () => {
       });
 
       // Given a task whose check failed once, so its work session was resumed
-      const server = await serverFor(fixture);
-      await dispatchOnce(server);
+      const app = await serverFor(fixture);
+      await dispatchOnce(app);
 
       // When the resumed session finishes the work and the review passes
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the work is one entry at the session total, because a resume is not a second session
-      expect((await taskOf(server, id)).costs).toEqual([
+      expect((await taskOf(app, id)).costs).toEqual([
         {
           state: "WORK",
           slot: "pi-fake-fake-1",
@@ -279,7 +279,7 @@ describe("Feature: sending a task back to the agent that did it", () => {
         },
       ]);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -308,18 +308,18 @@ describe("Feature: sending a task back to the agent that did it", () => {
       });
 
       // Given a task whose check failed after the first attempt
-      const server = await serverFor(fixture);
-      await dispatchOnce(server);
+      const app = await serverFor(fixture);
+      await dispatchOnce(app);
 
       // When the agent is dispatched again into the session it was using
-      await runOnce(server);
+      await runOnce(app);
 
       // Then its second prompt names the command that failed and how it failed
-      const prompts = await promptsTo(pathsOf(server).sessionDir(id, "worker"));
+      const prompts = await promptsTo(pathsOf(app).sessionDir(id, "worker"));
       expect(prompts).toHaveLength(2);
       expect(prompts[1]).toContain("`test -f fixed.txt` (exit 1)");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -343,14 +343,10 @@ describe("Feature: sending a task back to the agent that did it", () => {
       });
 
       // Given a task whose session was opened where an older server put it
-      const server = await serverFor(fixture);
-      await dispatchOnce(server);
-      const opened = await sessionOf(server, id);
-      const legacyDir = path.join(
-        pathsOf(server).taskRoot(id),
-        "session",
-        "work",
-      );
+      const app = await serverFor(fixture);
+      await dispatchOnce(app);
+      const opened = await sessionOf(app, id);
+      const legacyDir = path.join(pathsOf(app).taskRoot(id), "session", "work");
       const legacy = path.join(legacyDir, path.basename(opened));
       await fs.mkdir(legacyDir, { recursive: true });
       await fs.rename(opened, legacy);
@@ -361,19 +357,19 @@ describe("Feature: sending a task back to the agent that did it", () => {
       );
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the agent is dispatched again
-      await server.tick();
+      await app.server.tick();
 
       // Then the session is reopened where the document says it lies
-      expect(await stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(app, id)).toBe("WORK");
       const view = await readView(fixture.runtime);
       expect(at(view.slots, 0).state).toBe("BUSY");
       expect(at(view.slots, 0).session).toBe(legacy);
-      expect((await workspaceOf(server, id)).session).toBe(legacy);
+      expect((await workspaceOf(app, id)).session).toBe(legacy);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -399,17 +395,17 @@ describe("Feature: landing or abandoning finished work", () => {
       });
 
       // Given work that has been reviewed and is waiting on the manager
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
 
       // When the manager merges it
-      const result = await server.submit(id);
+      const result = await app.lander.merge(id);
 
       // Then the task closes, the work is on the base, and nothing is left over
       expect(result.to).toBe("CLOSED");
-      expect(await fs.exists(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.exists(pathsOf(app).worktree(id))).toBe(false);
       expect(await git.branchExists(fixture.repo, branchName(id))).toBe(false);
       expect(await fs.exists(path.join(fixture.repo, "a.txt"))).toBe(true);
     },
@@ -418,7 +414,7 @@ describe("Feature: landing or abandoning finished work", () => {
 
   async function atManagerReview(): Promise<{
     fixture: Fixture;
-    server: Server;
+    app: App;
     id: string;
   }> {
     const fixture = await makeFixture();
@@ -436,28 +432,28 @@ describe("Feature: landing or abandoning finished work", () => {
       },
     });
 
-    const server = await serverFor(fixture);
-    await server.setSchedulerEnabled(true);
-    await reaches(server, id, "MANAGER_REVIEW");
-    await server.setSchedulerEnabled(false);
+    const app = await serverFor(fixture);
+    await app.dispatcher.setEnabled(true);
+    await reaches(app, id, "MANAGER_REVIEW");
+    await app.dispatcher.setEnabled(false);
 
-    return { fixture, server, id };
+    return { fixture, app, id };
   }
 
   testInTempDirs(
     "abort takes a branch that never landed, and tears it down at CLOSED",
     async () => {
       // Given work that has been reviewed and is waiting on the manager
-      const { fixture, server, id } = await atManagerReview();
+      const { fixture, app, id } = await atManagerReview();
 
       // When the manager aborts it
-      const result = await server.abort(id);
+      const result = await app.lander.abort(id);
 
       // Then it closes, and the work it did is thrown away with the branch
       expect(result.to).toBe("CLOSED");
       expect(await fs.exists(path.join(fixture.repo, "a.txt"))).toBe(false);
       expect(await git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(await fs.exists(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.exists(pathsOf(app).worktree(id))).toBe(false);
     },
     30000,
   );
@@ -468,11 +464,16 @@ describe("Feature: landing or abandoning finished work", () => {
       // Given a task held before any agent ever started it
       const fixture = await makeFixture();
       const id = await readyTask(fixture, "A task nobody should start");
-      const server = await serverFor(fixture);
-      await server.transition(id, "hold", { reason: "abandoning" }, "manager");
+      const app = await serverFor(fixture);
+      await app.graph.transition(
+        id,
+        "hold",
+        { reason: "abandoning" },
+        "manager",
+      );
 
       // When the manager aborts it
-      const result = await server.abort(id);
+      const result = await app.lander.abort(id);
 
       // Then it closes, having left no branch behind at all
       expect(result.to).toBe("CLOSED");
@@ -494,17 +495,17 @@ describe("Feature: landing or abandoning finished work", () => {
       });
 
       // Given a task an agent is holding and working on
-      const server = await serverFor(fixture);
-      expect(await stateOf(server, id)).toBe("WORK");
+      const app = await serverFor(fixture);
+      expect(await stateOf(app, id)).toBe("WORK");
 
       // When the manager aborts it
-      const attempt = server.abort(id);
+      const attempt = app.lander.abort(id);
 
       // Then it is refused, naming where a task must be to be abandoned
       await expect(attempt).rejects.toThrow(
         /is not in MANAGER_REVIEW or HELD_DESIGN or HELD_PLAN or HELD_WORK/,
       );
-      expect(await stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(app, id)).toBe("WORK");
     },
     30000,
   );
@@ -528,27 +529,27 @@ describe("Feature: landing or abandoning finished work", () => {
       });
 
       // Given work that has been reviewed and is waiting on the manager
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
-      expect(await fs.exists(pathsOf(server).taskRoot(id))).toBe(true);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
+      expect(await fs.exists(pathsOf(app).taskRoot(id))).toBe(true);
 
       // When the manager merges it
-      await server.submit(id);
+      await app.lander.merge(id);
 
       // Then the runtime directory it worked in is removed with it
-      expect(await stateOf(server, id)).toBe("CLOSED");
-      expect(await fs.exists(pathsOf(server).taskRoot(id))).toBe(false);
+      expect(await stateOf(app, id)).toBe("CLOSED");
+      expect(await fs.exists(pathsOf(app).taskRoot(id))).toBe(false);
 
       for (let i = 0; i < 101; i++) {
         const other = await readyTask(fixture, `filler ${i}`);
-        await server.claim(other, { slotName: "filler", pid: process.pid });
+        await app.graph.claim(other, { slotName: "filler", pid: process.pid });
       }
-      await server.writeViews();
+      await app.views.write();
 
       // Then it stays gone once it falls off the end of the recent list
-      expect(await fs.exists(pathsOf(server).taskRoot(id))).toBe(false);
+      expect(await fs.exists(pathsOf(app).taskRoot(id))).toBe(false);
       const view = await readView(fixture.runtime);
       expect(view.tasks.some((task) => task.id === id)).toBe(false);
     },

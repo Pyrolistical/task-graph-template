@@ -4,6 +4,7 @@ import path from "node:path";
 import { groupOf } from "./domain/pattern.ts";
 import { memberOf } from "./domain/lookup.ts";
 import { at } from "./testing/present.ts";
+import { graph, render } from "./testing/import-graph.ts";
 
 const ROOT = import.meta.dir;
 
@@ -183,6 +184,37 @@ describe("Feature: the dependency rule", () => {
 
     // Then only the graph holds one, so no caller can mutate around it
     expect(names).toEqual([path.join("app", "task-graph.ts")]);
+  });
+
+  test("nothing in the application points back at the server", async () => {
+    // Given every application module apart from the lifecycle itself
+    const inside = (await modules()).filter(
+      (module) =>
+        module.layer === "app" && module.path !== path.join("app", "server.ts"),
+    );
+
+    // When each is searched for an import of the server
+    const back = inside
+      .filter((module) => /from "[^"]*server\.ts"/.test(module.source))
+      .map((module) => module.path);
+
+    // Then none of them has one: the server ticks the modules, they do not call it
+    expect(back).toEqual([]);
+  });
+
+  test("the import graph in the docs is the one the modules make", async () => {
+    // Given the graph read out of the modules themselves
+    const { modules: drawn, edges } = await graph();
+
+    // When it is rendered
+    const rendered = render(drawn, edges);
+
+    // Then it is what docs/import-graph.md holds, because a stale diagram is a wrong one
+    const published = await fs.readFile(
+      path.join(ROOT, "..", "docs", "import-graph.md"),
+      "utf-8",
+    );
+    expect(published).toBe(rendered);
   });
 
   test("the only modules outside a layer are the extensions and the test rig", async () => {

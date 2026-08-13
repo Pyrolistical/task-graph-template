@@ -30,12 +30,12 @@ import {
   reaches,
   serverFor,
 } from "../testing/server-jig.ts";
-import type { Server } from "../app/server.ts";
+import type { App } from "../main/compose.ts";
 import { type Ticking, boot, build, startTicking } from "../../mcp.ts";
 import { at, present } from "../testing/present.ts";
 
 const openClients: Client[] = [];
-const openServers: Server[] = [];
+const openServers: App[] = [];
 const openTickers: Ticking[] = [];
 
 afterEach(async () => {
@@ -45,8 +45,8 @@ afterEach(async () => {
   for (const ticking of openTickers.splice(0)) {
     await ticking.stop();
   }
-  for (const server of openServers.splice(0)) {
-    await server.shutdown();
+  for (const started of openServers.splice(0)) {
+    await started.server.shutdown();
   }
 });
 
@@ -69,8 +69,8 @@ async function connectIdle(fixture: Fixture) {
     runtime: fixture.runtime,
     tasksDir: fixture.tasksDir,
   });
-  if (started.server) {
-    openServers.push(started.server);
+  if (started.app) {
+    openServers.push(started.app);
   }
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -79,7 +79,7 @@ async function connectIdle(fixture: Fixture) {
   const client = new Client({ name: "test", version: "1.0.0" });
   openClients.push(client);
   await client.connect(clientSide);
-  return { client, server: present(started.server, "a started server") };
+  return { client, app: present(started.app, "a started server") };
 }
 
 async function connect(fixture: Fixture) {
@@ -89,9 +89,9 @@ async function connect(fixture: Fixture) {
     runtime: fixture.runtime,
     tasksDir: fixture.tasksDir,
   });
-  if (started.server) {
-    openServers.push(started.server);
-    openTickers.push(startTicking(started.server));
+  if (started.app) {
+    openServers.push(started.app);
+    openTickers.push(startTicking(started.app));
   }
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -538,10 +538,10 @@ describe("Feature: the tool surface the manager works through", () => {
       });
 
       // Given work that has been reviewed and is waiting on the manager
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.shutdown();
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.server.shutdown();
       const client = await connect(fixture);
 
       // When the manager accepts it
@@ -892,8 +892,8 @@ describe("Feature: a server that could not start", () => {
     async () => {
       // Given a running server that has hit a failure since it started
       const fixture = await makeFixture();
-      const { client, server } = await connectIdle(fixture);
-      await server.fail("writing the views failed: no space left");
+      const { client, app } = await connectIdle(fixture);
+      await app.health.fail("writing the views failed: no space left");
 
       // When the manager creates a task
       const result = await client.callTool({
@@ -913,8 +913,8 @@ describe("Feature: a server that could not start", () => {
     async () => {
       // Given a running server that has hit a failure since it started
       const fixture = await makeFixture();
-      const { client, server } = await connectIdle(fixture);
-      await server.fail("writing the views failed: no space left");
+      const { client, app } = await connectIdle(fixture);
+      await app.health.fail("writing the views failed: no space left");
 
       // When the manager reads the failure and the paths behind it
       const failure = await resourceOf(
@@ -940,11 +940,11 @@ describe("Feature: a server that could not start", () => {
     async () => {
       // Given a server refusing its tools after a failure
       const fixture = await makeFixture();
-      const { client, server } = await connectIdle(fixture);
-      await server.fail("writing the views failed: no space left");
+      const { client, app } = await connectIdle(fixture);
+      await app.health.fail("writing the views failed: no space left");
 
       // When a tick comes round without hitting it again
-      await server.tick();
+      await app.server.tick();
 
       // Then the tools answer again, without the manager restarting anything
       const result = await client.callTool({

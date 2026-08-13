@@ -6,7 +6,10 @@ import { Lander } from "../app/lander.ts";
 import { Pool } from "../app/pool.ts";
 import { Recovery } from "../app/recovery.ts";
 import { Checker } from "../app/checker.ts";
-import { Server, type ServerConfig } from "../app/server.ts";
+import { Server } from "../app/server.ts";
+import type { ServerConfig } from "../app/config.ts";
+import { Health } from "../app/health.ts";
+import { Views } from "../app/views.ts";
 import { Settler } from "../app/settler.ts";
 import { TaskGraph } from "../app/task-graph.ts";
 import { Latch } from "../domain/latch.ts";
@@ -45,7 +48,20 @@ export interface WiringOptions {
   base?: string;
 }
 
-export async function wire(options: WiringOptions): Promise<Server> {
+export interface App {
+  server: Server;
+  graph: TaskGraph;
+  pool: Pool;
+  dispatcher: Dispatcher;
+  settler: Settler;
+  checker: Checker;
+  lander: Lander;
+  recovery: Recovery;
+  views: Views;
+  health: Health;
+}
+
+export async function wire(options: WiringOptions): Promise<App> {
   const runtime = options.runtime;
   const repo = runtime.repo;
   if (!(await git.isRepo(repo))) {
@@ -152,6 +168,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
     runtime,
     publisher,
     config.base,
+    config.agentsPath,
   );
   const checker = new Checker(graph, checks, files, prompts, publisher, repo);
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
@@ -165,7 +182,19 @@ export async function wire(options: WiringOptions): Promise<Server> {
     config.base,
   );
 
-  return new Server(
+  const views = new Views(
+    config,
+    graph,
+    pool,
+    dispatcher,
+    checker,
+    transitions,
+    publisher,
+    runtime,
+  );
+  const health = new Health(publisher);
+
+  const server = new Server(
     config,
     wake,
     graph,
@@ -173,14 +202,27 @@ export async function wire(options: WiringOptions): Promise<Server> {
     dispatcher,
     settler,
     checker,
-    lander,
     recovery,
     commands,
-    transitions,
     prompts,
     runtime,
     publisher,
+    views,
+    health,
   );
+
+  return {
+    server,
+    graph,
+    pool,
+    dispatcher,
+    settler,
+    checker,
+    lander,
+    recovery,
+    views,
+    health,
+  };
 }
 
 export { branchName };

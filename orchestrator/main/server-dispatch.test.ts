@@ -63,7 +63,7 @@ describe("Feature: where a project's task graph is found", () => {
         const tasksDir = defaultTasksDir(fixture.repo);
 
         // When a server is started against it with a graph that is not there yet
-        const server = await startServer({
+        const app = await startServer({
           runtime: fixture.runtime,
           tasksDir,
           piCommand: fixture.piCommand,
@@ -71,7 +71,7 @@ describe("Feature: where a project's task graph is found", () => {
         });
 
         // Then it seeds the graph and takes its overrides from there
-        expect(server.config.promptDirs.overrides).toBe(
+        expect(app.server.config.promptDirs.overrides).toBe(
           path.join(tasksDir, "prompts"),
         );
         expect(await fs.exists(path.join(tasksDir, "agents.json"))).toBe(true);
@@ -80,7 +80,7 @@ describe("Feature: where a project's task graph is found", () => {
           "1\n",
         );
 
-        await server.shutdown();
+        await app.server.shutdown();
       });
     },
     30000,
@@ -94,7 +94,7 @@ describe("Feature: where a project's task graph is found", () => {
       await git.gitOrThrow(fixture.repo, ["checkout", "-q", "-b", "trunk"]);
 
       // When a server is started against it without being told a base
-      const server = await startServer({
+      const app = await startServer({
         runtime: fixture.runtime,
         agentsPath: fixture.agentsPath,
         tasksDir: fixture.tasksDir,
@@ -104,9 +104,9 @@ describe("Feature: where a project's task graph is found", () => {
       });
 
       // Then that branch is the one it will rebase onto and land work on
-      expect(server.config.base).toBe("trunk");
+      expect(app.server.config.base).toBe("trunk");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -135,21 +135,21 @@ describe("Feature: a task that goes all the way through", () => {
       });
 
       // Given a task with a check, and agents that will do and review the work
-      const server = await serverFor(fixture);
-      await walkTo(server, id, "MANAGER_REVIEW");
+      const app = await serverFor(fixture);
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // When the manager merges it
-      const merged = await server.submit(id);
+      const merged = await app.lander.merge(id);
 
       // Then the task closes and nothing of its workspace is left behind
       expect(merged.to).toBe("CLOSED");
-      expect((await server.tasks()).has(id)).toBe(false);
+      expect((await app.graph.list()).has(id)).toBe(false);
       expect(await fs.exists(closedTaskPath(fixture.tasksDir, id))).toBe(true);
       expect(await fs.exists(path.join(fixture.repo, "hello.txt"))).toBe(true);
       expect(await git.branchExists(fixture.repo, branchName(id))).toBe(false);
-      expect(await fs.exists(pathsOf(server).worktree(id))).toBe(false);
+      expect(await fs.exists(pathsOf(app).worktree(id))).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -178,13 +178,13 @@ describe("Feature: what a task cost to get through", () => {
       });
 
       // Given a task whose agents report what each session cost
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs it to the manager
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the document carries one entry per session, in the order they ran
-      expect((await taskOf(server, id)).costs).toEqual([
+      expect((await taskOf(app, id)).costs).toEqual([
         {
           state: "WORK",
           slot: "pi-fake-fake-1",
@@ -199,7 +199,7 @@ describe("Feature: what a task cost to get through", () => {
         },
       ]);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -227,16 +227,16 @@ describe("Feature: measuring how fast an agent writes", () => {
       });
 
       // Given a task whose agents report the tokens each message cost
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs it to the manager
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the agent that ran has a measured rate and an idle one has none
-      expect(server.rateOf("pi-fake-fake")).toBeGreaterThan(0);
-      expect(server.rateOf("pi-other-other")).toBeUndefined();
+      expect(app.pool.rates.rate("pi-fake-fake")).toBeGreaterThan(0);
+      expect(app.pool.rates.rate("pi-other-other")).toBeUndefined();
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -268,13 +268,13 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a task the manager submitted into the work phase on trust
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs it as far as the manager
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the work phase is all the server ever ran on it
-      const applied = (await (await transitionsOf(server)).read()).filter(
+      const applied = (await (await transitionsOf(app)).read()).filter(
         (e) => e.task_id === id,
       );
       expect(
@@ -285,8 +285,8 @@ describe("Feature: the design and planning phases", () => {
         "submit: WORK_REVIEW -> MANAGER_REVIEW",
       ]);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -323,10 +323,10 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a task nobody has designed or planned yet
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs it as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then the design and the plan are both in the task body
       const body = await fs.readFile(
@@ -337,16 +337,16 @@ describe("Feature: the design and planning phases", () => {
       expect(body).toContain("## Todos");
       expect(body).toContain("1. write hello.txt");
       expect(body).toContain("2. run the check");
-      expect(await fs.exists(pathsOf(server).worktree(id))).toBe(true);
-      expect(await fs.exists(pathsOf(server).sessionDir(id, "designer"))).toBe(
+      expect(await fs.exists(pathsOf(app).worktree(id))).toBe(true);
+      expect(await fs.exists(pathsOf(app).sessionDir(id, "designer"))).toBe(
         true,
       );
-      expect(await fs.exists(pathsOf(server).sessionDir(id, "planner"))).toBe(
+      expect(await fs.exists(pathsOf(app).sessionDir(id, "planner"))).toBe(
         true,
       );
 
       // Then it went through each phase and its review in order
-      const submits = (await (await transitionsOf(server)).read()).filter(
+      const submits = (await (await transitionsOf(app)).read()).filter(
         (e) => e.task_id === id && e.transition === "submit",
       );
       expect(submits.map((e) => `${e.from} -> ${e.to}`)).toEqual([
@@ -356,8 +356,8 @@ describe("Feature: the design and planning phases", () => {
         "PLAN_REVIEW -> WORK",
       ]);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -384,13 +384,13 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a design the reviewer will reject once before accepting
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then the designer was told what the reviewer found, in its own words
-      const designer = pathsOf(server).sessionDir(id, "designer");
+      const designer = pathsOf(app).sessionDir(id, "designer");
       expect((await promptsTo(designer)).join("\n")).toContain(
         "the design misses the farewell",
       );
@@ -403,8 +403,8 @@ describe("Feature: the design and planning phases", () => {
       expect(body).toContain("structure B");
       expect(body).not.toContain("structure A");
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -430,16 +430,16 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a design the reviewer will reject once before accepting
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the plan review
-      await settleTo(server, id, "PLAN_REVIEW");
+      await settleTo(app, id, "PLAN_REVIEW");
 
       // Then the designer read the findings in its next prompt
       expect(
-        (await promptsTo(pathsOf(server).sessionDir(id, "designer")))[1],
+        (await promptsTo(pathsOf(app).sessionDir(id, "designer")))[1],
       ).toBe(
-        promptsOf(server).fragment("DESIGN-with-findings", {
+        promptsOf(app).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
       );
@@ -453,18 +453,18 @@ describe("Feature: the design and planning phases", () => {
       expect(body).not.toContain("the design misses the farewell");
 
       const assignment = await fs.readFile(
-        pathsOf(server).assignment(id),
+        pathsOf(app).assignment(id),
         "utf-8",
       );
       expect(assignment).not.toContain("the design misses the farewell");
 
-      expect(await fs.exists(pathsOf(server).messageFile(id, "DESIGN"))).toBe(
+      expect(await fs.exists(pathsOf(app).messageFile(id, "DESIGN"))).toBe(
         false,
       );
-      expect(await fs.exists(pathsOf(server).findings(id))).toBe(false);
+      expect(await fs.exists(pathsOf(app).findings(id))).toBe(false);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -490,22 +490,20 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a designer that compacts on the turn after it was sent back
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the planning stage
-      await settleTo(server, id, "PLAN");
+      await settleTo(app, id, "PLAN");
 
       // Then the steer it was given still carried the findings to answer
-      expect(
-        await steersTo(pathsOf(server).sessionDir(id, "designer")),
-      ).toEqual([
-        promptsOf(server).fragment("DESIGN-with-findings", {
+      expect(await steersTo(pathsOf(app).sessionDir(id, "designer"))).toEqual([
+        promptsOf(app).fragment("DESIGN-with-findings", {
           findings: [{ finding: "the design misses the farewell" }],
         }),
       ]);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -523,22 +521,22 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a designer that submits without writing anything
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      await walkTo(server, id, "HELD_DESIGN");
+      await walkTo(app, id, "HELD_DESIGN");
 
       // Then the task is held, saying what the designer never wrote
-      const task = await taskOf(server, id);
+      const task = await taskOf(app, id);
       expect(task.held_reason).toContain(
         "the designer submitted without appending a design section",
       );
       expect(task.state).toBe("HELD_DESIGN");
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "designer")),
+        await promptsTo(pathsOf(app).sessionDir(id, "designer")),
       ).toHaveLength(ISSUES["missing-design"].attempts + 1);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -562,18 +560,18 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a design reviewer that leaves a file behind in the worktree
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+        await promptsTo(pathsOf(app).sessionDir(id, "reviewer")),
       ).toHaveLength(3);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -600,13 +598,13 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a plan the reviewer will reject once before accepting
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then the planner was told what the reviewer found, in its own words
-      const planner = pathsOf(server).sessionDir(id, "planner");
+      const planner = pathsOf(app).sessionDir(id, "planner");
       expect((await promptsTo(planner)).join("\n")).toContain(
         "no todo covers the check",
       );
@@ -619,8 +617,8 @@ describe("Feature: the design and planning phases", () => {
       expect(body).toContain("1. run the check");
       expect(body).not.toContain("1. write hello.txt");
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -644,18 +642,18 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a planner that submits nothing once, then writes its todos
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then it was asked once for the plan and never held
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+        await promptsTo(pathsOf(app).sessionDir(id, "planner")),
       ).toHaveLength(2);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -675,22 +673,22 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a planner that submits without writing anything
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      await walkTo(server, id, "HELD_PLAN");
+      await walkTo(app, id, "HELD_PLAN");
 
       // Then the task is held, saying what the planner never wrote
-      const task = await taskOf(server, id);
+      const task = await taskOf(app, id);
       expect(task.held_reason).toContain(
         "the planner submitted without appending a todo list",
       );
       expect(task.state).toBe("HELD_PLAN");
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+        await promptsTo(pathsOf(app).sessionDir(id, "planner")),
       ).toHaveLength(ISSUES["missing-todos"].attempts + 1);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -718,18 +716,18 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a planner that leaves a file behind in the worktree
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then it was sent back to clean up before its plan was accepted
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "planner")),
+        await promptsTo(pathsOf(app).sessionDir(id, "planner")),
       ).toHaveLength(2);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -755,19 +753,19 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a planner that commits work the plan stage may not do
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the server nudges it until the attempts run out
-      await walkTo(server, id, "HELD_PLAN");
+      await walkTo(app, id, "HELD_PLAN");
 
       // Then the task is held, saying which rule the planner broke
-      const task = await taskOf(server, id);
+      const task = await taskOf(app, id);
       expect(task.held_reason).toContain(
         "wrote to the worktree during design or planning",
       );
       expect(task.state).toBe("HELD_PLAN");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -791,18 +789,18 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a plan reviewer that leaves a file behind in the worktree
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the scheduler runs the task as far as the work stage
-      await walkTo(server, id, "WORK");
+      await walkTo(app, id, "WORK");
 
       // Then it was sent back to clean up before its review was accepted
       expect(
-        await promptsTo(pathsOf(server).sessionDir(id, "reviewer")),
+        await promptsTo(pathsOf(app).sessionDir(id, "reviewer")),
       ).toHaveLength(3);
 
-      await server.shutdown();
-      await server.drain();
+      await app.server.shutdown();
+      await app.server.drain();
     },
     30000,
   );
@@ -819,19 +817,19 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a designer that reports it cannot go on
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_DESIGN");
-      const task = await taskOf(server, id);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "HELD_DESIGN");
+      const task = await taskOf(app, id);
       expect(task.held_reason).toBe("the acceptance criteria are empty");
 
       // When the manager resumes it
-      await server.transition(id, "resume", {}, "manager");
+      await app.graph.transition(id, "resume", {}, "manager");
 
       // Then the task starts its design phase over
-      expect(await stateOf(server, id)).toBe("DESIGN");
+      expect(await stateOf(app, id)).toBe("DESIGN");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -850,19 +848,19 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a planner that reports it cannot go on
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_PLAN");
-      const task = await taskOf(server, id);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "HELD_PLAN");
+      const task = await taskOf(app, id);
       expect(task.held_reason).toBe("the acceptance criteria are empty");
 
       // When the manager resumes it
-      await server.transition(id, "resume", {}, "manager");
+      await app.graph.transition(id, "resume", {}, "manager");
 
       // Then the task starts its planning phase over
-      expect(await stateOf(server, id)).toBe("PLAN");
+      expect(await stateOf(app, id)).toBe("PLAN");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -882,19 +880,19 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a plan reviewer that reports it cannot go on
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "HELD_PLAN");
-      const task = await taskOf(server, id);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "HELD_PLAN");
+      const task = await taskOf(app, id);
       expect(task.held_reason).toBe("the criteria contradict the goal");
 
       // When the manager resumes it
-      await server.transition(id, "resume", {}, "manager");
+      await app.graph.transition(id, "resume", {}, "manager");
 
       // Then the task goes back to the planner rather than the reviewer
-      expect(await stateOf(server, id)).toBe("PLAN");
+      expect(await stateOf(app, id)).toBe("PLAN");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -909,8 +907,8 @@ describe("Feature: the design and planning phases", () => {
       });
 
       // Given a task held because its goal was unclear to the agent
-      const server = await serverFor(fixture);
-      await walkTo(server, id, "HELD_WORK");
+      const app = await serverFor(fixture);
+      await walkTo(app, id, "HELD_WORK");
 
       // Given the manager rewrites the goal in the task body
       await writeTaskBody(
@@ -920,12 +918,12 @@ describe("Feature: the design and planning phases", () => {
       );
 
       // When the manager resumes it
-      await server.transition(id, "resume", {}, "manager");
+      await app.graph.transition(id, "resume", {}, "manager");
 
       // Then the task goes back into the queue with the clearer goal
-      expect(await stateOf(server, id)).toBe("WORK");
+      expect(await stateOf(app, id)).toBe("WORK");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -940,8 +938,8 @@ describe("Feature: the design and planning phases", () => {
       const planFresh = await unplannedTask(fixture, "Ready to be planned");
       await unplannedTask(fixture, "Not yet designed");
 
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(false);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(false);
 
       for (const id of [reviewing, planFresh]) {
         await takeClaim(fixture.tasksDir, id, {
@@ -959,11 +957,14 @@ describe("Feature: the design and planning phases", () => {
           ).body,
         });
       }
-      await server.claim(reviewing, { slotName: "planner", pid: process.pid });
-      await server.transition(reviewing, "submit", {}, "server");
+      await app.graph.claim(reviewing, {
+        slotName: "planner",
+        pid: process.pid,
+      });
+      await app.graph.transition(reviewing, "submit", {}, "server");
 
       // When the queue is published
-      await server.tick();
+      await app.server.tick();
 
       // Then work outranks planning, and a review outranks its own fresh stage
       const view = await readView(fixture.runtime);
@@ -974,7 +975,7 @@ describe("Feature: the design and planning phases", () => {
         "DESIGN_FRESH",
       ]);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -986,21 +987,26 @@ describe("Feature: the design and planning phases", () => {
       const id = await unplannedTask(fixture, "The wrong shape");
 
       // Given a task queued for design that nothing has started
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(false);
-      await server.tick();
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(false);
+      await app.server.tick();
 
       // Given the manager holds it, abandoning it
-      await server.transition(id, "hold", { reason: "abandoning" }, "manager");
+      await app.graph.transition(
+        id,
+        "hold",
+        { reason: "abandoning" },
+        "manager",
+      );
 
       // When the manager aborts it
-      const result = await server.abort(id);
+      const result = await app.lander.abort(id);
 
       // Then it closes and leaves the graph
       expect(result.to).toBe("CLOSED");
-      expect((await server.tasks()).has(id)).toBe(false);
+      expect((await app.graph.list()).has(id)).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1017,7 +1023,7 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a driven project with no orchestrator directory of its own
-      const server = await startServer({
+      const app = await startServer({
         runtime: fixture.runtime,
         agentsPath: fixture.agentsPath,
         tasksDir: fixture.tasksDir,
@@ -1026,18 +1032,18 @@ describe("Feature: handing a task to an agent", () => {
       });
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When a task is dispatched
-      await settle(server, 1);
+      await settle(app, 1);
 
       // Then the prompts came from the orchestrator's own directory
-      expect(server.config.promptDirs.orchestrator).toBe(
+      expect(app.server.config.promptDirs.orchestrator).toBe(
         path.join(import.meta.dir, "..", "prompts"),
       );
-      expect(await fs.exists(pathsOf(server).assignment(id))).toBe(true);
+      expect(await fs.exists(pathsOf(app).assignment(id))).toBe(true);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1057,26 +1063,26 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a project that carries its own copy of the work prompt
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When a task is dispatched
-      await settle(server, 1);
+      await settle(app, 1);
 
       // Then the agent read the project's words, over the task's own body
-      const sessionDir = pathsOf(server).sessionDir(id, "worker");
+      const sessionDir = pathsOf(app).sessionDir(id, "worker");
       expect((await promptsTo(sessionDir))[0]).toBe(
         "You are this project's implementer.\n",
       );
       const assignment = await fs.readFile(
-        pathsOf(server).assignment(id),
+        pathsOf(app).assignment(id),
         "utf-8",
       );
       expect(assignment).toContain("# The body of this task");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1094,10 +1100,10 @@ describe("Feature: handing a task to an agent", () => {
       );
 
       // When the server starts against it
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Then the override is named in the log, and the file it replaced is not
-      const log = await fs.readFile(pathsOf(server).serverLog, "utf-8");
+      const log = await fs.readFile(pathsOf(app).serverLog, "utf-8");
       expect(log).toContain(
         `cached ${path.join(fixture.overridesDir, "prompts", "WORK.md")}`,
       );
@@ -1105,7 +1111,7 @@ describe("Feature: handing a task to an agent", () => {
         `cached ${path.join(fixture.orchestratorDir, "prompts", "WORK.md")}`,
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1125,16 +1131,16 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a project that overrides the design prompt but not the work one
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When a task is dispatched into the work stage
-      await settle(server, 1);
+      await settle(app, 1);
 
       // Then the agent read the orchestrator's own work prompt, untouched
-      const sessionDir = pathsOf(server).sessionDir(id, "worker");
+      const sessionDir = pathsOf(app).sessionDir(id, "worker");
       expect((await promptsTo(sessionDir))[0]).toBe(
         await fs.readFile(
           path.join(fixture.orchestratorDir, "prompts", "WORK.md"),
@@ -1142,7 +1148,7 @@ describe("Feature: handing a task to an agent", () => {
         ),
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1157,17 +1163,17 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK: [{ notes: "still thinking" }] } });
 
       // Given a task with a goal written into its body
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the task is dispatched
-      await settle(server, 1);
+      await settle(app, 1);
 
       // Then it has a worktree, a branch, and its assignment beside the worktree
-      const worktree = pathsOf(server).worktree(id);
-      const assignment = pathsOf(server).assignment(id);
+      const worktree = pathsOf(app).worktree(id);
+      const assignment = pathsOf(app).assignment(id);
       expect(await fs.exists(worktree)).toBe(true);
       expect(await fs.exists(assignment)).toBe(true);
       expect(assignment.startsWith(worktree)).toBe(false);
@@ -1176,7 +1182,7 @@ describe("Feature: handing a task to an agent", () => {
       const body = await fs.readFile(assignment, "utf-8");
       expect(body).toContain("# The body of this task");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1191,20 +1197,20 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { DESIGN: [{ submit: true }] } });
 
       // Given a task about to be dispatched into the design stage
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the task is dispatched
-      await settle(server, 1);
+      await settle(app, 1);
 
       // Then the assignment is the body plus the empty heading to fill in
-      expect(await fs.readFile(pathsOf(server).assignment(id), "utf-8")).toBe(
+      expect(await fs.readFile(pathsOf(app).assignment(id), "utf-8")).toBe(
         "\n\n# The body of this task\n\n## Design\n",
       );
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1229,31 +1235,31 @@ describe("Feature: handing a task to an agent", () => {
       });
 
       // Given a task about to be dispatched
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // Given a server with its scheduler enabled
-      await server.setSchedulerEnabled(true);
+      await app.dispatcher.setEnabled(true);
 
       // When the agent claims it
-      await server.tick();
+      await app.server.tick();
 
       // Then the document names the agent, its process and everything it needs
-      const held = await taskOf(server, id);
+      const held = await taskOf(app, id);
       const workspace = requireWorkspace(held);
       expect(held.claimed_by).toBe("pi-fake-fake-1");
       expect(held.claimed_pid).toBeGreaterThan(0);
       expect(workspace.slot).toBe("pi-fake-fake-1");
       expect(workspace.branch).toBe(branchName(id));
-      expect(workspace.worktree).toBe(pathsOf(server).worktree(id));
-      expect(await fs.exists(await sessionOf(server, id))).toBe(true);
+      expect(workspace.worktree).toBe(pathsOf(app).worktree(id));
+      expect(await fs.exists(await sessionOf(app, id))).toBe(true);
 
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
 
       // Then the claim is released once the work is done
-      expect((await taskOf(server, id)).claimed_by).toBeUndefined();
+      expect((await taskOf(app, id)).claimed_by).toBeUndefined();
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1269,10 +1275,10 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK_REVIEW: [{ submit: true }] } });
 
       // Given work committed on a branch named by an older version of the server
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
       const legacy = `work/${id}`;
-      const worktree = pathsOf(server).worktree(id);
-      await pathsOf(server).prepare(id);
+      const worktree = pathsOf(app).worktree(id);
+      await pathsOf(app).prepare(id);
       await git.createWorkspace(fixture.repo, legacy, worktree, "master");
       await fs.writeFile(path.join(worktree, "a.txt"), "a\n");
       await git.gitOrThrow(worktree, ["add", "-A"]);
@@ -1298,20 +1304,20 @@ describe("Feature: handing a task to an agent", () => {
       ] as const) {
         await applyTransition(fixture.tasksDir, id, name, args);
       }
-      expect(await stateOf(server, id)).toBe("WORK_REVIEW");
+      expect(await stateOf(app, id)).toBe("WORK_REVIEW");
 
       // When the task is reviewed and merged under the current server
-      await walkTo(server, id, "MANAGER_REVIEW");
+      await walkTo(app, id, "MANAGER_REVIEW");
 
       // Then the branch it recorded is the one used, not the one it would pick
-      expect((await workspaceOf(server, id)).branch).toBe(legacy);
+      expect((await workspaceOf(app, id)).branch).toBe(legacy);
       expect(await git.branchExists(fixture.repo, branchName(id))).toBe(false);
 
-      expect((await server.submit(id)).to).toBe("CLOSED");
+      expect((await app.lander.merge(id)).to).toBe("CLOSED");
       expect(await fs.exists(path.join(fixture.repo, "a.txt"))).toBe(true);
       expect(await git.branchExists(fixture.repo, legacy)).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1324,16 +1330,16 @@ describe("Feature: handing a task to an agent", () => {
       await setPlan(fixture, { [id]: { WORK: [{ submit: true }] } });
 
       // Given a queued task and a server whose scheduler is stopped
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the server ticks twice
-      await settle(server, 2);
+      await settle(app, 2);
 
       // Then the task is still queued and nothing was started
-      expect(await stateOf(server, id)).toBe("WORK");
-      expect(server.schedulerEnabled).toBe(false);
+      expect(await stateOf(app, id)).toBe("WORK");
+      expect(app.dispatcher.enabled).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1356,20 +1362,20 @@ describe("Feature: handing a task to an agent", () => {
       });
 
       // Given a task already dispatched to an agent
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await server.tick();
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await app.server.tick();
 
       // When the scheduler is stopped while the agent is still working
-      await server.setSchedulerEnabled(false);
+      await app.dispatcher.setEnabled(false);
 
       // Then its submit is still applied and its checks still run
-      await server.drain();
-      await settle(server, 2);
-      expect(await stateOf(server, id)).toBe("WORK_REVIEW");
-      expect(server.schedulerEnabled).toBe(false);
+      await app.server.drain();
+      await settle(app, 2);
+      expect(await stateOf(app, id)).toBe("WORK_REVIEW");
+      expect(app.dispatcher.enabled).toBe(false);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1395,10 +1401,10 @@ describe("Feature: landing work on the base branch", () => {
       });
 
       // Given finished work whose base has since changed the same file
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
       await fs.writeFile(
         path.join(fixture.repo, "shared.txt"),
         "from master\n",
@@ -1406,13 +1412,13 @@ describe("Feature: landing work on the base branch", () => {
       await commitGraph(fixture, "conflicting change on master");
 
       // When the manager merges it
-      const merging = server.submit(id);
+      const merging = app.lander.merge(id);
 
       // Then the manager is told it no longer rebases, and the task is untouched
       expect(merging).rejects.toThrow(/no longer rebases/);
-      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(await stateOf(app, id)).toBe("MANAGER_REVIEW");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1436,25 +1442,25 @@ describe("Feature: landing work on the base branch", () => {
       });
 
       // Given finished work whose branch no longer passes its own check
-      const server = await serverFor(fixture);
-      await server.setSchedulerEnabled(true);
-      await reaches(server, id, "MANAGER_REVIEW");
-      await server.setSchedulerEnabled(false);
-      await fs.rm(path.join(pathsOf(server).worktree(id), "wanted.txt"));
-      await git.gitOrThrow(pathsOf(server).worktree(id), [
+      const app = await serverFor(fixture);
+      await app.dispatcher.setEnabled(true);
+      await reaches(app, id, "MANAGER_REVIEW");
+      await app.dispatcher.setEnabled(false);
+      await fs.rm(path.join(pathsOf(app).worktree(id), "wanted.txt"));
+      await git.gitOrThrow(pathsOf(app).worktree(id), [
         "commit",
         "-qam",
         "remove it",
       ]);
 
       // When the manager merges it
-      const merging = server.submit(id);
+      const merging = app.lander.merge(id);
 
       // Then the check that failed is named, and the task is untouched
       expect(merging).rejects.toThrow(/test -f wanted\.txt/);
-      expect(await stateOf(server, id)).toBe("MANAGER_REVIEW");
+      expect(await stateOf(app, id)).toBe("MANAGER_REVIEW");
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
@@ -1479,28 +1485,28 @@ describe("Feature: landing work on the base branch", () => {
       });
 
       // Given a task whose check tries to write into the project it came from
-      const server = await serverFor(fixture);
+      const app = await serverFor(fixture);
 
       // When the work is done and the check runs against it
-      await dispatchOnce(server);
+      await dispatchOnce(app);
 
       // Then the write is refused, and the project is untouched
       const queued = await fs.readFile(
-        pathsOf(server).messageFile(id, "WORK"),
+        pathsOf(app).messageFile(id, "WORK"),
         "utf-8",
       );
       expect(queued).toContain("Read-only file system");
       expect(await fs.exists(path.join(fixture.repo, "poke"))).toBe(false);
 
       expect(
-        await git.gitOrThrow(pathsOf(server).worktree(id), [
+        await git.gitOrThrow(pathsOf(app).worktree(id), [
           "log",
           "--oneline",
           "-1",
         ]),
       ).toContain(`work on ${id}`);
 
-      await server.shutdown();
+      await app.server.shutdown();
     },
     30000,
   );
