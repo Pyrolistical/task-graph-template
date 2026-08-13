@@ -19,6 +19,8 @@
       "roles": ["worker"],
       "enabled": false,
       "healthCheck": true,
+      "wattage": 300,
+      "costPerKwh": 0.19,
       "write": ["~/.cache", "~/.cargo"]
     }
   ]
@@ -37,6 +39,14 @@ Defaults to all four; the only knob on what a slot may be handed. The task's sta
 ## write
 
 The only knob on the [sandbox](sandbox.md). Declaring it **replaces** the default `["~/.cache"]`: rust needs `["~/.cache", "~/.cargo", "~/.rustup"]`, nothing-but-the-worktree is `[]`. `~` is the server user's home, relative paths resolve against the launch directory, nonexistent paths are dropped because `bwrap` cannot overlay what is not there, and resolution happens at spawn so a cache created after startup is picked up.
+
+## wattage and costPerKwh
+
+What a session on this agent costs when the provider prices nothing. Both default to zero, and zero is the honest answer for a hosted model: pi already reports what the tokens cost, and a meter on top would bill the same work twice.
+
+- a local model bills no tokens, so `wattage` × how long the session ran × `costPerKwh` is the whole cost of running it; declare the box's draw under load and what the wall socket charges
+- used only where pi reports nothing: a session pi prices is taken at its word, since that price already spans every turn the session took
+- the same number the console draws is the one written to [`costs`](task-document.md#what-a-task-cost), so what a slot showed while it ran is what the task ends up carrying
 
 ## healthCheck
 

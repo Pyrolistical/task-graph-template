@@ -49,6 +49,7 @@ async function aRig(live = DISPATCHED) {
     workspaces,
     publisher,
     () => false,
+    (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
   const edits = new Queue();
   const settler = new Settler(

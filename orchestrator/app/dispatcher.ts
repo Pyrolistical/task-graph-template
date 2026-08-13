@@ -7,6 +7,7 @@ import { type Runner, Pool } from "./pool.ts";
 import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../domain/agents.ts";
+import { carriedOn } from "../domain/costs.ts";
 import { messageOf } from "../domain/errors.ts";
 import {
   type TaskId,
@@ -145,6 +146,8 @@ export class Dispatcher {
     const slot = runner.slot;
     const workspace = requireWorkspace(task);
     const session = requireSession(task, workspace);
+    runner.resumed = true;
+    runner.carried = carriedOn(task.costs, "WORK");
     runner.checkout = {
       branch: workspace.branch,
       worktree: workspace.worktree,

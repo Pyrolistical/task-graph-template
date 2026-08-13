@@ -4,6 +4,7 @@ import type { Workspaces } from "./ports/workspaces.ts";
 import { Pool } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Awaitable } from "../domain/awaitable.ts";
+import { isClaimState } from "../domain/state-machine.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 
 export class Recovery {
@@ -47,6 +48,7 @@ export class Recovery {
       return;
     }
 
+    const tasks = await this.graph.list();
     for (const row of rows) {
       const runner = this.pool
         .runners()
@@ -55,8 +57,10 @@ export class Recovery {
         continue;
       }
 
+      const state = tasks.get(row.task_id)?.state;
       runner.state = "BUSY";
       runner.taskId = row.task_id;
+      runner.taskState = state && isClaimState(state) ? state : undefined;
       runner.role = row.role;
       runner.startedAt = row.started_at;
       runner.detachedPid = row.pid;
@@ -87,7 +91,7 @@ export class Recovery {
 
       for (const runner of this.pool.runners()) {
         if (runner.taskId === id) {
-          this.pool.release(runner.slot.name);
+          await this.pool.release(runner.slot.name);
         }
       }
     }

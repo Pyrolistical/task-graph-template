@@ -12,6 +12,7 @@ import {
   taskRow,
   taskRows,
 } from "../domain/graph.ts";
+import type { Cost } from "../domain/costs.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import {
   type TaskState,
@@ -120,6 +121,10 @@ export class TaskGraph {
   async claim(taskId: TaskId, args: ClaimArgs): Promise<void> {
     await this.tasks.claim(taskId, args);
     await this.remember(taskId, await this.list());
+  }
+
+  recordCost(taskId: TaskId, cost: Cost, resumed: boolean): Awaitable<void> {
+    return this.tasks.recordCost(taskId, cost, resumed);
   }
 
   async releaseClaim(taskId: TaskId): Promise<void> {

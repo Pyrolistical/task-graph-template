@@ -392,6 +392,83 @@ describe("Feature: reading and writing a task's fields", () => {
       expect(parseTaskMeta(parseDocument(document).raw).checks).toEqual([]);
     },
   );
+  testInTempDirs(
+    "what each session cost is written as a list a person can read",
+    () => {
+      // Given a task that has paid for a design and two work sessions
+      const meta = baseMeta({
+        costs: [
+          {
+            state: "DESIGN",
+            slot: "pi-anthropic-opus-1",
+            seconds: 300,
+            cost: 0.45,
+          },
+          {
+            state: "WORK",
+            slot: "pi-llama.cpp-rocm-1",
+            seconds: 7200,
+            cost: 0,
+          },
+          {
+            state: "WORK",
+            slot: "pi-anthropic-opus-2",
+            seconds: 940,
+            cost: 1.2,
+          },
+        ],
+      });
+      // When it is written and read back
+      const document = rebuildDocument(meta, "\n");
+      // Then every session is a block of its own, naming the slot that ran it
+      expect(document).toContain(
+        [
+          "costs:",
+          "  - state: DESIGN",
+          '    slot: "pi-anthropic-opus-1"',
+          "    seconds: 300",
+          "    cost: 0.45",
+          "  - state: WORK",
+          '    slot: "pi-llama.cpp-rocm-1"',
+          "    seconds: 7200",
+          "    cost: 0",
+          "  - state: WORK",
+          '    slot: "pi-anthropic-opus-2"',
+          "    seconds: 940",
+          "    cost: 1.2",
+        ].join("\n"),
+      );
+      expect(parseTaskMeta(parseDocument(document).raw).costs).toEqual(
+        meta.costs,
+      );
+    },
+  );
+  testInTempDirs("a task written before costs were kept still parses", () => {
+    // Given a document from a graph that predates the ledger
+    const { costs: _costs, ...document } = raw(baseMeta());
+    // When it is parsed as a task
+    const meta = parseTaskMeta(document);
+    // Then it starts with an empty ledger rather than refusing to load
+    expect(meta.costs).toEqual([]);
+  });
+  testInTempDirs("a cost against a state no agent runs is refused", () => {
+    // Given a task billing the manager's own review
+    const document = {
+      ...baseMeta(),
+      costs: [
+        {
+          state: "MANAGER_REVIEW",
+          slot: "pi-anthropic-opus-1",
+          seconds: 300,
+          cost: 0.45,
+        },
+      ],
+    };
+    // When it is parsed as a task
+    const issues = issuesOf(document);
+    // Then it is refused, because only the states pi runs cost anything
+    expect(issues[0]).toContain("costs[0].state");
+  });
   testInTempDirs("fields are always written in the same order", () => {
     // Given a task with every field on it
     const meta = baseMeta();
@@ -414,6 +491,7 @@ describe("Feature: reading and writing a task's fields", () => {
       "held_reason",
       "workspace",
       "checks",
+      "costs",
     ]);
   });
 });

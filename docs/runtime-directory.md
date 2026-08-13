@@ -27,7 +27,7 @@ Five snapshots, one per question a reader asks: `inbox` (what waits on a person)
 - all five carry the same `seq` — the transition cursor at write time — so a view and a graph delta line up
 - an idle slot is a row with no task, never a missing row: the pool is fixed at load and the view shows all of it
 - `enabled` is the agent's toggle, not the slot's, so a draining agent reads `enabled: false` while its slot still reads `BUSY`
-- `tokens`, `cost` and `context_percent` are the session totals pi reports, polled per tick off the running process; a provider that charges nothing reports zero and the console draws nothing
+- `tokens` and `context_percent` are the session totals pi reports, polled per tick off the running process; `cost` is what that session has spent — pi's price, or the [meter](agents.md#wattage-and-costperkwh) when the provider charges nothing, and zero when neither does, which the console draws as nothing
 - a queued task is one waiting on a slot; everything else is waiting on a person, a check or an agent, and lives in `inbox.json` or `tasks.json`
 - `blocking` is the transitive dependent count: the scheduler's tiebreak, the inbox's tiebreak, and the manager's reason to review one branch before another
 

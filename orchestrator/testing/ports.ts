@@ -13,6 +13,7 @@ import type { Awaitable } from "../domain/awaitable.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
+import type { Cost } from "../domain/costs.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
 import type {
   Role,
@@ -37,6 +38,8 @@ export function aSlot(overrides: Partial<Slot> = {}): Slot {
     index: 1,
     enabled: true,
     healthCheck: false,
+    wattage: 0,
+    costPerKwh: 0,
     write: [],
     roles: ["worker", "reviewer", "planner", "designer"],
     ...overrides,
@@ -55,6 +58,7 @@ export function aTask(overrides: Partial<TaskMeta> = {}): TaskMeta {
     held_reason: undefined,
     workspace: undefined,
     checks: [],
+    costs: [],
     ...overrides,
   };
 }
@@ -128,6 +132,7 @@ export class FakePublisher implements Publisher {
 
 export class FakeTasks implements Tasks {
   readonly released: TaskId[] = [];
+  readonly costs: { id: TaskId; cost: Cost; resumed: boolean }[] = [];
   readonly bodies = new Map<TaskId, string>();
 
   constructor(private readonly tasks: Map<TaskId, TaskMeta>) {}
@@ -189,6 +194,10 @@ export class FakeTasks implements Tasks {
       task.claimed_by = undefined;
       task.claimed_pid = undefined;
     }
+  }
+
+  recordCost(id: TaskId, cost: Cost, resumed: boolean): Awaitable<void> {
+    this.costs.push({ id, cost, resumed });
   }
 }
 

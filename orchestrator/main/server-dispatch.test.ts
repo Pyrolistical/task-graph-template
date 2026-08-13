@@ -155,6 +155,56 @@ describe("Feature: a task that goes all the way through", () => {
   );
 });
 
+describe("Feature: what a task cost to get through", () => {
+  testInTempDirs(
+    "every session a task runs is billed to the task, against the state it ran in",
+    async () => {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Add a greeting", [
+        "test -f hello.txt",
+      ]);
+
+      await setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "wrote hello.txt",
+              commit: { path: "hello.txt", contents: "hello\n" },
+            },
+          ],
+          WORK_REVIEW: [{ submit: true }],
+        },
+      });
+
+      // Given a task whose agents report what each session cost
+      const server = await serverFor(fixture);
+
+      // When the scheduler runs it to the manager
+      await walkTo(server, id, "MANAGER_REVIEW");
+
+      // Then the document carries one entry per session, in the order they ran
+      expect((await taskOf(server, id)).costs).toEqual([
+        {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: expect.any(Number),
+          cost: 0.45,
+        },
+        {
+          state: "WORK_REVIEW",
+          slot: "pi-fake-fake-1",
+          seconds: expect.any(Number),
+          cost: 0.45,
+        },
+      ]);
+
+      await server.shutdown();
+    },
+    30000,
+  );
+});
+
 describe("Feature: measuring how fast an agent writes", () => {
   testInTempDirs(
     "the output tokens of every message land in the pool's rate table",

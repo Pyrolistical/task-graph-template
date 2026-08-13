@@ -124,7 +124,13 @@ export async function wire(options: WiringOptions): Promise<Server> {
     publisher,
     runtime,
   );
-  const pool = new Pool(agents, workspaces, publisher, isProcessAlive);
+  const pool = new Pool(
+    agents,
+    workspaces,
+    publisher,
+    isProcessAlive,
+    (taskId, cost, resumed) => graph.recordCost(taskId, cost, resumed),
+  );
   const settler = new Settler(
     graph,
     edits,

@@ -10,6 +10,7 @@ import {
 } from "../domain/agents.ts";
 import { type Awaitable, orUndefined } from "../domain/awaitable.ts";
 import { abortable } from "../domain/activity.ts";
+import { type Carried, type Cost, costOf, secondsOf } from "../domain/costs.ts";
 import { messageOf, uncaught } from "../domain/errors.ts";
 import { type IssueName } from "../domain/issues.ts";
 import { Rates } from "../domain/rates.ts";
@@ -37,6 +38,8 @@ export interface Runner {
   startedAt?: string;
   detachedPid?: number;
   session?: string;
+  resumed: boolean;
+  carried: Carried;
   tokens?: number;
   cost?: number;
   contextPercent?: number;
@@ -59,6 +62,8 @@ function freshRunner(slot: Slot): Runner {
     startedAt: undefined,
     detachedPid: undefined,
     session: undefined,
+    resumed: false,
+    carried: { seconds: 0, cost: 0 },
     tokens: undefined,
     cost: undefined,
     contextPercent: undefined,
@@ -100,6 +105,11 @@ export class Pool {
     private readonly workspaces: Workspaces,
     private readonly publisher: Publisher,
     private readonly alive: (pid: number) => Awaitable<boolean>,
+    private readonly costs: (
+      taskId: TaskId,
+      cost: Cost,
+      resumed: boolean,
+    ) => Awaitable<void>,
   ) {
     this.slots = agents.slots();
     for (const slot of this.slots) {
@@ -300,7 +310,7 @@ export class Pool {
         process.kill();
       }
     }
-    this.release(runner.slot.name);
+    await this.release(runner.slot.name);
   }
 
   async finish(runner: Runner): Promise<void> {
@@ -309,9 +319,38 @@ export class Pool {
     await this.harvest(checkout);
   }
 
-  release(name: string): void {
+  async release(name: string): Promise<void> {
     const runner = this.runner(name);
+    const { taskId, taskState, session } = runner;
+    if (taskId && taskState && session) {
+      await this.costs(
+        taskId,
+        {
+          state: taskState,
+          slot: runner.slot.name,
+          seconds: secondsOf(this.elapsed(runner), runner.carried.seconds),
+          cost: this.spent(runner),
+        },
+        runner.resumed,
+      );
+    }
     Object.assign(runner, freshRunner(runner.slot));
+  }
+
+  private elapsed(runner: Runner): number {
+    const started = runner.startedAt
+      ? Date.parse(runner.startedAt)
+      : Date.now();
+    return Date.now() - started;
+  }
+
+  private spent(runner: Runner): number {
+    return costOf(
+      runner.slot,
+      this.elapsed(runner),
+      runner.cost,
+      runner.carried.cost,
+    );
   }
 
   rows(): SlotRow[] {
@@ -334,7 +373,7 @@ export class Pool {
       started_at: runner.startedAt,
       activity: runner.process?.stream.state.activity ?? { kind: "none" },
       tokens: runner.tokens,
-      cost: runner.cost,
+      cost: this.spent(runner),
       context_percent: runner.contextPercent,
       compactions: runner.compactions,
       session: runner.session,

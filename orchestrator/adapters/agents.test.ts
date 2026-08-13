@@ -178,9 +178,47 @@ describe("Feature: loading the pool of agents", () => {
         index: 1,
         enabled: true,
         healthCheck: false,
+        wattage: 0,
+        costPerKwh: 0,
         write: DEFAULT_WRITE,
         roles: ["worker", "reviewer", "planner", "designer"],
       });
+    },
+  );
+  testInTempDirs(
+    "an agent that draws power carries what its hour costs",
+    () => {
+      // Given a pool whose local agent declares the watts it draws and the price of a kWh
+      const pool = {
+        agents: [
+          {
+            type: "pi",
+            provider: "llama.cpp-rocm",
+            model: "rocm",
+            wattage: 300,
+            costPerKwh: 0.2,
+          },
+        ],
+      };
+      // When the pool is loaded
+      const slot = at(parsePool(pool), 0);
+      // Then the slot carries both, so a model that bills no tokens still costs something
+      expect(slot.wattage).toBe(300);
+      expect(slot.costPerKwh).toBe(0.2);
+    },
+  );
+  testInTempDirs(
+    "an agent that declares no meter is billed by its provider alone",
+    () => {
+      // Given a pool that says nothing about power
+      const pool = {
+        agents: [{ type: "pi", provider: "anthropic", model: "m" }],
+      };
+      // When the pool is loaded
+      const slot = at(parsePool(pool), 0);
+      // Then both default to zero, leaving the provider's price the only cost
+      expect(slot.wattage).toBe(0);
+      expect(slot.costPerKwh).toBe(0);
     },
   );
   testInTempDirs(

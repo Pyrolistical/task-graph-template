@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Cost } from "./costs.ts";
 import { keysOf } from "./lookup.ts";
 import { maybe, parse } from "./schema.ts";
 import { ALL_STATES } from "./state-machine.ts";
@@ -51,6 +52,7 @@ const TaskFields = z.strictObject({
   held_reason: maybe(nonEmpty),
   workspace: maybe(Workspace),
   checks: z.array(nonEmpty),
+  costs: z.array(Cost).default(() => []),
 });
 
 const Meta = TaskFields.refine(
@@ -159,6 +161,22 @@ export function serializeMeta(meta: TaskMeta): string {
         for (const item of items) {
           lines.push(`  - ${JSON.stringify(item)}`);
         }
+      }
+      continue;
+    }
+
+    if (key === "costs") {
+      const costs = meta[key];
+      if (costs.length === 0) {
+        lines.push(`${key}: []`);
+        continue;
+      }
+      lines.push(`${key}:`);
+      for (const entry of costs) {
+        lines.push(`  - state: ${entry.state}`);
+        lines.push(`    slot: ${scalar("slot", entry.slot)}`);
+        lines.push(`    seconds: ${entry.seconds}`);
+        lines.push(`    cost: ${entry.cost}`);
       }
       continue;
     }

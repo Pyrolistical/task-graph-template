@@ -61,6 +61,7 @@ export function baseMeta(overrides: Partial<TaskMeta> = {}): TaskMeta {
     held_reason: undefined,
     workspace: undefined,
     checks: [],
+    costs: [],
     ...overrides,
   };
 }

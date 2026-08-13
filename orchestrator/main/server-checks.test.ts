@@ -234,6 +234,57 @@ describe("Feature: sending a task back to the agent that did it", () => {
   );
 
   testInTempDirs(
+    "a resumed session is billed once, however many turns it took",
+    async () => {
+      const fixture = await makeFixture();
+      const id = await readyTask(fixture, "Do a thing", ["test -f fixed.txt"]);
+      await setPlan(fixture, {
+        [id]: {
+          WORK: [
+            {
+              submit: true,
+              notes: "first attempt",
+              commit: { path: "a.txt", contents: "a" },
+            },
+            {
+              submit: true,
+              notes: "first attempt\n\nthen I added fixed.txt",
+              commit: { path: "fixed.txt", contents: "now it is here\n" },
+            },
+          ],
+          WORK_REVIEW: [{ submit: true }],
+        },
+      });
+
+      // Given a task whose check failed once, so its work session was resumed
+      const server = await serverFor(fixture);
+      await dispatchOnce(server);
+
+      // When the resumed session finishes the work and the review passes
+      await walkTo(server, id, "MANAGER_REVIEW");
+
+      // Then the work is one entry at the session total, because a resume is not a second session
+      expect((await taskOf(server, id)).costs).toEqual([
+        {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: expect.any(Number),
+          cost: 0.45,
+        },
+        {
+          state: "WORK_REVIEW",
+          slot: "pi-fake-fake-1",
+          seconds: expect.any(Number),
+          cost: 0.45,
+        },
+      ]);
+
+      await server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
     "the resume prompt carries every failing command into the session",
     async () => {
       const fixture = await makeFixture();

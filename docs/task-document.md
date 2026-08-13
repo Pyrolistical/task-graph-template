@@ -22,6 +22,18 @@ Past the types:
 - `id` is a quoted six-digit string — `000042` unquoted is the number 42
 - `claimed_by` and `claimed_pid` are both set or both null: a claim with no pid cannot be released, a pid with no name cannot be attributed
 - `workspace.session` is the `WORK` session only ([why](sessions.md#roles-never-share-a-session))
+- `costs` is what the task has spent, one `{state, slot, seconds, cost}` per session, in the order the sessions ran
+
+## What a task cost
+
+The server appends to `costs` when a slot lets a session go, so the ledger reads as the phases ran and a task carries its own bill — no view to join, no log to replay, and it survives into `closed/`.
+
+- only the six states an agent runs are in it; `CHECK` and `MANAGER_REVIEW` cost nothing because nothing is prompted in them
+- one entry is one **session**, not one turn: a resumed `WORK` session ([when](sessions.md#resume-only-within-the-same-submit-cycle)) updates the entry it already has, because pi prices a session file whole. A rejection starts a fresh session, so it is a second `WORK` entry
+- `slot` is the [slot name](agents.md) the session ran on, so the bill names the model on the provider that earned it and not just the phase; a resume that lands on [another slot](scheduler.md#which-free-slot) takes over the entry, since the cost it carries is now the whole session's
+- `seconds` is wall clock the session held its slot, rounded to the second, and a resume adds to what the entry already held. It is summed where a reported price is not, because a provider prices the whole session file while the clock only ever runs while a slot is held — the two agree only when nothing was resumed
+- a zero is kept rather than dropped: a model that prices nothing and declares no [meter](agents.md#wattage-and-costperkwh) still ran, and an absent entry would read as a session that never happened
+- the field is written by the server alone, so a document from before it existed loads with an empty one rather than being refused
 
 ## Serialization is hand-written
 

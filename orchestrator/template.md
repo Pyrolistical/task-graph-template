@@ -9,6 +9,7 @@ claimed_pid:
 held_reason:
 workspace:
 checks: []
+costs: []
 ---
 
 # Purpose

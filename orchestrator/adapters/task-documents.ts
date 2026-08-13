@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ClaimArgs, CreatedTask, Tasks } from "../app/ports/tasks.ts";
+import { type Cost, recorded } from "../domain/costs.ts";
 import { hasCode, messageOf } from "../domain/errors.ts";
 import {
   type TaskId,
@@ -276,6 +277,24 @@ export async function clearClaim(
   await writeTaskFile(filePath, meta, body);
 }
 
+export async function addCost(
+  tasksDir: string,
+  taskId: TaskId,
+  cost: Cost,
+  resumed: boolean,
+): Promise<void> {
+  const filePath = await findTaskFile(taskId, tasksDir);
+  if (!filePath) {
+    throw new Error(`Task "${taskId}" not found`);
+  }
+
+  const { meta, body } = await readTaskFile(filePath);
+
+  meta.costs = recorded(meta.costs, cost, resumed);
+
+  await writeTaskFile(filePath, meta, body);
+}
+
 export class TaskDocuments implements Tasks {
   constructor(
     private readonly tasksDir: string,
@@ -326,6 +345,10 @@ export class TaskDocuments implements Tasks {
 
   async releaseClaim(id: TaskId): Promise<void> {
     await clearClaim(this.tasksDir, id);
+  }
+
+  async recordCost(id: TaskId, cost: Cost, resumed: boolean): Promise<void> {
+    await addCost(this.tasksDir, id, cost, resumed);
   }
 
   takeLock(): Promise<void> {

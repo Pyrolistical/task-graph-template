@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Pool } from "./pool.ts";
+import { type Runner, Pool } from "./pool.ts";
 import {
   FakePublisher,
   FakeWorkspaces,
@@ -9,6 +9,7 @@ import {
 } from "../testing/ports.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
+import type { Cost } from "../domain/costs.ts";
 import { at } from "../testing/present.ts";
 
 function aPool(
@@ -27,13 +28,23 @@ function aPool(
       return health();
     },
   );
-  const pool = new Pool(agents, workspaces, publisher, () => alive);
+  const costs: { id: string; cost: Cost; resumed: boolean }[] = [];
+  const pool = new Pool(
+    agents,
+    workspaces,
+    publisher,
+    () => alive,
+    (id, cost, resumed) => {
+      costs.push({ id, cost, resumed });
+    },
+  );
   return {
     pool,
     log: publisher.lines,
     harvested: workspaces.harvested,
     workspaces,
     probed,
+    costs,
   };
 }
 
@@ -238,6 +249,46 @@ describe("Feature: the pool of agent slots", () => {
   });
 });
 
+describe("Feature: what a running session has cost so far", () => {
+  test("the console is shown the price pi reports", () => {
+    // Given a busy slot whose provider prices what it has spent
+    const { pool } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
+    const runner = onATask(pool);
+    runner.cost = 0.45;
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then the row carries the provider's price, not a second one off the meter
+    expect(row.cost).toBe(0.45);
+  });
+
+  test("a slot on an unpriced model shows what its power has cost", () => {
+    // Given a busy slot on a 300W agent at 20 cents a kWh, an hour in, priced at nothing
+    const { pool } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
+    const runner = onATask(pool);
+    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then the console has a cost to draw for a model that bills no tokens
+    expect(row.cost).toBe(0.06);
+  });
+
+  test("a slot with neither a price nor a meter costs nothing", () => {
+    // Given a busy slot on an agent that declares no wattage
+    const { pool } = aPool();
+    onATask(pool);
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then it reads zero, which the console draws as no column at all
+    expect(row.cost).toBe(0);
+  });
+});
+
 describe("Feature: aborting the tool call an agent is inside", () => {
   test("a slot running a bash call has that call aborted", async () => {
     // Given a slot whose agent is inside a bash tool call
@@ -273,6 +324,18 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     expect(attempt).toThrow(/not running a bash tool call/);
   });
 });
+
+function onATask(pool: Pool): Runner {
+  const runner = pool.runner("pi-fake-fake-1");
+  runner.state = "BUSY";
+  runner.taskId = "000042";
+  runner.taskState = "WORK";
+  runner.role = "worker";
+  runner.startedAt = new Date().toISOString();
+  runner.session = "/runtime/000042/session/worker/000042.jsonl";
+  runner.process = aSession({ kind: "none" });
+  return runner;
+}
 
 describe("Feature: releasing a slot when its work ends", () => {
   test("finishing a runner harvests its worktree and returns the slot to idle", async () => {
@@ -334,6 +397,7 @@ describe("Feature: releasing a slot when its work ends", () => {
         new Promise<boolean>((resolve) => {
           confirm = resolve;
         }),
+      () => {},
     );
     const runner = pool.runner("pi-fake-fake-1");
     runner.state = "BUSY";
@@ -353,6 +417,93 @@ describe("Feature: releasing a slot when its work ends", () => {
     confirm(true);
     await released;
     expect(at(pool.rows(), 0).state).toBe("IDLE");
+  });
+
+  test("a session that ends puts what pi charged for it on the task", async () => {
+    // Given a slot part way through a work session pi has priced
+    const { pool, costs } = aPool();
+    const runner = onATask(pool);
+    runner.cost = 0.45;
+
+    // When the slot is released
+    await pool.release("pi-fake-fake-1");
+
+    // Then the task carries what that session cost, against the state it ran
+    expect(costs).toEqual([
+      {
+        id: "000042",
+        cost: {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: 0,
+          cost: 0.45,
+        },
+        resumed: false,
+      },
+    ]);
+  });
+
+  test("a session on an unpriced model is billed for the power it drew", async () => {
+    // Given a slot on a 300W agent at 20 cents a kWh, an hour into a session pi prices at nothing
+    const { pool, costs } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
+    const runner = onATask(pool);
+    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+
+    // When the slot is released
+    await pool.release("pi-fake-fake-1");
+
+    // Then the hour it ran is billed as energy instead of tokens
+    expect(costs).toEqual([
+      {
+        id: "000042",
+        cost: {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: 3600,
+          cost: 0.06,
+        },
+        resumed: false,
+      },
+    ]);
+  });
+
+  test("a resumed session is recorded as the same session, not a second one", async () => {
+    // Given a slot that resumed a work session which had already run 15 minutes
+    const { pool, costs } = aPool();
+    const runner = onATask(pool);
+    runner.resumed = true;
+    runner.carried = { seconds: 900, cost: 0.3 };
+    runner.cost = 0.7;
+
+    // When the slot is released
+    await pool.release("pi-fake-fake-1");
+
+    // Then the entry is marked a resume, carrying the clock but taking pi's price whole
+    expect(costs).toEqual([
+      {
+        id: "000042",
+        cost: {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: 900,
+          cost: 0.7,
+        },
+        resumed: true,
+      },
+    ]);
+  });
+
+  test("a slot released before it opened a session bills the task nothing", async () => {
+    // Given a slot that took a task but died before pi gave it a session
+    const { pool, costs } = aPool();
+    const runner = onATask(pool);
+    runner.session = undefined;
+
+    // When the slot is released
+    await pool.release("pi-fake-fake-1");
+
+    // Then nothing is recorded, because an entry is a session and there was none
+    expect(costs).toEqual([]);
   });
 
   test("a pool with nothing tracked has no work in flight", () => {

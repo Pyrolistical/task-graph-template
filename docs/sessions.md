@@ -19,6 +19,8 @@ In reverse, a rejected task starts fresh: the context worth keeping is already d
 
 `workspace.session` records the **work** session only, since `WORK` is the only state a resume targets. Otherwise the following review would own the field and a worker sent back by a finding would switch into the reviewer's session — the review of its own work, exactly what the split denies it.
 
+What each session spent is billed to the task as one `costs` entry ([how](task-document.md#what-a-task-cost)).
+
 ## Resume only within the same submit cycle
 
 A failed check is seconds after the work, so the agent still holds every reason for its choices: `switch_session`, assignment carried forward with its notes, failures already in the session as the first prompt, at the scheduler's top rank. `runner.checkout.dispatched` is re-based on the carried file so the append-only check still holds.

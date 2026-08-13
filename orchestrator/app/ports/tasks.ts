@@ -1,4 +1,5 @@
 import type { Awaitable } from "../../domain/awaitable.ts";
+import type { Cost } from "../../domain/costs.ts";
 import type {
   TransitionArgs,
   TransitionName,
@@ -35,6 +36,7 @@ export interface Tasks {
   ): Awaitable<TransitionResult>;
   claim(id: TaskId, args: ClaimArgs): Awaitable<void>;
   releaseClaim(id: TaskId): Awaitable<void>;
+  recordCost(id: TaskId, cost: Cost, resumed: boolean): Awaitable<void>;
   takeLock(): Awaitable<void>;
   clearLock(): Awaitable<void>;
 }

@@ -20,7 +20,7 @@ import { at } from "../testing/present.ts";
 const DEAD_PID = 9001;
 const LIVE_PID = 9002;
 
-function aRig(tasks: TaskMeta[]) {
+function aRig(tasks: TaskMeta[], slots = [aSlot()]) {
   const byId = new Map<TaskId, TaskMeta>(tasks.map((task) => [task.id, task]));
   const store = new FakeTasks(byId);
   const workspaces = new FakeWorkspaces();
@@ -36,10 +36,11 @@ function aRig(tasks: TaskMeta[]) {
     paths,
   );
   const pool = new Pool(
-    fakeAgents([aSlot()]),
+    fakeAgents(slots),
     workspaces,
     publisher,
     (pid) => pid === LIVE_PID,
+    (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
   const recover = new Recovery(
     graph,
@@ -147,7 +148,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     runner.state = "BUSY";
     runner.taskId = task.id;
     runner.process = aSession({ kind: "none" }, false);
-    pool.release("pi-fake-fake-1");
+    await pool.release("pi-fake-fake-1");
 
     // When the reaper runs over the graph
     await recover.reap(new Map([[task.id, task]]));
@@ -155,6 +156,43 @@ describe("Feature: reaping claims whose process is gone", () => {
     // Then the claim is released and the slot goes back to idle
     expect(store.released).toEqual(["000042"]);
     expect(at(pool.rows(), 0).state).toBe("IDLE");
+  });
+
+  test("what a reaped agent drew from the wall is billed to its task", async () => {
+    // Given a task claimed by a detached agent whose process has since exited
+    const task = aTask({
+      claimed_by: "pi-fake-fake-1",
+      claimed_pid: DEAD_PID,
+    });
+    const { recover, pool, store } = aRig(
+      [task],
+      [aSlot({ wattage: 300, costPerKwh: 0.2 })],
+    );
+
+    // Given the slot was picked back up an hour ago and priced by nobody
+    const runner = pool.runner("pi-fake-fake-1");
+    runner.state = "BUSY";
+    runner.taskId = task.id;
+    runner.taskState = "WORK";
+    runner.session = "/sessions/000042.jsonl";
+    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+
+    // When the reaper runs over the graph
+    await recover.reap(new Map([[task.id, task]]));
+
+    // Then the hour it ran is on the task, because a detached run still costs power
+    expect(store.costs).toEqual([
+      {
+        id: "000042",
+        cost: {
+          state: "WORK",
+          slot: "pi-fake-fake-1",
+          seconds: 3600,
+          cost: 0.06,
+        },
+        resumed: false,
+      },
+    ]);
   });
 
   test("the work a reaped agent committed is harvested onto its branch", async () => {
@@ -206,6 +244,33 @@ describe("Feature: picking the pool back up after a restart", () => {
     expect(log).toEqual([
       `pi-fake-fake-1 is still running 000042 as pid ${LIVE_PID}; leaving it alone`,
     ]);
+  });
+
+  test("a slot picked back up knows which state it is running", async () => {
+    // Given a task in WORK whose agent outlived the server that dispatched it
+    const task = aTask({
+      state: "WORK",
+      claimed_by: "pi-fake-fake-1",
+      claimed_pid: LIVE_PID,
+    });
+    const { recover, pool, publisher } = aRig([task]);
+    publisher.rows = [
+      {
+        ...at(pool.rows(), 0),
+        state: "BUSY",
+        task_id: task.id,
+        role: "worker",
+        pid: LIVE_PID,
+        started_at: "2026-07-29T00:00:00Z",
+        session: "/sessions/000042.jsonl",
+      },
+    ];
+
+    // When the server reattaches to what the last one left behind
+    await recover.reattach();
+
+    // Then the state comes off the graph, since the view does not carry it and a cost needs one
+    expect(pool.runner("pi-fake-fake-1").taskState).toBe("WORK");
   });
 
   test("a slot whose pid is gone is left idle for the scheduler", async () => {

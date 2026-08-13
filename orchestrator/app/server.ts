@@ -319,8 +319,9 @@ export class Server implements Manager {
 
   async shutdown(): Promise<void> {
     this.stopTaking();
-    await this.release();
     this.pool.shutdown();
+    await this.pool.settled();
+    await this.release();
     await this.close();
   }
 

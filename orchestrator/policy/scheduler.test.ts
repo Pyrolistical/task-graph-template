@@ -21,6 +21,7 @@ describe("Feature: which task is dispatched next", () => {
       held_reason: undefined,
       workspace: undefined,
       checks: [],
+      costs: [],
       ...overrides,
     };
   }
@@ -70,6 +71,8 @@ describe("Feature: which task is dispatched next", () => {
     index: 1,
     enabled: true,
     healthCheck: false,
+    wattage: 0,
+    costPerKwh: 0,
     write: ["~/.cache/zig"],
     roles: [...ALL_ROLES],
   });
@@ -418,6 +421,7 @@ describe("Feature: what is waiting on the manager", () => {
       held_reason: undefined,
       workspace: undefined,
       checks: [],
+      costs: [],
       ...overrides,
     };
   }

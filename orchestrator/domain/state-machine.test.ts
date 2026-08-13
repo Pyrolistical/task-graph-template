@@ -23,6 +23,7 @@ function aTask(state: ValidState, overrides: Partial<TaskMeta> = {}): TaskMeta {
     held_reason: undefined,
     workspace: undefined,
     checks: [],
+    costs: [],
     ...overrides,
   };
 }

@@ -103,7 +103,7 @@ The server drives the directory `claude` was started in, so run it from the proj
 }
 ```
 
-It is seeded with one disabled placeholder: give it a real provider and model, set `enabled`, add slots. A provider that is not always up — a local inference server — takes `"healthCheck": true`. See [Agents](docs/agents.md).
+It is seeded with one disabled placeholder: give it a real provider and model, set `enabled`, add slots. A provider that is not always up — a local inference server — takes `"healthCheck": true`. A local model bills no tokens, so give it `"wattage"` and `"costPerKwh"` and its sessions are priced by the power they drew. See [Agents](docs/agents.md).
 
 Link the manager's skills in, so they stay the template's copy: `task-graph-inbox` clears the inbox once, `task-graph-monitor` clears it and keeps watching.
 
