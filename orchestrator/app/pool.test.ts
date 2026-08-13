@@ -3,6 +3,7 @@ import { type Runner, Pool } from "./pool.ts";
 import {
   FakePublisher,
   FakeWorkspaces,
+  aSchedule,
   aSession,
   aSlot,
   fakeAgents,
@@ -95,6 +96,90 @@ describe("Feature: the pool of agent slots", () => {
     expect((await pool.freeSlots()).map((slot) => slot.name)).toEqual([
       "pi-fake-fake-1",
     ]);
+  });
+
+  test("a slot inside a segment its agent declared is offered", async () => {
+    // Given a pool whose only agent is allowed to run for the half hour either side of now
+    const { pool } = aPool([aSlot({ schedule: aSchedule(-30, 30) })]);
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then the slot is dispatchable, because the clock is inside its schedule
+    expect(free.map((slot) => slot.name)).toEqual(["pi-fake-fake-1"]);
+  });
+
+  test("a slot outside every segment its agent declared is held back", async () => {
+    // Given a pool whose only agent is allowed to run in half an hour's time
+    const { pool } = aPool([aSlot({ schedule: aSchedule(30, 90) })]);
+
+    // When the scheduler asks what is free
+    const free = await pool.freeSlots();
+
+    // Then nothing is dispatched, because the clock is outside its schedule
+    expect(free).toEqual([]);
+  });
+
+  test("a slot outside its schedule reads as off schedule", () => {
+    // Given a pool whose only agent is allowed to run in half an hour's time
+    const { pool } = aPool([aSlot({ schedule: aSchedule(30, 90) })]);
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then it reads as off schedule with its switch still on, because the agent is enabled
+    expect(row.state).toBe("OFF_SCHEDULE");
+    expect(row.enabled).toBe(true);
+  });
+
+  test("a slot outside its schedule never has its provider reached for", async () => {
+    // Given a pool whose only agent asks for a health check
+    // Given that agent is allowed to run only in half an hour's time
+    const { pool, probed } = aPool([
+      aSlot({ healthCheck: true, schedule: aSchedule(30, 90) }),
+    ]);
+
+    // When the scheduler asks what is free
+    await pool.freeSlots();
+
+    // Then the provider was left alone, because a held slot is not capacity to check
+    expect(probed).toEqual([]);
+  });
+
+  test("a slot holding a task keeps it when its schedule closes", () => {
+    // Given a pool of two slots of one agent, allowed to run only in half an hour's time
+    // Given one of them is busy with a task and the other is idle
+    const slots = [1, 2].map((index) =>
+      aSlot({
+        name: `pi-fake-fake-${index}`,
+        index,
+        schedule: aSchedule(30, 90),
+      }),
+    );
+    const { pool } = aPool(slots);
+    const busy = pool.runner("pi-fake-fake-1");
+    busy.state = "BUSY";
+    busy.taskId = "000042";
+
+    // When the pool is asked for its rows
+    const rows = pool.rows();
+
+    // Then only the idle slot reads as off schedule, because a schedule gates dispatch, not work in flight
+    expect(rows.map((row) => row.state)).toEqual(["BUSY", "OFF_SCHEDULE"]);
+  });
+
+  test("a slot of an agent that is both off and outside its schedule reads as disabled", () => {
+    // Given a pool whose only agent is turned off in the pool file
+    // Given that agent is also allowed to run only in half an hour's time
+    const { pool } = aPool([
+      aSlot({ enabled: false, schedule: aSchedule(30, 90) }),
+    ]);
+
+    // When the pool is asked for its rows
+    const row = at(pool.rows(), 0);
+
+    // Then it reads as disabled, because a switch a person threw outranks the clock
+    expect(row.state).toBe("DISABLED");
   });
 
   test("a slot whose agent asks for no health check is offered unasked", async () => {

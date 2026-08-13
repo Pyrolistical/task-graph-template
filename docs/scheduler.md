@@ -12,6 +12,7 @@ Why work-in-progress rather than throughput: every task in flight holds a worktr
 - `claimed_by` is the first thing the ranking reads: a claimed task is not a candidate
 - an empty pool refuses to start the scheduler, naming the pool file — a running scheduler with nothing to dispatch to is a queue that never moves
 - a provider held back by its [health check](agents.md#healthcheck) is not free capacity: its slots exist but are not offered, and the queue waits
+- an agent outside its [schedule](agents.md#schedule) is held the same way, and its provider is not even reached for: a slot that cannot be dispatched is not worth a health check
 
 ## Which free slot
 

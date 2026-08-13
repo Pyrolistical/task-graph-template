@@ -12,6 +12,7 @@ import type { Workspaces } from "../app/ports/workspaces.ts";
 import type { Awaitable } from "../domain/awaitable.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
+import type { Schedule } from "../domain/schedule.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import type { Cost } from "../domain/costs.ts";
 import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
@@ -37,6 +38,7 @@ export function aSlot(overrides: Partial<Slot> = {}): Slot {
     model: "fake",
     index: 1,
     enabled: true,
+    schedule: undefined,
     healthCheck: false,
     wattage: 0,
     costPerKwh: 0,
@@ -44,6 +46,20 @@ export function aSlot(overrides: Partial<Slot> = {}): Slot {
     roles: ["worker", "reviewer", "planner", "designer"],
     ...overrides,
   };
+}
+
+export function aSchedule(
+  fromMinutes: number,
+  toMinutes: number,
+  nowMs = Date.now(),
+): Schedule {
+  const hhmm = (minutes: number) => {
+    const at = new Date(nowMs + minutes * 60 * 1000);
+    return [at.getHours(), at.getMinutes()]
+      .map((part) => String(part).padStart(2, "0"))
+      .join(":");
+  };
+  return [{ start: hhmm(fromMinutes), end: hhmm(toMinutes) }];
 }
 
 export function aTask(overrides: Partial<TaskMeta> = {}): TaskMeta {

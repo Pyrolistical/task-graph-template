@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { maybe, parse } from "./schema.ts";
+import { Schedule, withinSchedule } from "./schedule.ts";
 import { ALL_ROLES, type Role } from "./state-machine.ts";
 import { Activity } from "./activity.ts";
 
@@ -10,6 +11,7 @@ function poolSchema(defaultWrite: string[]) {
     model: z.string().min(1),
     slots: z.int().min(1).default(1),
     enabled: z.boolean().default(true),
+    schedule: Schedule.optional(),
     healthCheck: z.boolean().default(false),
     wattage: z.number().min(0).default(0),
     costPerKwh: z.number().min(0).default(0),
@@ -39,6 +41,7 @@ export interface AgentEntry {
   model: string;
   slots: number;
   enabled: boolean;
+  schedule?: Schedule;
   healthCheck: boolean;
   wattage: number;
   costPerKwh: number;
@@ -54,6 +57,7 @@ export interface Slot {
   model: string;
   index: number;
   enabled: boolean;
+  schedule?: Schedule;
   healthCheck: boolean;
   wattage: number;
   costPerKwh: number;
@@ -91,6 +95,7 @@ export function parseAgents(
         model: entry.model,
         index,
         enabled: entry.enabled,
+        schedule: entry.schedule,
         healthCheck: entry.healthCheck,
         wattage: entry.wattage,
         costPerKwh: entry.costPerKwh,
@@ -106,6 +111,7 @@ export function parseAgents(
 export const SlotState = z.enum([
   "IDLE",
   "DISABLED",
+  "OFF_SCHEDULE",
   "UNREACHABLE",
   "SPAWNING",
   "BUSY",
@@ -157,14 +163,26 @@ export const SlotsViewOfAnyServer = z.looseObject({
   slots: z.array(SlotRow.strip()),
 });
 
-function idleState(enabled: boolean, reachable: boolean): SlotState {
+function idleState(
+  enabled: boolean,
+  reachable: boolean,
+  scheduled: boolean,
+): SlotState {
   if (!enabled) {
     return "DISABLED";
+  }
+  if (!scheduled) {
+    return "OFF_SCHEDULE";
   }
   return reachable ? "IDLE" : "UNREACHABLE";
 }
 
-export function idleRow(slot: Slot, enabled = true, reachable = true): SlotRow {
+export function idleRow(
+  slot: Slot,
+  enabled = true,
+  reachable = true,
+  scheduled = withinSchedule(slot.schedule),
+): SlotRow {
   return {
     name: slot.name,
     agent: slot.agent,
@@ -173,7 +191,7 @@ export function idleRow(slot: Slot, enabled = true, reachable = true): SlotRow {
     model: slot.model,
     index: slot.index,
     enabled,
-    state: idleState(enabled, reachable),
+    state: idleState(enabled, reachable, scheduled),
     task_id: undefined,
     role: undefined,
     pid: undefined,

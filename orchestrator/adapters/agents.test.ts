@@ -129,6 +129,126 @@ describe("Feature: loading the pool of agents", () => {
     // Then only that agent's slots start disabled
     expect(slots.map((slot) => slot.enabled)).toEqual([true, true, false]);
   });
+  testInTempDirs("an agent runs at any time unless the pool says when", () => {
+    // Given a pool with one agent that names no segments
+    const pool = {
+      agents: [{ type: "pi", provider: "anthropic", model: "m", slots: 1 }],
+    };
+    // When the pool is loaded
+    const slots = parsePool(pool);
+    // Then its slot carries no schedule, which is what leaves it always dispatchable
+    expect(at(slots, 0).schedule).toBeUndefined();
+  });
+  testInTempDirs(
+    "every slot of an agent carries the segments it runs in",
+    () => {
+      // Given a pool with one agent allowed to run overnight and over lunch, on two slots
+      const pool = {
+        agents: [
+          {
+            type: "pi",
+            provider: "llama.cpp-rocm",
+            model: "rocm",
+            slots: 2,
+            schedule: [
+              { start: "22:30", end: "06:15" },
+              { start: "12:05", end: "12:55" },
+            ],
+          },
+        ],
+      };
+      // When the pool is loaded
+      const slots = parsePool(pool);
+      // Then both slots carry both segments to the minute, because the schedule is the agent's, not a slot's
+      expect(slots.map((slot) => slot.schedule)).toEqual([
+        [
+          { start: "22:30", end: "06:15" },
+          { start: "12:05", end: "12:55" },
+        ],
+        [
+          { start: "22:30", end: "06:15" },
+          { start: "12:05", end: "12:55" },
+        ],
+      ]);
+    },
+  );
+  testInTempDirs("an hour written without its leading zero is refused", () => {
+    // Given a pool whose segment names nine in the morning as a single digit
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          schedule: [{ start: "9:00", end: "17:00" }],
+        },
+      ],
+    };
+    // When the pool is loaded
+    const attempt = () => parsePool(pool);
+    // Then it is refused on load, naming the 24 hour form it wanted
+    expect(attempt).toThrow(
+      /agents\[0\]\.schedule\[0\]\.start: must be a 24 hour time hh:mm/,
+    );
+  });
+  testInTempDirs("an hour past the end of the day is refused", () => {
+    // Given a pool whose segment ends at a twenty-fifth hour
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          schedule: [{ start: "09:00", end: "24:00" }],
+        },
+      ],
+    };
+    // When the pool is loaded
+    const attempt = () => parsePool(pool);
+    // Then it is refused, because midnight is written as the zeroth hour
+    expect(attempt).toThrow(
+      /agents\[0\]\.schedule\[0\]\.end: must be a 24 hour time hh:mm/,
+    );
+  });
+  testInTempDirs(
+    "a segment that starts and ends at the same minute is refused",
+    () => {
+      // Given a pool whose segment opens and closes at noon
+      const pool = {
+        agents: [
+          {
+            type: "pi",
+            provider: "anthropic",
+            model: "m",
+            schedule: [{ start: "12:00", end: "12:00" }],
+          },
+        ],
+      };
+      // When the pool is loaded
+      const attempt = () => parsePool(pool);
+      // Then it is refused rather than read as a whole day or as none of one
+      expect(attempt).toThrow(
+        /starts and ends at the same minute, so it never opens/,
+      );
+    },
+  );
+  testInTempDirs("a schedule with no segments in it loads as none", () => {
+    // Given a pool whose agent declares an empty list of segments
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          schedule: [],
+        },
+      ],
+    };
+    // When the pool is loaded
+    const slots = parsePool(pool);
+    // Then its slot carries the empty list, which reads the same as naming no segments at all
+    expect(at(slots, 0).schedule).toEqual([]);
+  });
   testInTempDirs(
     "a slot may take every role unless the pool restricts it",
     () => {
@@ -177,6 +297,7 @@ describe("Feature: loading the pool of agents", () => {
         model: "m",
         index: 1,
         enabled: true,
+        schedule: undefined,
         healthCheck: false,
         wattage: 0,
         costPerKwh: 0,

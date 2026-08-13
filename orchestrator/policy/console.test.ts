@@ -133,6 +133,17 @@ describe("Feature: joining a slot to the task it is running", () => {
     expect(detail).toBe("provider not answering");
   });
 
+  test("a slot outside its schedule says why it is holding no task", () => {
+    // Given a view whose only slot is idle because the clock is outside its schedule
+    const view = { slots: [idleRow(SLOTS[1], true, true, false)] };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it says the schedule is what is holding the slot, not that there is no work
+    expect(detail).toBe("outside its schedule");
+  });
+
   test("an idle slot shows no task, no check and no clock", () => {
     // Given a view whose only slot is idle
     const view = { slots: [idleRow(SLOTS[1])] };
@@ -1222,6 +1233,19 @@ describe("Feature: the switches on a pane header", () => {
     // Then the switch is still on, because the agent is enabled, and the state is red
     expect(line).toBe(
       "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1       \x1b[31munreachable\x1b[0m",
+    );
+  });
+
+  test("a slot outside its schedule reads as off schedule", () => {
+    // Given an idle slot the clock has taken outside its schedule
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], true, true, false)] });
+
+    // When its header is drawn
+    const line = renderLine(at(header(pane, 60, 1000), 0));
+
+    // Then the switch is still on, and the state is two words rather than one underscored
+    expect(line).toBe(
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1      off schedule",
     );
   });
 

@@ -14,6 +14,7 @@ import { type Carried, type Cost, costOf, secondsOf } from "../domain/costs.ts";
 import { messageOf, uncaught } from "../domain/errors.ts";
 import { type IssueName } from "../domain/issues.ts";
 import { Rates } from "../domain/rates.ts";
+import { withinSchedule } from "../domain/schedule.ts";
 import type { ResultCall } from "../domain/results.ts";
 import type { ClaimState, Role } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
@@ -136,7 +137,9 @@ export class Pool {
     const idle = this.runners()
       .filter(
         (runner) =>
-          runner.state === "IDLE" && !this.disabled.has(runner.slot.agent),
+          runner.state === "IDLE" &&
+          !this.disabled.has(runner.slot.agent) &&
+          withinSchedule(runner.slot.schedule),
       )
       .map((runner) => runner.slot);
 

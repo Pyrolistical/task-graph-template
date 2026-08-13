@@ -1,6 +1,6 @@
 # Agents
 
-`agents.json` declares the pool: a model on a provider, how many slots, whether it runs, whether its provider is asked if it is up first, what it may write outside its worktree, which roles it may take.
+`agents.json` declares the pool: a model on a provider, how many slots, whether it runs, when it may run, whether its provider is asked if it is up first, what it may write outside its worktree, which roles it may take.
 
 ```json
 {
@@ -18,6 +18,7 @@
       "slots": 1,
       "roles": ["worker"],
       "enabled": false,
+      "schedule": [{ "start": "22:30", "end": "06:15" }],
       "healthCheck": true,
       "wattage": 300,
       "costPerKwh": 0.19,
@@ -64,6 +65,19 @@ A property of the agent, not a slot: there is no case where slot 2 should be dis
 
 Disabling never interrupts work: a slot mid-task keeps it, settles it, runs its checks, and is not offered again. `enabled` goes false on every row at once while `state` still reads `BUSY`, becoming `DISABLED` on release, because draining and already-idle are different situations.
 
+## schedule
+
+When an enabled agent may be dispatched, as segments of 24 hour `hh:mm` on the server's own clock. Naming none — the field omitted, or an empty list — leaves the agent dispatchable at any time; naming some closes every minute they leave out, and a slot outside all of them is not offered and reads `OFF_SCHEDULE`, so the console says why the queue is not moving rather than showing capacity that takes nothing. For the box that is cheap to run overnight and the model you would rather not have thinking while you work.
+
+- **the minute is the unit**, both ends: `09:30–17:45` is a segment, `09:30–09:31` is the smallest one there is, and a slot is held at `09:29` against a `09:30` start. Nothing rounds to the hour
+- a segment is half-open, `start` up to but not including `end`, so `06:00–09:00` and `09:00–17:00` hand over at nine without covering that minute twice
+- an `end` earlier than its `start` wraps midnight: `22:00–06:00` is one segment, not two
+- segments are a union and may overlap; a day with segments in it is closed unless one of them opens it
+- refused **on load**: a time that is not `hh:mm`, and a segment that starts and ends at the same minute — never running is what `enabled` is for, and a whole day is what an empty schedule is for
+- gates dispatch only, like the health check: a slot mid-task when its schedule closes keeps it, settles it, runs its checks, and is not offered again. `enabled` stays on throughout, because nobody threw a switch
+- the clock is read at every tick and every view, and a tick is a second, so an agent starts taking work within a second of its segment opening, with nothing to restart
+- `enabled` outranks it: an agent turned off inside its schedule reads `DISABLED`, not `OFF_SCHEDULE`
+
 ## Aborting one tool call
 
 `slot_abort` targets one slot by full name — the only case where a slot, not an agent, is the unit. Refused unless that process is inside a `bash` call: `bash` is the only tool that runs long enough to be stuck, and it kills the command, not the turn. The tool result comes back as an error and **the agent reacts** — a failed tool call is something it already knows how to read, and ending the turn would throw away the context that produced it. Session, claim and slot are untouched. Anything worse is `looping` or a held state.
@@ -77,11 +91,13 @@ Disabling never interrupts work: a slot mid-task keeps it, settles it, runs its 
 ```text
 IDLE → SPAWNING → BUSY ⇄ WAITING → SETTLED → IDLE
 IDLE ⇄ DISABLED (its agent)   IDLE ⇄ UNREACHABLE (its provider)
+IDLE ⇄ OFF_SCHEDULE (its schedule)
 BUSY → ABORTING → SETTLED (shutdown)   BUSY → IDLE (process died unsettled)
 SETTLED → BUSY (correct, nudge, resume in situ)
 ```
 
 - `UNREACHABLE` = `IDLE` + failed health check: holds nothing, still enabled, not offered. `WAITING` is the same shortage from the other side — a slot already holding a task that cannot reach its provider
+- `OFF_SCHEDULE` = `IDLE` + the clock outside every declared segment: the same shape as `UNREACHABLE`, held by the schedule rather than the provider, and no state to enter or leave because it is read off the clock
 - a `WAITING` slot is **not free**: outage backpressure must show as reduced capacity, not a queue of dispatches into a wall
 - `DISABLED` is entered only from `IDLE`, which makes disabling safe at any moment
 - `BUSY → IDLE` is `pi` dying without settling (OOM, segfault): the stream fails when stdout closes, the worker stops rather than prompting a corpse, the slot is released, the reaper releases the claim next tick

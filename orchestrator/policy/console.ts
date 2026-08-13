@@ -180,7 +180,9 @@ function identity(slot: SlotRow): string {
 
 function stateLine(pane: Pane, nowMs: number): string {
   const state =
-    pane.slot.state === "DISABLED" ? "idle" : pane.slot.state.toLowerCase();
+    pane.slot.state === "DISABLED"
+      ? "idle"
+      : pane.slot.state.toLowerCase().replace("_", " ");
   if (!pane.sinceMs) {
     return state;
   }
@@ -192,6 +194,9 @@ export function detailLine(pane: Pane): string {
   const { slot, task } = pane;
   if (slot.state === "UNREACHABLE") {
     return "provider not answering";
+  }
+  if (slot.state === "OFF_SCHEDULE") {
+    return "outside its schedule";
   }
   if (!slot.task_id) {
     return "no task";

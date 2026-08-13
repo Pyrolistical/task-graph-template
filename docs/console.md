@@ -18,6 +18,7 @@ tool: bash — bun test     │ thinking (12s)           │
 - one queue line (scheduler switch, queue head with ranks, total) and four header lines per pane; `xN` counts compactions on the current task and `$` the session's cost, drawn only when the provider or the [meter](agents.md#wattage-and-costperkwh) charges
 - each pane joins three sources by slot: its `slots.json` row, the `tasks.json` row for the task it holds, and that task's `checks.json` row — a running check displaces the activity line, because a task in `CHECK` has no agent doing anything
 - a slot whose provider failed its [health check](agents.md#healthcheck) reads `unreachable` with its switch still on: the agent is enabled, the provider is not there
+- a slot the clock has taken outside its [schedule](agents.md#schedule) reads `off schedule`, switch on for the same reason: nobody turned it off, its next segment has not come round
 - panes divide the terminal evenly; below a minimum width it refuses to draw and says how many columns it needs. With no agents there are no panes, only the pool file's path
 - disabled agents collapse to the right under one `hide disabled` button — console-local state, nothing written to the server
 
