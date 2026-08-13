@@ -151,6 +151,40 @@ describe("Feature: the dependency rule", () => {
     expect(impure).toEqual([]);
   });
 
+  test("the task documents are reached through the task graph and nothing else", async () => {
+    // Given the modules that name the port over the task documents
+    const naming = (await modules()).filter((module) =>
+      /import[^;]*\bTasks\b[^;]*from "[^"]*ports\/tasks\.ts"/s.test(
+        module.source,
+      ),
+    );
+
+    // When they are listed
+    const names = naming.map((module) => module.path).sort();
+
+    // Then it is the graph, the adapter behind it, and the fake that stands in
+    expect(names).toEqual(
+      [
+        path.join("adapters", "task-documents.ts"),
+        path.join("app", "task-graph.ts"),
+        path.join("testing", "ports.ts"),
+      ].sort(),
+    );
+  });
+
+  test("the queue that serialises edits is owned by the task graph alone", async () => {
+    // Given every module that reaches for the edit queue
+    const naming = (await modules()).filter((module) =>
+      /from "[^"]*domain\/queue\.ts"/.test(module.source),
+    );
+
+    // When they are listed
+    const names = naming.map((module) => module.path).sort();
+
+    // Then only the graph holds one, so no caller can mutate around it
+    expect(names).toEqual([path.join("app", "task-graph.ts")]);
+  });
+
   test("the only modules outside a layer are the extensions and the test rig", async () => {
     // Given the modules that belong to no layer directory
     const loose = (await modules()).filter((module) => !module.layer);

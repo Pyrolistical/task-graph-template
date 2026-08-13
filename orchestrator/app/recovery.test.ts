@@ -8,19 +8,31 @@ import {
   FakePublisher,
   FakeTasks,
   FakeWorkspaces,
+  aRun,
   aSession,
   aSlot,
   aTask,
   fakeAgents,
   fakePaths,
 } from "../testing/ports.ts";
+import type { Reservation } from "../testing/ports.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 import { at } from "../testing/present.ts";
 
 const DEAD_PID = 9001;
 const LIVE_PID = 9002;
+const A_SESSION = "/sessions/000042.jsonl";
 
-function aRig(tasks: TaskMeta[], slots = [aSlot()]) {
+function aReservation(taskId: TaskId): Reservation {
+  return {
+    slotName: "pi-fake-fake-1",
+    taskId,
+    state: "WORK",
+    role: "worker",
+  };
+}
+
+function aRig(tasks: TaskMeta[], slots = [aSlot()], alive = true) {
   const byId = new Map<TaskId, TaskMeta>(tasks.map((task) => [task.id, task]));
   const store = new FakeTasks(byId);
   const workspaces = new FakeWorkspaces();
@@ -36,7 +48,7 @@ function aRig(tasks: TaskMeta[], slots = [aSlot()]) {
     paths,
   );
   const pool = new Pool(
-    fakeAgents(slots),
+    fakeAgents(slots, () => aSession({ kind: "none" }, alive)),
     workspaces,
     publisher,
     (pid) => pid === LIVE_PID,
@@ -95,9 +107,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, pool, store } = aRig([task]);
 
     // Given the slot holding it still has a live process of its own
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.taskId = task.id;
-    runner.process = aSession({ kind: "none" }, true);
+    await aRun(pool, aReservation(task.id), A_SESSION);
 
     // When the reaper runs over the graph
     await recover.reap(new Map([[task.id, task]]));
@@ -118,14 +128,11 @@ describe("Feature: reaping claims whose process is gone", () => {
         session: undefined,
       },
     });
-    const { recover, pool, store, workspaces } = aRig([task]);
+    const { recover, pool, store, workspaces } = aRig([task], [aSlot()], false);
     workspaces.present.add("/runtime/000042/worktree");
 
     // Given the slot holding it kept the process that has already exited
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = task.id;
-    runner.process = aSession({ kind: "none" }, false);
+    await aRun(pool, aReservation(task.id), A_SESSION);
 
     // When the reaper runs over the graph
     await recover.reap(new Map([[task.id, task]]));
@@ -144,10 +151,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     const { recover, pool, store } = aRig([task]);
 
     // Given the settler has finished with the slot and handed it back
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = task.id;
-    runner.process = aSession({ kind: "none" }, false);
+    await aRun(pool, aReservation(task.id), A_SESSION);
     await pool.release("pi-fake-fake-1");
 
     // When the reaper runs over the graph
@@ -169,13 +173,19 @@ describe("Feature: reaping claims whose process is gone", () => {
       [aSlot({ wattage: 300, costPerKwh: 0.2 })],
     );
 
-    // Given the slot was picked back up an hour ago and priced by nobody
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = task.id;
-    runner.taskState = "WORK";
-    runner.session = "/sessions/000042.jsonl";
-    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+    // Given the slot was reattached to an hour ago and priced by nobody
+    pool.reattach(
+      {
+        ...at(pool.rows(), 0),
+        state: "BUSY",
+        task_id: task.id,
+        role: "worker",
+        pid: DEAD_PID,
+        started_at: new Date(Date.now() - 3600000).toISOString(),
+        session: A_SESSION,
+      },
+      "WORK",
+    );
 
     // When the reaper runs over the graph
     await recover.reap(new Map([[task.id, task]]));
@@ -253,7 +263,7 @@ describe("Feature: picking the pool back up after a restart", () => {
       claimed_by: "pi-fake-fake-1",
       claimed_pid: LIVE_PID,
     });
-    const { recover, pool, publisher } = aRig([task]);
+    const { recover, pool, publisher, store } = aRig([task]);
     publisher.rows = [
       {
         ...at(pool.rows(), 0),
@@ -270,7 +280,8 @@ describe("Feature: picking the pool back up after a restart", () => {
     await recover.reattach();
 
     // Then the state comes off the graph, since the view does not carry it and a cost needs one
-    expect(pool.runner("pi-fake-fake-1").taskState).toBe("WORK");
+    await pool.release("pi-fake-fake-1");
+    expect(store.costs.map((one) => one.cost.state)).toEqual(["WORK"]);
   });
 
   test("a slot whose pid is gone is left idle for the scheduler", async () => {

@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { type Runner, Pool } from "./pool.ts";
+import { type Run, Pool } from "./pool.ts";
 import {
   FakePublisher,
   FakeWorkspaces,
+  type Reservation,
+  aRun,
   aSchedule,
   aSession,
   aSlot,
   fakeAgents,
 } from "../testing/ports.ts";
+import type { AgentProcess } from "./ports/agents.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { Slot } from "../domain/agents.ts";
 import type { Cost } from "../domain/costs.ts";
@@ -17,18 +20,15 @@ function aPool(
   slots: Slot[] = [aSlot()],
   alive = true,
   health: () => boolean = () => true,
+  session: () => AgentProcess = () => aSession(),
 ) {
   const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
   const probed: string[] = [];
-  const agents = fakeAgents(
-    slots,
-    () => aSession(),
-    (slot) => {
-      probed.push(slot.provider);
-      return health();
-    },
-  );
+  const agents = fakeAgents(slots, session, (slot) => {
+    probed.push(slot.provider);
+    return health();
+  });
   const costs: { id: string; cost: Cost; resumed: boolean }[] = [];
   const pool = new Pool(
     agents,
@@ -146,7 +146,7 @@ describe("Feature: the pool of agent slots", () => {
     expect(probed).toEqual([]);
   });
 
-  test("a slot holding a task keeps it when its schedule closes", () => {
+  test("a slot holding a task keeps it when its schedule closes", async () => {
     // Given a pool of two slots of one agent, allowed to run only in half an hour's time
     // Given one of them is busy with a task and the other is idle
     const slots = [1, 2].map((index) =>
@@ -157,9 +157,7 @@ describe("Feature: the pool of agent slots", () => {
       }),
     );
     const { pool } = aPool(slots);
-    const busy = pool.runner("pi-fake-fake-1");
-    busy.state = "BUSY";
-    busy.taskId = "000042";
+    await onATask(pool);
 
     // When the pool is asked for its rows
     const rows = pool.rows();
@@ -297,9 +295,7 @@ describe("Feature: the pool of agent slots", () => {
       aSlot({ name: `pi-fake-fake-${index}`, index, healthCheck: true }),
     );
     const { pool } = aPool(slots, true, () => false);
-    const busy = pool.runner("pi-fake-fake-1");
-    busy.state = "BUSY";
-    busy.taskId = "000042";
+    await onATask(pool);
 
     // When the provider behind them fails its health check
     await pool.freeSlots();
@@ -335,11 +331,16 @@ describe("Feature: the pool of agent slots", () => {
 });
 
 describe("Feature: what a running session has cost so far", () => {
-  test("the console is shown the price pi reports", () => {
+  test("the console is shown the price pi reports", async () => {
     // Given a busy slot whose provider prices what it has spent
-    const { pool } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
-    const runner = onATask(pool);
-    runner.cost = 0.45;
+    const { pool } = aPool(
+      [aSlot({ wattage: 300, costPerKwh: 0.2 })],
+      true,
+      () => true,
+      () => aSession({ kind: "none" }, true, [], { cost: 0.45 }),
+    );
+    await onATask(pool);
+    await pool.readStats();
 
     // When the pool is asked for its rows
     const row = at(pool.rows(), 0);
@@ -348,11 +349,10 @@ describe("Feature: what a running session has cost so far", () => {
     expect(row.cost).toBe(0.45);
   });
 
-  test("a slot on an unpriced model shows what its power has cost", () => {
+  test("a slot on an unpriced model shows what its power has cost", async () => {
     // Given a busy slot on a 300W agent at 20 cents a kWh, an hour in, priced at nothing
     const { pool } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
-    const runner = onATask(pool);
-    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+    await onATask(pool, anHourAgo());
 
     // When the pool is asked for its rows
     const row = at(pool.rows(), 0);
@@ -361,10 +361,10 @@ describe("Feature: what a running session has cost so far", () => {
     expect(row.cost).toBe(0.06);
   });
 
-  test("a slot with neither a price nor a meter costs nothing", () => {
+  test("a slot with neither a price nor a meter costs nothing", async () => {
     // Given a busy slot on an agent that declares no wattage
     const { pool } = aPool();
-    onATask(pool);
+    await onATask(pool);
 
     // When the pool is asked for its rows
     const row = at(pool.rows(), 0);
@@ -377,15 +377,19 @@ describe("Feature: what a running session has cost so far", () => {
 describe("Feature: aborting the tool call an agent is inside", () => {
   test("a slot running a bash call has that call aborted", async () => {
     // Given a slot whose agent is inside a bash tool call
-    const { pool, log } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.process = aSession({
-      kind: "tool-call",
-      tool: "bash",
-      target: "sleep 600",
-      started_at: Date.now(),
-    });
+    const { pool, log } = aPool(
+      [aSlot()],
+      true,
+      () => true,
+      () =>
+        aSession({
+          kind: "tool-call",
+          tool: "bash",
+          target: "sleep 600",
+          started_at: Date.now(),
+        }),
+    );
+    await onATask(pool);
 
     // When the slot is aborted
     await pool.abortSlot("pi-fake-fake-1");
@@ -394,13 +398,16 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
   });
 
-  test("a slot that is thinking is refused", () => {
+  test("a slot that is thinking is refused", async () => {
     // Given a busy slot that is thinking rather than running a command
     const activity: Activity = { kind: "thinking", started_at: 0 };
-    const { pool } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.process = aSession(activity);
+    const { pool } = aPool(
+      [aSlot()],
+      true,
+      () => true,
+      () => aSession(activity),
+    );
+    await onATask(pool);
 
     // When the slot is aborted
     const attempt = () => pool.abortSlot("pi-fake-fake-1");
@@ -410,54 +417,60 @@ describe("Feature: aborting the tool call an agent is inside", () => {
   });
 });
 
-function onATask(pool: Pool): Runner {
-  const runner = pool.runner("pi-fake-fake-1");
-  runner.state = "BUSY";
-  runner.taskId = "000042";
-  runner.taskState = "WORK";
-  runner.role = "worker";
-  runner.startedAt = new Date().toISOString();
-  runner.session = "/runtime/000042/session/worker/000042.jsonl";
-  runner.process = aSession({ kind: "none" });
-  return runner;
+function anHourAgo(): string {
+  return new Date(Date.now() - 3600000).toISOString();
+}
+
+const A_SESSION = "/sessions/000042.jsonl";
+
+function aReservation(
+  startedAt?: string,
+  carried?: { seconds: number; cost: number },
+): Reservation {
+  return {
+    slotName: "pi-fake-fake-1",
+    taskId: "000042",
+    state: "WORK",
+    role: "worker",
+    startedAt,
+    resumed: Boolean(carried),
+    carried,
+  };
+}
+
+function onATask(
+  pool: Pool,
+  startedAt?: string,
+  carried?: { seconds: number; cost: number },
+): Promise<Run> {
+  return aRun(pool, aReservation(startedAt, carried), A_SESSION);
 }
 
 describe("Feature: releasing a slot when its work ends", () => {
   test("finishing a runner harvests its worktree and returns the slot to idle", async () => {
     // Given a slot busy on a task in its own worktree
     const { pool, harvested, workspaces } = aPool();
-    workspaces.present.add("/tmp/000042/worktree");
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = "000042";
-    runner.checkout = {
-      branch: "task/000042",
-      worktree: "/tmp/000042/worktree",
-      head: "abc1234",
-      dispatched: "the assignment\n",
-    };
-    runner.process = aSession({ kind: "none" });
+    workspaces.present.add("/runtime/000042/worktree");
+    const run = await onATask(pool);
 
-    // When the runner is finished with
-    await pool.finish(runner);
+    // When the run is finished with
+    await pool.finish(run);
 
     // Then the commits in its worktree are harvested onto its branch
-    expect(harvested).toEqual(["/tmp/000042/worktree"]);
+    expect(harvested).toEqual(["/runtime/000042/worktree"]);
 
     // Then the slot reads idle again, holding nothing
     expect(at(pool.rows(), 0).state).toBe("IDLE");
-    expect(pool.runner("pi-fake-fake-1").taskId).toBeUndefined();
+    expect(at(pool.rows(), 0).task_id).toBeUndefined();
   });
 
   test("work that throws stops the slot and says which task it failed on", async () => {
     // Given a slot busy on a task
     const { pool, log } = aPool();
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = "000042";
+    const run = await onATask(pool);
 
     // When the work the pool is tracking rejects
-    pool.track(runner, Promise.reject(new Error("the provider hung up")));
+    pool.track(run, Promise.reject(new Error("the provider hung up")));
 
     // Then the failure is logged against the slot and the task it was on
     await pool.settled();
@@ -484,13 +497,10 @@ describe("Feature: releasing a slot when its work ends", () => {
         }),
       () => {},
     );
-    const runner = pool.runner("pi-fake-fake-1");
-    runner.state = "BUSY";
-    runner.taskId = "000042";
-    runner.process = aSession({ kind: "none" });
+    const run = await onATask(pool);
 
     // When the work the pool is tracking fails, before the process check answers
-    pool.track(runner, Promise.reject(new Error("the provider hung up")));
+    pool.track(run, Promise.reject(new Error("the provider hung up")));
     const released = pool.settled();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -506,9 +516,14 @@ describe("Feature: releasing a slot when its work ends", () => {
 
   test("a session that ends puts what pi charged for it on the task", async () => {
     // Given a slot part way through a work session pi has priced
-    const { pool, costs } = aPool();
-    const runner = onATask(pool);
-    runner.cost = 0.45;
+    const { pool, costs } = aPool(
+      [aSlot()],
+      true,
+      () => true,
+      () => aSession({ kind: "none" }, true, [], { cost: 0.45 }),
+    );
+    await onATask(pool);
+    await pool.readStats();
 
     // When the slot is released
     await pool.release("pi-fake-fake-1");
@@ -531,8 +546,7 @@ describe("Feature: releasing a slot when its work ends", () => {
   test("a session on an unpriced model is billed for the power it drew", async () => {
     // Given a slot on a 300W agent at 20 cents a kWh, an hour into a session pi prices at nothing
     const { pool, costs } = aPool([aSlot({ wattage: 300, costPerKwh: 0.2 })]);
-    const runner = onATask(pool);
-    runner.startedAt = new Date(Date.now() - 3600000).toISOString();
+    await onATask(pool, anHourAgo());
 
     // When the slot is released
     await pool.release("pi-fake-fake-1");
@@ -554,11 +568,14 @@ describe("Feature: releasing a slot when its work ends", () => {
 
   test("a resumed session is recorded as the same session, not a second one", async () => {
     // Given a slot that resumed a work session which had already run 15 minutes
-    const { pool, costs } = aPool();
-    const runner = onATask(pool);
-    runner.resumed = true;
-    runner.carried = { seconds: 900, cost: 0.3 };
-    runner.cost = 0.7;
+    const { pool, costs } = aPool(
+      [aSlot()],
+      true,
+      () => true,
+      () => aSession({ kind: "none" }, true, [], { cost: 0.7 }),
+    );
+    await onATask(pool, undefined, { seconds: 900, cost: 0.3 });
+    await pool.readStats();
 
     // When the slot is released
     await pool.release("pi-fake-fake-1");
@@ -581,8 +598,7 @@ describe("Feature: releasing a slot when its work ends", () => {
   test("a slot released before it opened a session bills the task nothing", async () => {
     // Given a slot that took a task but died before pi gave it a session
     const { pool, costs } = aPool();
-    const runner = onATask(pool);
-    runner.session = undefined;
+    await aRun(pool, aReservation(), undefined);
 
     // When the slot is released
     await pool.release("pi-fake-fake-1");

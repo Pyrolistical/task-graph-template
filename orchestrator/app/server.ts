@@ -9,12 +9,12 @@ import type { Manager, PathReport } from "./manager.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { Lander } from "./lander.ts";
 import { Pool } from "./pool.ts";
+import { Settler } from "./settler.ts";
 import { Recovery } from "./recovery.ts";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Command } from "../domain/command.ts";
 import { Latch } from "../domain/latch.ts";
-import { Queue } from "../domain/queue.ts";
 import type { SlotRow } from "../domain/agents.ts";
 import { type TaskId, type TaskMeta, detectCycles } from "../domain/task.ts";
 import type {
@@ -41,10 +41,11 @@ export class Server implements Manager {
 
   constructor(
     readonly config: ServerConfig,
-    private readonly queue: Queue,
+    private readonly wake: Latch,
     private readonly graph: TaskGraph,
     private readonly pool: Pool,
     private readonly dispatcher: Dispatcher,
+    private readonly settler: Settler,
     private readonly checker: Checker,
     private readonly lander: Lander,
     private readonly recovery: Recovery,
@@ -60,11 +61,7 @@ export class Server implements Manager {
   }
 
   get pending(): Latch {
-    return this.queue.pending;
-  }
-
-  enqueue<T>(work: () => Promise<T>): Promise<T> {
-    return this.queue.submit(work);
+    return this.wake;
   }
 
   async view(name: ViewName): Promise<string> {
@@ -230,26 +227,38 @@ export class Server implements Manager {
   }
 
   async tick(): Promise<void> {
-    await this.queue.drain();
+    this.wake.clear();
+    await this.graph.settled();
     const snapshot = await this.graph.snapshot();
     await this.recovery.reap(snapshot.tasks);
     this.checker.start(snapshot.tasks);
+    await this.settler.retryDue();
     if (this.scheduling) {
       await this.dispatcher.run(snapshot);
     }
     await this.writeViews();
+    await this.recover();
+  }
+
+  private async recover(): Promise<void> {
+    if (!this.failure) {
+      return;
+    }
+    this.failure = undefined;
+    await this.publisher.log("the tick came round cleanly; the server is up");
   }
 
   async drain(): Promise<void> {
     for (;;) {
-      await this.queue.drain();
+      await this.graph.settled();
       if (this.pool.inflight === 0 && this.checker.inflight === 0) {
         return;
       }
+      this.wake.clear();
       const done: AbortController = new AbortController();
       await Promise.race([
         Promise.all([this.pool.settled(), this.checker.settled()]),
-        this.queue.pending.wait(done.signal),
+        this.wake.wait(done.signal),
       ]);
       done.abort();
     }
@@ -282,7 +291,7 @@ export class Server implements Manager {
       await this.applyCommand(stale);
     }
     this.watcher = this.commands.watch(
-      (command) => this.enqueue(() => this.applyCommand(command)),
+      (command) => this.applyCommand(command),
       (err) => this.fail(`the console channel failed: ${messageOf(err)}`),
     );
   }
@@ -306,6 +315,7 @@ export class Server implements Manager {
     } catch (err) {
       await this.fail(`writing the views failed: ${messageOf(err)}`);
     }
+    this.wake.notify();
   }
 
   async detach(): Promise<void> {
@@ -327,7 +337,6 @@ export class Server implements Manager {
 
   private stopTaking(): void {
     this.watcher?.close();
-    this.queue.close();
   }
 
   private async release(): Promise<void> {
@@ -336,6 +345,7 @@ export class Server implements Manager {
   }
 
   private async close(): Promise<void> {
+    this.graph.close();
     await this.transitions.close();
     await this.paths.close();
   }

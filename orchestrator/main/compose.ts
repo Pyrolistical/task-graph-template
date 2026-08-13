@@ -9,7 +9,7 @@ import { Checker } from "../app/checker.ts";
 import { Server, type ServerConfig } from "../app/server.ts";
 import { Settler } from "../app/settler.ts";
 import { TaskGraph } from "../app/task-graph.ts";
-import { Queue } from "../domain/queue.ts";
+import { Latch } from "../domain/latch.ts";
 import { branchName } from "../domain/workspace.ts";
 import { loadAgents } from "../adapters/agent-pool.ts";
 import { CommandFile } from "../adapters/command.ts";
@@ -114,7 +114,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
 
   const commands = new CommandFile(runtime);
 
-  const edits = new Queue();
+  const wake = new Latch();
 
   const graph = new TaskGraph(
     tasks,
@@ -123,6 +123,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
     transitions,
     publisher,
     runtime,
+    wake,
   );
   const pool = new Pool(
     agents,
@@ -133,7 +134,6 @@ export async function wire(options: WiringOptions): Promise<Server> {
   );
   const settler = new Settler(
     graph,
-    edits,
     pool,
     files,
     files,
@@ -153,15 +153,7 @@ export async function wire(options: WiringOptions): Promise<Server> {
     publisher,
     config.base,
   );
-  const checker = new Checker(
-    graph,
-    edits,
-    checks,
-    files,
-    prompts,
-    publisher,
-    repo,
-  );
+  const checker = new Checker(graph, checks, files, prompts, publisher, repo);
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
   const recovery = new Recovery(
     graph,
@@ -175,10 +167,11 @@ export async function wire(options: WiringOptions): Promise<Server> {
 
   return new Server(
     config,
-    edits,
+    wake,
     graph,
     pool,
     dispatcher,
+    settler,
     checker,
     lander,
     recovery,

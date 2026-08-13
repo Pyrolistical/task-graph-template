@@ -9,7 +9,14 @@ import type { Reviews } from "../app/ports/reviews.ts";
 import type { CreatedTask, Tasks } from "../app/ports/tasks.ts";
 import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
 import type { Workspaces } from "../app/ports/workspaces.ts";
+import {
+  type Checkout,
+  type Reservation as PoolReservation,
+  type Run,
+  Pool,
+} from "../app/pool.ts";
 import type { Awaitable } from "../domain/awaitable.ts";
+import type { StreamState } from "../domain/protocol.ts";
 import type { Activity } from "../domain/activity.ts";
 import type { SlotRow, Slot } from "../domain/agents.ts";
 import type { Schedule } from "../domain/schedule.ts";
@@ -23,6 +30,11 @@ import type {
   TransitionResult,
 } from "../domain/state-machine.ts";
 import type { FragmentVars } from "../domain/fragment.ts";
+import type { ResultCall } from "../domain/results.ts";
+
+export interface Reservation extends PoolReservation {
+  slotName: string;
+}
 
 export async function yielded<T>(value: T): Promise<T> {
   await Promise.resolve();
@@ -79,10 +91,18 @@ export function aTask(overrides: Partial<TaskMeta> = {}): TaskMeta {
   };
 }
 
+export interface SessionStats {
+  tokens?: number;
+  cost?: number;
+  contextPercent?: number;
+}
+
 export function aSession(
   activity: Activity = { kind: "none" },
   alive = true,
   prompts: string[] = [],
+  stats: SessionStats = {},
+  stream: Partial<StreamState> = {},
 ): AgentProcess {
   let settles = 0;
   return {
@@ -93,6 +113,7 @@ export function aSession(
         activity,
         settled: false,
         retrying: false,
+        ...stream,
       },
       settled: () => {
         if (settles > 0) {
@@ -111,7 +132,7 @@ export function aSession(
     },
     abort: () => {},
     abortBash: () => {},
-    stats: () => yielded({}),
+    stats: () => yielded(stats),
     lastAssistantText: () => {},
     close: () => {},
     kill: () => {},
@@ -476,13 +497,49 @@ export function fakeAgents(
   slots: Slot[],
   session: () => AgentProcess = () => aSession(),
   healthy: (slot: Slot) => Awaitable<boolean> = () => true,
+  results: ResultCall[] = [],
 ): Agents {
   return {
     slots: () => slots,
     hasSession: (_path: string) => yielded(true),
     healthy,
-    spawn: () => yielded(session()),
+    spawn: (_spec, _onUsage, _onCompaction, onResult) => {
+      for (const call of results) {
+        onResult(call);
+      }
+      return yielded(session());
+    },
   };
+}
+
+export function aCheckout(overrides: Partial<Checkout> = {}): Checkout {
+  return {
+    branch: "task/000042",
+    worktree: "/runtime/000042/worktree",
+    head: "abc1234",
+    dispatched: "the goal\n",
+    ...overrides,
+  };
+}
+
+export async function aRun(
+  pool: Pool,
+  reservation: Reservation,
+  session?: string,
+  checkout: Checkout = aCheckout(),
+  compacted: (run: Run) => Promise<void> = () => Promise.resolve(),
+): Promise<Run> {
+  const slot = pool.slots.find((one) => one.name === reservation.slotName);
+  if (!slot) {
+    throw new Error(`the pool has no slot named "${reservation.slotName}"`);
+  }
+  pool.reserve(slot, reservation);
+  const run = await pool.spawn(slot, checkout, checkout.worktree, compacted);
+  if (session) {
+    pool.opened(run, session);
+  }
+  pool.busy(run);
+  return run;
 }
 
 export class FakePrompts implements Prompts {

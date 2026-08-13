@@ -28,6 +28,7 @@ The pipeline is mostly **decisions**: what to dispatch, what a settled turn mean
 
 ## What the layers are not
 
-- `Tasks` is one coarse port over whole documents under one lock: the document's point is that a person can edit it, and a repository-per-aggregate over that is `fs` with extra steps
+- `Tasks` is one coarse port over whole documents: the document's point is that a person can edit it, and a repository-per-aggregate over that is `fs` with extra steps
+- `app/task-graph.ts` is the only module that holds that port, and the only door onto the graph. A whole-document rewrite is a read and a write with an `await` between them, so two of them running at once lose one; the queue that stops it lives **inside** the graph, not at the call sites. Dispatch, settle, checks, reap and every MCP tool all go through the same methods, and `architecture.test.ts` fails if a second module names either `Tasks` or the queue
 - `Messages`, `Reviews` and `Assignments` share one adapter over the runtime directory, because it is one place with one convention; a file per verb only spreads the layout
 - no `Clock` port: `rates.ts` takes `nowMs` as a defaulted parameter

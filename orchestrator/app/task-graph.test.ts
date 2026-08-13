@@ -27,6 +27,61 @@ function aRig(state: TaskMeta["state"]) {
   return { graph, store, reviews, task };
 }
 
+class WholeDocumentTasks extends FakeTasks {
+  document = { costs: 0, body: "the goal\n" };
+
+  private async rewrite(edit: (was: Document) => Document): Promise<void> {
+    const read = { ...this.document };
+    await Promise.resolve();
+    this.document = edit(read);
+  }
+
+  override recordCost(): Promise<void> {
+    return this.rewrite((was) => ({ ...was, costs: was.costs + 1 }));
+  }
+
+  override async writeBody(id: TaskId, body: string): Promise<string> {
+    await this.rewrite((was) => ({ ...was, body }));
+    return `/tasks/${id}.md`;
+  }
+}
+
+interface Document {
+  costs: number;
+  body: string;
+}
+
+describe("Feature: one door onto the task documents", () => {
+  test("edits that arrive together are applied one after the other", async () => {
+    // Given a store that reads a whole document, then writes the whole of it back
+    const store = new WholeDocumentTasks(new Map<TaskId, TaskMeta>());
+    const graph = new TaskGraph(
+      store,
+      new FakeWorkspaces(),
+      new FakeTaskFiles(),
+      new FakeTransitions(),
+      new FakePublisher(),
+      fakePaths(),
+    );
+
+    // When a cost and a body change are handed to the graph at the same moment
+    await Promise.all([
+      graph.recordCost(
+        "000042",
+        { state: "WORK", slot: "pi-1", seconds: 3, cost: 1 },
+        false,
+      ),
+      graph.writeBody("000042", "the goal, rewritten\n"),
+    ]);
+
+    // Then both survive, because neither read the document the other was holding
+    expect(store.document).toEqual({
+      costs: 1,
+      body: "the goal, rewritten\n",
+    });
+  });
+});
+
 describe("Feature: counting the rounds a review has sent work back", () => {
   test("the round that reaches the limit parks the task", async () => {
     // Given a task under review, one round short of the limit that holds it

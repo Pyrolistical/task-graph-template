@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
-import { Queue } from "../domain/queue.ts";
 import {
   FakeChecks,
   FakePrompts,
@@ -34,10 +33,8 @@ function aRig(store: FakeTasks) {
     publisher,
     fakePaths(),
   );
-  const edits = new Queue();
   const checker = new Checker(
     graph,
-    edits,
     new FakeChecks(),
     new FakeTaskFiles(),
     new FakePrompts(),
@@ -47,10 +44,7 @@ function aRig(store: FakeTasks) {
 
   const runChecks = async (task: TaskMeta): Promise<void> => {
     checker.start(new Map([[task.id, task]]));
-    const running = checker.settled();
-    await Promise.race([running, edits.pending.wait()]);
-    await edits.drain();
-    await running;
+    await checker.settled();
   };
 
   return { checker, runChecks, log: publisher.lines };

@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Pool } from "./pool.ts";
+import { type Run, Pool } from "./pool.ts";
 import { Settler } from "./settler.ts";
 import { TaskGraph } from "./task-graph.ts";
-import { Queue } from "../domain/queue.ts";
 import {
   FakeAssignments,
   FakeTaskFiles,
@@ -11,19 +10,30 @@ import {
   FakePublisher,
   FakeTasks,
   FakeWorkspaces,
+  aCheckout,
+  aRun,
   aSession,
   aSlot,
   aTask,
   fakeAgents,
   fakePaths,
 } from "../testing/ports.ts";
-import { ISSUES } from "../domain/issues.ts";
+import type { SlotRow } from "../domain/agents.ts";
+import { BACKOFF_CAP_MS } from "../domain/backoff.ts";
+import { type IssueName, ISSUES } from "../domain/issues.ts";
+import type { StreamState } from "../domain/protocol.ts";
+import type { ResultCall } from "../domain/results.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 import { at } from "../testing/present.ts";
 
 const DISPATCHED = "the goal\n\n## Implementation Notes\n";
 
-async function aRig(live = DISPATCHED) {
+async function aRig(
+  live = DISPATCHED,
+  alive = true,
+  results: ResultCall[] = [],
+  stream: Partial<StreamState> = {},
+) {
   const task: TaskMeta = aTask({
     claimed_by: "pi-fake-fake-1",
     claimed_pid: 4242,
@@ -45,16 +55,19 @@ async function aRig(live = DISPATCHED) {
   );
   const prompted: string[] = [];
   const pool = new Pool(
-    fakeAgents([aSlot()]),
+    fakeAgents(
+      [aSlot()],
+      () => aSession({ kind: "none" }, alive, prompted, {}, stream),
+      () => true,
+      results,
+    ),
     workspaces,
     publisher,
     () => false,
     (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
-  const edits = new Queue();
   const settler = new Settler(
     graph,
-    edits,
     pool,
     assignments,
     new FakeTaskFiles(),
@@ -64,37 +77,38 @@ async function aRig(live = DISPATCHED) {
     "master",
   );
 
-  const runner = pool.runner("pi-fake-fake-1");
-  runner.state = "BUSY";
-  runner.taskId = task.id;
-  runner.taskState = "WORK";
-  runner.role = "worker";
-  runner.checkout = {
-    branch: "task/000042",
-    worktree: "/runtime/000042/worktree",
-    head: "abc1234",
-    dispatched: DISPATCHED,
-  };
-  runner.process = aSession({ kind: "none" }, true, prompted);
+  const run = await aRun(
+    pool,
+    {
+      slotName: "pi-fake-fake-1",
+      taskId: task.id,
+      state: "WORK",
+      role: "worker",
+    },
+    "/sessions/000042.jsonl",
+    aCheckout({ dispatched: DISPATCHED }),
+  );
 
-  const settle = async (): Promise<void> => {
-    const settling = settler.settle(runner);
-    await Promise.race([settling, edits.pending.wait()]);
-    await edits.drain();
-    await settling;
-  };
+  const settle = (): Promise<void> => settler.settle(run);
+  const rowOf = (): SlotRow => at(pool.rows(), 0);
 
   return {
     settle,
     settler,
-    edits,
+    rowOf,
     pool,
-    runner,
+    run,
     store,
     assignments,
     prompted,
     publisher,
   };
+}
+
+function exhausted(pool: Pool, run: Run, issue: IssueName): void {
+  for (let used = 0; used < ISSUES[issue].attempts; used++) {
+    pool.raised(run, issue);
+  }
 }
 
 describe("Feature: what the server does with a settled turn", () => {
@@ -112,8 +126,8 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an agent that keeps ending without a result has its task held", async () => {
     // Given an agent that has already used every attempt it is given
-    const { settle, runner, store } = await aRig();
-    runner.issues.set("missing-result", ISSUES["missing-result"].attempts);
+    const { settle, pool, run, store } = await aRig();
+    exhausted(pool, run, "missing-result");
 
     // When the server settles another turn with no result in it
     await settle();
@@ -130,24 +144,10 @@ describe("Feature: what the server does with a settled turn", () => {
     ]);
   });
 
-  test("a settled turn waits for the tick before it touches the graph", async () => {
-    // Given an agent that has already used every attempt it is given
-    const { settler, edits, pool, runner, store } = await aRig();
-    runner.issues.set("missing-result", ISSUES["missing-result"].attempts);
-
-    // When its turn settles while nothing is draining the queue
-    void settler.settle(runner);
-    await edits.pending.wait();
-
-    // Then the graph is untouched and the slot still holds the task
-    expect(store.applied).toEqual([]);
-    expect(at(pool.rows(), 0).state).not.toBe("IDLE");
-  });
-
   test("a held task frees the slot that was working on it", async () => {
     // Given an agent that has already used every attempt it is given
-    const { settle, pool, runner } = await aRig();
-    runner.issues.set("missing-result", ISSUES["missing-result"].attempts);
+    const { settle, pool, run } = await aRig();
+    exhausted(pool, run, "missing-result");
 
     // When the server settles another turn with no result in it
     await settle();
@@ -158,10 +158,11 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an assignment the agent may not have changed is put back", async () => {
     // Given an agent that rewrote the part of the assignment it was given
-    const { settle, runner, assignments, prompted } = await aRig(
+    const { settle, assignments, prompted } = await aRig(
       "the goal, rewritten\n\n## Implementation Notes\n\nI did the work\n",
+      true,
+      [{ tool: "submit", args: {} }],
     );
-    runner.results = [{ tool: "submit", args: {} }];
 
     // When the server settles that turn
     await settle();
@@ -177,8 +178,7 @@ describe("Feature: what the server does with a settled turn", () => {
 
   test("an agent whose process died is finished with, not prompted", async () => {
     // Given an agent whose process exited without settling its turn
-    const { settle, pool, runner, prompted } = await aRig();
-    runner.process = aSession({ kind: "none" }, false);
+    const { settle, pool, prompted } = await aRig(DISPATCHED, false);
 
     // When the server settles that turn
     await settle();
@@ -186,5 +186,59 @@ describe("Feature: what the server does with a settled turn", () => {
     // Then nothing is asked of it and the slot goes back to idle
     expect(prompted).toEqual([]);
     expect(at(pool.rows(), 0).state).toBe("IDLE");
+  });
+});
+
+describe("Feature: a provider that is not answering", () => {
+  test("a turn that ends on a provider error leaves the slot waiting, not sleeping", async () => {
+    // Given an agent whose turn ended on an error from its provider
+    const { settle, rowOf, prompted } = await aRig(DISPATCHED, true, [], {
+      stopReason: "error",
+      errorMessage: "502 bad gateway",
+    });
+
+    // When the server settles that turn
+    await settle();
+
+    // Then the slot is parked with the time it will retry, and nothing was asked of it yet
+    expect(rowOf().state).toBe("WAITING");
+    expect(rowOf().retry?.attempt).toBe(1);
+    expect(prompted).toEqual([]);
+  });
+
+  test("the tick that finds the wait over prompts the same session again", async () => {
+    // Given a slot waiting out a provider error
+    const { settle, settler, rowOf, prompted } = await aRig(
+      DISPATCHED,
+      true,
+      [],
+      { stopReason: "error", errorMessage: "502 bad gateway" },
+    );
+    await settle();
+
+    // When a tick comes round after the time it named
+    await settler.retryDue(Date.now() + BACKOFF_CAP_MS);
+
+    // Then it is prompted with its assignment again, on the slot it never left
+    expect(prompted).toEqual(["prompt:WORK"]);
+    expect(rowOf().state).toBe("BUSY");
+  });
+
+  test("a wait that is not over yet is left alone", async () => {
+    // Given a slot waiting out a provider error
+    const { settle, settler, rowOf, prompted } = await aRig(
+      DISPATCHED,
+      true,
+      [],
+      { stopReason: "error", errorMessage: "502 bad gateway" },
+    );
+    await settle();
+
+    // When a tick comes round before the time it named
+    await settler.retryDue(Date.now());
+
+    // Then nothing is asked of it, because the provider has not been given its second
+    expect(prompted).toEqual([]);
+    expect(rowOf().state).toBe("WAITING");
   });
 });

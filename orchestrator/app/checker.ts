@@ -5,7 +5,6 @@ import type { Publisher } from "./ports/publisher.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult, RunningCheck } from "../domain/checks.ts";
 import { messageOf, uncaught } from "../domain/errors.ts";
-import { Queue } from "../domain/queue.ts";
 import type { TaskId, TaskMeta } from "../domain/task.ts";
 
 type CheckFailure = {
@@ -19,7 +18,6 @@ export class Checker {
 
   constructor(
     private readonly graph: TaskGraph,
-    private readonly edits: Queue,
     private readonly checks: Checks,
     private readonly messages: Messages,
     private readonly prompts: Prompts,
@@ -93,12 +91,10 @@ export class Checker {
     }
 
     if (failures.length === 0) {
-      await this.edits.submit(() =>
-        this.graph.transition(taskId, "pass", {}, "server"),
-      );
+      await this.graph.transition(taskId, "pass", {}, "server");
       return;
     }
-    await this.edits.submit(() => this.sendBack(taskId, failures));
+    await this.sendBack(taskId, failures);
   }
 
   private async sendBack(

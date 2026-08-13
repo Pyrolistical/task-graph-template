@@ -14,9 +14,19 @@ A held runtime directory, a bad config or a non-git directory is fatal to startu
 
 ## The tick
 
-Settle checks → reap dead claims → start checks → apply settled agents → dispatch → write views.
+Settle checks → reap dead claims → start checks → re-prompt the runs whose [backoff](agents.md#when-the-provider-is-down) is up → dispatch → write views.
 
 Dispatch is last because everything before it can free a slot or move a task: the queue is planned against the graph as it is after this tick's facts. A reaped claim leaves the task's state where it is, so it re-enters the queue where it stands.
+
+## Every edit through one door
+
+The graph is a directory of whole documents, and rewriting one is a read and a write with an `await` between them. Nothing in the server writes a document itself: every mutation is a method on [the task graph](architecture.md#what-the-layers-are-not), which runs them one at a time. So a cost recorded as a slot is released cannot land on top of a body the manager just wrote, and the tick that follows reads what both of them left.
+
+A tool call returns once its edit has been applied, not once a tick has picked it up.
+
+## When a tick fails
+
+The failure is kept, and served as `error`. Every tool and view refuses with that message while it stands, because a manager acting on views the server could not write is worse than a manager that is told to wait; `paths` and `workspace_path` still answer, since they are how a person finds what broke. The first tick that comes round cleanly clears it — a full disk that gets emptied needs no restart.
 
 ## Paused
 

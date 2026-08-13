@@ -18,7 +18,6 @@ export interface PathReport {
 }
 
 export interface Manager {
-  enqueue<T>(work: () => Promise<T>): Promise<T>;
   createTask(title: string): Promise<CreatedTask>;
   writeBody(id: TaskId, body: string): Promise<string>;
   tasks(): Promise<Map<TaskId, TaskMeta>>;

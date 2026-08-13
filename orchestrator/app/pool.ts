@@ -1,15 +1,15 @@
-import type { AgentProcess, AgentSpec, Agents } from "./ports/agents.ts";
+import type { AgentProcess, Agents } from "./ports/agents.ts";
 import type { Publisher } from "./ports/publisher.ts";
 import type { Workspaces } from "./ports/workspaces.ts";
 import {
   type SlotRow,
   type Slot,
   type SlotState,
-  type Retry,
   idleRow,
 } from "../domain/agents.ts";
 import { type Awaitable, orUndefined } from "../domain/awaitable.ts";
 import { abortable } from "../domain/activity.ts";
+import { type Wait, due, retryOf } from "../domain/backoff.ts";
 import { type Carried, type Cost, costOf, secondsOf } from "../domain/costs.ts";
 import { messageOf, uncaught } from "../domain/errors.ts";
 import { type IssueName } from "../domain/issues.ts";
@@ -19,8 +19,6 @@ import type { ResultCall } from "../domain/results.ts";
 import type { ClaimState, Role } from "../domain/state-machine.ts";
 import type { TaskId } from "../domain/task.ts";
 
-export const BACKOFF_START_MS = 1000;
-
 export interface Checkout {
   branch: string;
   worktree: string;
@@ -28,13 +26,22 @@ export interface Checkout {
   dispatched: string;
 }
 
-export interface Runner {
+export interface Reservation {
+  taskId: TaskId;
+  state: ClaimState;
+  role: Role;
+  startedAt?: string;
+  resumed?: boolean;
+  carried?: Carried;
+}
+
+interface Runner {
   slot: Slot;
   state: SlotState;
+  run?: Run;
   taskId?: TaskId;
   taskState?: ClaimState;
   role?: Role;
-  checkout?: Checkout;
   process?: AgentProcess;
   startedAt?: string;
   detachedPid?: number;
@@ -47,18 +54,17 @@ export interface Runner {
   compactions: number;
   results: ResultCall[];
   issues: Map<IssueName, number>;
-  backoff: number;
-  retry?: Retry;
+  wait?: Wait;
 }
 
 function freshRunner(slot: Slot): Runner {
   return {
     slot,
     state: "IDLE",
+    run: undefined,
     taskId: undefined,
     taskState: undefined,
     role: undefined,
-    checkout: undefined,
     process: undefined,
     startedAt: undefined,
     detachedPid: undefined,
@@ -71,25 +77,39 @@ function freshRunner(slot: Slot): Runner {
     compactions: 0,
     results: [],
     issues: new Map(),
-    backoff: BACKOFF_START_MS,
-    retry: undefined,
+    wait: undefined,
   };
 }
 
-export interface Run {
-  runner: Runner;
-  process: AgentProcess;
-  taskId: TaskId;
-  state: ClaimState;
-  checkout: Checkout;
-}
+export class Run {
+  constructor(
+    private readonly runner: Runner,
+    readonly process: AgentProcess,
+    readonly taskId: TaskId,
+    readonly state: ClaimState,
+    readonly role: Role,
+    readonly checkout: Checkout,
+  ) {}
 
-export function runOf(runner: Runner): Run | undefined {
-  const { process, taskId, taskState, checkout } = runner;
-  if (!process || !taskId || !taskState || !checkout) {
-    return undefined;
+  get slot(): Slot {
+    return this.runner.slot;
   }
-  return { runner, process, taskId, state: taskState, checkout };
+
+  get results(): ResultCall[] {
+    return this.runner.results;
+  }
+
+  get session(): string | undefined {
+    return this.runner.session;
+  }
+
+  get wait(): Wait | undefined {
+    return this.runner.wait;
+  }
+
+  attempts(issue: IssueName): number {
+    return this.runner.issues.get(issue) ?? 0;
+  }
 }
 
 export class Pool {
@@ -121,16 +141,26 @@ export class Pool {
     }
   }
 
-  runners(): Runner[] {
-    return [...this.byName.values()];
-  }
-
-  runner(name: string): Runner {
+  private runner(name: string): Runner {
     const runner = this.byName.get(name);
     if (!runner) {
       throw new Error(`no agent slot named "${name}"`);
     }
     return runner;
+  }
+
+  private held(run: Run): Runner {
+    const runner = this.runner(run.slot.name);
+    if (runner.run !== run) {
+      throw new Error(
+        `${run.slot.name} no longer holds ${run.taskId}; its slot was released`,
+      );
+    }
+    return runner;
+  }
+
+  private runners(): Runner[] {
+    return [...this.byName.values()];
   }
 
   async freeSlots(): Promise<Slot[]> {
@@ -241,44 +271,125 @@ export class Pool {
     return this.rowOf(runner);
   }
 
-  spawn(
-    runner: Runner,
-    spec: Omit<AgentSpec, "slot">,
-    compacted: (runner: Runner) => Promise<void>,
-  ): Awaitable<AgentProcess> {
-    return this.agents.spawn(
-      { ...spec, slot: runner.slot },
+  reserve(slot: Slot, reservation: Reservation): void {
+    const runner = this.runner(slot.name);
+    if (runner.state !== "IDLE") {
+      throw new Error(
+        `${slot.name} is ${runner.state} on ${runner.taskId ?? "no task"}; it cannot take ${reservation.taskId}`,
+      );
+    }
+
+    runner.state = "SPAWNING";
+    runner.taskId = reservation.taskId;
+    runner.taskState = reservation.state;
+    runner.role = reservation.role;
+    runner.startedAt = reservation.startedAt ?? new Date().toISOString();
+    runner.resumed = reservation.resumed ?? false;
+    runner.carried = reservation.carried ?? { seconds: 0, cost: 0 };
+    runner.issues.clear();
+    runner.results = [];
+  }
+
+  async spawn(
+    slot: Slot,
+    checkout: Checkout,
+    cwd: string,
+    compacted: (run: Run) => Promise<void>,
+  ): Promise<Run> {
+    const runner = this.runner(slot.name);
+    const { taskId, taskState, role } = runner;
+    if (!taskId || !taskState || !role) {
+      throw new Error(`${slot.name} was not reserved for a task before spawn`);
+    }
+
+    let spawned: Run | undefined = undefined;
+
+    const process = await this.agents.spawn(
+      { taskId, state: taskState, role, slot, cwd },
       (sample) => {
-        this.rates.record(runner.slot.agent, sample);
+        this.rates.record(slot.agent, sample);
       },
       () => {
         runner.compactions += 1;
-        this.track(runner, compacted(runner));
+        if (spawned) {
+          this.track(spawned, compacted(spawned));
+        }
       },
       (call) => {
         runner.results.push(call);
       },
     );
+
+    spawned = new Run(runner, process, taskId, taskState, role, checkout);
+    runner.process = process;
+    runner.run = spawned;
+    return spawned;
   }
 
-  requireRun(runner: Runner): Run {
-    const run = runOf(runner);
-    if (!run) {
-      throw new Error(
-        `${runner.slot.name} has no session to work in: it holds ${runner.taskId ?? "no task"}`,
+  opened(run: Run, session: string): void {
+    this.held(run).session = session;
+  }
+
+  busy(run: Run): void {
+    this.held(run).state = "BUSY";
+  }
+
+  settling(run: Run): void {
+    this.held(run).state = "SETTLED";
+  }
+
+  waiting(run: Run, wait: Wait): void {
+    const runner = this.held(run);
+    runner.state = "WAITING";
+    runner.wait = wait;
+  }
+
+  recovered(run: Run): void {
+    this.held(run).wait = undefined;
+  }
+
+  raised(run: Run, issue: IssueName): void {
+    const runner = this.held(run);
+    runner.issues.set(issue, run.attempts(issue) + 1);
+    runner.state = "BUSY";
+  }
+
+  clearResults(run: Run): void {
+    this.held(run).results = [];
+  }
+
+  due(nowMs = Date.now()): Run[] {
+    return this.runners()
+      .filter((runner) => runner.state === "WAITING")
+      .flatMap((runner) =>
+        runner.run && runner.wait && due(runner.wait, nowMs)
+          ? [runner.run]
+          : [],
       );
-    }
-    return run;
   }
 
-  track(runner: Runner, work: Promise<void>): void {
-    const taskId = runner.taskId;
+  reattach(row: SlotRow, state?: ClaimState): boolean {
+    const runner = this.byName.get(row.name);
+    if (!runner || !row.pid || !row.task_id) {
+      return false;
+    }
+    runner.state = "BUSY";
+    runner.taskId = row.task_id;
+    runner.taskState = state;
+    runner.role = row.role;
+    runner.startedAt = row.started_at;
+    runner.detachedPid = row.pid;
+    runner.session = row.session;
+    return true;
+  }
+
+  track(run: Run, work: Promise<void>): void {
     const settling = work
       .catch(async (err: unknown) => {
         await this.publisher.log(
-          `${runner.slot.name} on ${taskId} failed: ${messageOf(err)}`,
+          `${run.slot.name} on ${run.taskId} failed: ${messageOf(err)}`,
         );
-        await this.stop(runner);
+        await this.stop(run);
       })
       .finally(() => {
         this.tracked.delete(settling);
@@ -305,21 +416,43 @@ export class Pool {
     await this.workspaces.harvest(workspace.worktree, workspace.branch);
   }
 
-  async stop(runner: Runner): Promise<void> {
-    const process = runner.process;
+  async stop(run: Run): Promise<void> {
+    if (this.runner(run.slot.name).run !== run) {
+      return;
+    }
+    await this.stopSlot(run.slot.name);
+  }
+
+  async finish(run: Run): Promise<void> {
+    if (this.runner(run.slot.name).run !== run) {
+      return;
+    }
+    await this.finishSlot(run.slot.name);
+  }
+
+  async finishSlot(name: string): Promise<void> {
+    const checkout = this.runner(name).run?.checkout;
+    await this.stopSlot(name);
+    await this.harvest(checkout);
+  }
+
+  private async stopSlot(name: string): Promise<void> {
+    const process = this.runner(name).process;
     if (process) {
       process.close();
       if (await this.alive(process.pid)) {
         process.kill();
       }
     }
-    await this.release(runner.slot.name);
+    await this.release(name);
   }
 
-  async finish(runner: Runner): Promise<void> {
-    const { checkout } = runner;
-    await this.stop(runner);
-    await this.harvest(checkout);
+  async releaseTask(taskId: TaskId): Promise<void> {
+    for (const runner of this.runners()) {
+      if (runner.taskId === taskId) {
+        await this.release(runner.slot.name);
+      }
+    }
   }
 
   async release(name: string): Promise<void> {
@@ -380,7 +513,10 @@ export class Pool {
       context_percent: runner.contextPercent,
       compactions: runner.compactions,
       session: runner.session,
-      retry: runner.retry,
+      retry:
+        runner.state === "WAITING" && runner.wait
+          ? retryOf(runner.wait)
+          : undefined,
     };
   }
 

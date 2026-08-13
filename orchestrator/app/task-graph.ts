@@ -1,4 +1,6 @@
 import type { Awaitable } from "../domain/awaitable.ts";
+import { Latch } from "../domain/latch.ts";
+import { Queue } from "../domain/queue.ts";
 import type { Paths } from "./ports/paths.ts";
 import type { Publisher } from "./ports/publisher.ts";
 import type { Reviews } from "./ports/reviews.ts";
@@ -34,6 +36,7 @@ export interface Snapshot {
 }
 
 export class TaskGraph {
+  private readonly edits = new Queue();
   private readonly recent: TaskId[] = [];
   private readonly closed = new Map<TaskId, TaskRow>();
   private problems = new Map<string, string>();
@@ -46,7 +49,22 @@ export class TaskGraph {
     private readonly transitions: Transitions,
     private readonly publisher: Publisher,
     private readonly paths: Paths,
+    private readonly wake: Latch = new Latch(),
   ) {}
+
+  private edit<T>(work: () => Awaitable<T>): Promise<T> {
+    const done = this.edits.submit(work);
+    this.wake.notify();
+    return done;
+  }
+
+  settled(): Promise<void> {
+    return this.edits.settled();
+  }
+
+  close(): void {
+    this.edits.close();
+  }
 
   takeLock(): Awaitable<void> {
     return this.tasks.takeLock();
@@ -110,29 +128,44 @@ export class TaskGraph {
     return this.tasks.body(taskId);
   }
 
-  create(title: string): Awaitable<CreatedTask> {
-    return this.tasks.create(title);
+  create(title: string): Promise<CreatedTask> {
+    return this.edit(() => this.tasks.create(title));
   }
 
-  writeBody(taskId: TaskId, body: string): Awaitable<string> {
-    return this.tasks.writeBody(taskId, body);
+  writeBody(taskId: TaskId, body: string): Promise<string> {
+    return this.edit(() => this.tasks.writeBody(taskId, body));
   }
 
-  async claim(taskId: TaskId, args: ClaimArgs): Promise<void> {
-    await this.tasks.claim(taskId, args);
-    await this.remember(taskId, await this.list());
+  claim(taskId: TaskId, args: ClaimArgs): Promise<void> {
+    return this.edit(async () => {
+      await this.tasks.claim(taskId, args);
+      await this.remember(taskId, await this.list());
+    });
   }
 
-  recordCost(taskId: TaskId, cost: Cost, resumed: boolean): Awaitable<void> {
-    return this.tasks.recordCost(taskId, cost, resumed);
+  recordCost(taskId: TaskId, cost: Cost, resumed: boolean): Promise<void> {
+    return this.edit(async () => {
+      await this.tasks.recordCost(taskId, cost, resumed);
+    });
   }
 
-  async releaseClaim(taskId: TaskId): Promise<void> {
-    await this.tasks.releaseClaim(taskId);
-    await this.remember(taskId, await this.list());
+  releaseClaim(taskId: TaskId): Promise<void> {
+    return this.edit(async () => {
+      await this.tasks.releaseClaim(taskId);
+      await this.remember(taskId, await this.list());
+    });
   }
 
-  async transition(
+  transition(
+    taskId: TaskId,
+    name: TransitionName,
+    args: TransitionArgs,
+    by: string,
+  ): Promise<TransitionResult> {
+    return this.edit(() => this.applyTransition(taskId, name, args, by));
+  }
+
+  private async applyTransition(
     taskId: TaskId,
     name: TransitionName,
     args: TransitionArgs,
@@ -169,7 +202,15 @@ export class TaskGraph {
     return result;
   }
 
-  async feedback(
+  feedback(
+    taskId: TaskId,
+    findings: string[],
+    by: string,
+  ): Promise<TransitionResult> {
+    return this.edit(() => this.applyFeedback(taskId, findings, by));
+  }
+
+  private async applyFeedback(
     taskId: TaskId,
     findings: string[],
     by: string,
@@ -180,7 +221,7 @@ export class TaskGraph {
       const failures = (await this.reviews.failures(taskId)) + 1;
       if (failures >= REVIEW_FAILURE_LIMIT) {
         await this.reviews.clearFailures(taskId);
-        return this.transition(
+        return this.applyTransition(
           taskId,
           "hold",
           { reason: reviewFailureReason(state, findings) },
@@ -189,7 +230,7 @@ export class TaskGraph {
       }
       await this.reviews.setFailures(taskId, failures);
     }
-    return this.transition(taskId, "feedback", { findings }, by);
+    return this.applyTransition(taskId, "feedback", { findings }, by);
   }
 
   async teardown(task: TaskMeta): Promise<void> {

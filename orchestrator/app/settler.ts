@@ -3,16 +3,10 @@ import type { Prompts } from "./ports/prompts.ts";
 import type { Publisher } from "./ports/publisher.ts";
 import type { Reviews } from "./ports/reviews.ts";
 import type { Workspaces } from "./ports/workspaces.ts";
-import {
-  type Run,
-  type Runner,
-  BACKOFF_START_MS,
-  Pool,
-  runOf,
-} from "./pool.ts";
+import { type Run, Pool } from "./pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { orUndefined } from "../domain/awaitable.ts";
-import { Queue } from "../domain/queue.ts";
+import { nextWait } from "../domain/backoff.ts";
 import { diffAssignment, restored } from "../domain/assignment.ts";
 import { type IssueName, ISSUES } from "../domain/issues.ts";
 import type { ClaimState } from "../domain/state-machine.ts";
@@ -25,13 +19,9 @@ import {
   decideSettle,
 } from "../policy/settle.ts";
 
-export const BACKOFF_CAP_MS = 64000;
-export const MODEL_LOADING_MS = 5000;
-
 export class Settler {
   constructor(
     private readonly graph: TaskGraph,
-    private readonly edits: Queue,
     private readonly pool: Pool,
     private readonly assignments: Assignments,
     private readonly reviews: Reviews,
@@ -52,41 +42,48 @@ export class Settler {
   }
 
   async prompt(run: Run, message: string): Promise<void> {
-    run.runner.results = [];
+    this.pool.clearResults(run);
     await run.process.prompt(message);
   }
 
-  watch(runner: Runner): void {
-    this.pool.track(runner, this.settle(runner));
+  watch(run: Run): void {
+    this.pool.track(run, this.settle(run));
   }
 
-  async settle(runner: Runner): Promise<void> {
-    const run = runOf(runner);
-    if (!run) {
-      return;
-    }
-
+  async settle(run: Run): Promise<void> {
     await run.process.stream.settled();
 
     if (!run.process.alive) {
       await this.publisher.log(
-        `${runner.slot.name} on ${run.taskId}: the process exited without settling: ${run.process.stream.state.failure}`,
+        `${run.slot.name} on ${run.taskId}: the process exited without settling: ${run.process.stream.state.failure}`,
       );
-      await this.pool.finish(runner);
+      await this.pool.finish(run);
       return;
     }
 
-    runner.state = "SETTLED";
+    this.pool.settling(run);
     const stopReason = run.process.stream.state.stopReason;
 
     const closing = await orUndefined(run.process.lastAssistantText());
     if (closing) {
       await this.publisher.log(
-        `${runner.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
+        `${run.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
       );
     }
 
     await this.apply(run, decideSettle(await this.observe(run)));
+  }
+
+  async retryDue(nowMs = Date.now()): Promise<void> {
+    for (const run of this.pool.due(nowMs)) {
+      if (!run.process.alive) {
+        await this.pool.finish(run);
+        continue;
+      }
+      this.pool.busy(run);
+      await this.prompt(run, await this.nudge(run.taskId, run.state));
+      this.watch(run);
+    }
   }
 
   private async observe(run: Run): Promise<Settlement> {
@@ -98,7 +95,7 @@ export class Settler {
       alive: run.process.alive,
       stopReason: run.process.stream.state.stopReason,
       looping: run.process.stream.state.looping,
-      calls: run.runner.results,
+      calls: run.results,
       diff: diffAssignment(run.checkout.dispatched, live),
       worktree:
         stage.guard === "none"
@@ -109,12 +106,12 @@ export class Settler {
   }
 
   private async apply(run: Run, intents: Intent[]): Promise<void> {
-    const { runner, taskId } = run;
+    const { taskId } = run;
 
     for (const intent of intents) {
       switch (intent.kind) {
         case "abandon": {
-          await this.pool.finish(runner);
+          await this.pool.finish(run);
           return;
         }
         case "back-off": {
@@ -133,21 +130,21 @@ export class Settler {
           break;
         }
         case "raise": {
-          runner.backoff = BACKOFF_START_MS;
+          this.pool.recovered(run);
           await this.raise(run, intent.issue, intent.detail, intent.vars);
           return;
         }
         case "feedback": {
-          runner.backoff = BACKOFF_START_MS;
-          await this.edits.submit(() => this.sendBack(run, intent.findings));
+          this.pool.recovered(run);
+          await this.sendBack(run, intent.findings);
           return;
         }
         case "submit": {
-          runner.backoff = BACKOFF_START_MS;
+          this.pool.recovered(run);
           const live = intent.body
             ? await this.assignments.read(taskId)
             : undefined;
-          await this.edits.submit(() => this.accept(run, live));
+          await this.accept(run, live);
           return;
         }
       }
@@ -157,7 +154,7 @@ export class Settler {
   private async sendBack(run: Run, findings: string[]): Promise<void> {
     run.process.close();
     await this.graph.feedback(run.taskId, findings, "server");
-    await this.pool.finish(run.runner);
+    await this.pool.finish(run);
   }
 
   private async accept(run: Run, body?: string): Promise<void> {
@@ -167,80 +164,51 @@ export class Settler {
       run.taskId,
       "submit",
       body ? { body } : {},
-      run.runner.slot.name,
+      run.slot.name,
     );
-    await this.pool.finish(run.runner);
+    await this.pool.finish(run);
   }
 
   private async park(run: Run, reason: string): Promise<void> {
     run.process.close();
-    await this.graph.transition(
-      run.taskId,
-      "hold",
-      { reason },
-      run.runner.slot.name,
-    );
-    await this.pool.finish(run.runner);
+    await this.graph.transition(run.taskId, "hold", { reason }, run.slot.name);
+    await this.pool.finish(run);
   }
 
-  async compacted(runner: Runner): Promise<void> {
-    const run = runOf(runner);
-    if (!run || !run.process.alive) {
+  async compacted(run: Run): Promise<void> {
+    if (!run.process.alive) {
       return;
     }
 
-    if (runner.results.length > 0) {
+    if (run.results.length > 0) {
       await this.publisher.log(
-        `${runner.slot.name} on ${run.taskId} compacted after its result: left alone to settle`,
+        `${run.slot.name} on ${run.taskId} compacted after its result: left alone to settle`,
       );
       return;
     }
 
-    const resetting = runner.role !== "worker";
+    const resetting = run.role !== "worker";
 
     if (resetting) {
       await this.workspaces.resetTo(run.checkout.worktree, run.checkout.head);
     }
 
     await this.publisher.log(
-      `${runner.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
+      `${run.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
     );
 
     await run.process.steer(await this.nudge(run.taskId, run.state));
   }
 
   private async backOff(run: Run): Promise<void> {
-    const { runner } = run;
     const message = run.process.stream.state.errorMessage ?? "";
-    const loading = /503/.test(message) && /load/i.test(message);
-    const delay = loading
-      ? MODEL_LOADING_MS
-      : Math.min(runner.backoff, BACKOFF_CAP_MS);
+    const wait = nextWait(message, run.wait);
 
-    const attempt = runner.retry?.attempt ?? 0;
-    runner.state = "WAITING";
-    runner.retry = {
-      at: new Date(Date.now() + delay).toISOString(),
-      attempt: loading ? attempt : attempt + 1,
-    };
-    if (!loading) {
-      runner.backoff = Math.min(runner.backoff * 2, BACKOFF_CAP_MS);
-    }
+    this.pool.waiting(run, wait);
 
     await this.publisher.log(
-      `${runner.slot.name} waiting ${delay}ms on ${loading ? "model loading" : "provider error"}: ${message}`,
+      `${run.slot.name} waiting ${wait.delayMs}ms on ${wait.loading ? "model loading" : "provider error"}: ${message}`,
     );
-
-    await Bun.sleep(delay);
-    if (!run.process.alive) {
-      await this.pool.finish(runner);
-      return;
-    }
-
-    runner.state = "BUSY";
-    runner.retry = undefined;
-    await this.prompt(run, await this.nudge(run.taskId, run.state));
-    this.watch(runner);
   }
 
   private async raise(
@@ -249,27 +217,25 @@ export class Settler {
     detail: string,
     vars: FragmentVars = {},
   ): Promise<void> {
-    const { runner, taskId } = run;
     const issue = ISSUES[name];
-    const used = runner.issues.get(name) ?? 0;
+    const used = run.attempts(name);
 
     await this.publisher.log(
-      `${runner.slot.name} on ${taskId}: ${name} (${used}/${issue.attempts} retried)${detail === "" ? "" : `: ${detail}`}`,
+      `${run.slot.name} on ${run.taskId}: ${name} (${used}/${issue.attempts} retried)${detail === "" ? "" : `: ${detail}`}`,
     );
 
     if (used >= issue.attempts) {
-      await this.edits.submit(() => this.park(run, issue.held(detail)));
+      await this.park(run, issue.held(detail));
       return;
     }
 
     if (!run.process.alive) {
-      await this.pool.finish(runner);
+      await this.pool.finish(run);
       return;
     }
 
-    runner.issues.set(name, used + 1);
-    runner.state = "BUSY";
+    this.pool.raised(run, name);
     await this.prompt(run, this.prompts.issue(name, run.state, vars));
-    this.watch(runner);
+    this.watch(run);
   }
 }

@@ -32,7 +32,7 @@ import {
 } from "../testing/server-jig.ts";
 import type { Server } from "../app/server.ts";
 import { type Ticking, boot, build, startTicking } from "../../mcp.ts";
-import { at } from "../testing/present.ts";
+import { at, present } from "../testing/present.ts";
 
 const openClients: Client[] = [];
 const openServers: Server[] = [];
@@ -50,7 +50,7 @@ afterEach(async () => {
   }
 });
 
-async function connect(fixture: Fixture) {
+async function prepare(fixture: Fixture) {
   await fs.promises.mkdir(fixture.tasksDir, { recursive: true });
   const agentsPath = defaultAgentsPath(fixture.tasksDir);
   if (!(await fs.promises.exists(agentsPath))) {
@@ -61,6 +61,29 @@ async function connect(fixture: Fixture) {
       }),
     );
   }
+}
+
+async function connectIdle(fixture: Fixture) {
+  await prepare(fixture);
+  const started = await boot({
+    runtime: fixture.runtime,
+    tasksDir: fixture.tasksDir,
+  });
+  if (started.server) {
+    openServers.push(started.server);
+  }
+
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await build(started).connect(serverSide);
+
+  const client = new Client({ name: "test", version: "1.0.0" });
+  openClients.push(client);
+  await client.connect(clientSide);
+  return { client, server: present(started.server, "a started server") };
+}
+
+async function connect(fixture: Fixture) {
+  await prepare(fixture);
 
   const started = await boot({
     runtime: fixture.runtime,
@@ -860,6 +883,76 @@ describe("Feature: a server that could not start", () => {
       expect((await client.listTools()).tools.length).toBeGreaterThan(0);
 
       await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "a server that has hit a failure refuses the tools until it comes good",
+    async () => {
+      // Given a running server that has hit a failure since it started
+      const fixture = await makeFixture();
+      const { client, server } = await connectIdle(fixture);
+      await server.fail("writing the views failed: no space left");
+
+      // When the manager creates a task
+      const result = await client.callTool({
+        name: "task_create",
+        arguments: { title: "a task" },
+      });
+
+      // Then the call comes back as that failure rather than being applied
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("writing the views failed");
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "the paths a failure is diagnosed from are readable while it stands",
+    async () => {
+      // Given a running server that has hit a failure since it started
+      const fixture = await makeFixture();
+      const { client, server } = await connectIdle(fixture);
+      await server.fail("writing the views failed: no space left");
+
+      // When the manager reads the failure and the paths behind it
+      const failure = await resourceOf(
+        client,
+        "orchestrator://error",
+        z.looseObject({ error: z.string() }),
+      );
+      const paths = await client.readResource({
+        uri: "orchestrator://paths",
+      });
+
+      // Then both answer, because they are how a person finds what broke
+      expect(failure.error).toContain("no space left");
+      expect(at(TextBlocks.parse(paths.contents), 0).text).toContain(
+        fixture.tasksDir,
+      );
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "a tick that comes round cleanly puts the server back in service",
+    async () => {
+      // Given a server refusing its tools after a failure
+      const fixture = await makeFixture();
+      const { client, server } = await connectIdle(fixture);
+      await server.fail("writing the views failed: no space left");
+
+      // When a tick comes round without hitting it again
+      await server.tick();
+
+      // Then the tools answer again, without the manager restarting anything
+      const result = await client.callTool({
+        name: "task_create",
+        arguments: { title: "a task" },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(textOf(result)).toContain('"id"');
     },
     60000,
   );

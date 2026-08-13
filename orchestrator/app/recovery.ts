@@ -50,21 +50,19 @@ export class Recovery {
 
     const tasks = await this.graph.list();
     for (const row of rows) {
-      const runner = this.pool
-        .runners()
-        .find((one) => one.slot.name === row.name);
-      if (!runner || !row.pid || !row.task_id || !(await this.alive(row.pid))) {
+      if (!row.pid || !row.task_id || !(await this.alive(row.pid))) {
         continue;
       }
 
       const state = tasks.get(row.task_id)?.state;
-      runner.state = "BUSY";
-      runner.taskId = row.task_id;
-      runner.taskState = state && isClaimState(state) ? state : undefined;
-      runner.role = row.role;
-      runner.startedAt = row.started_at;
-      runner.detachedPid = row.pid;
-      runner.session = row.session;
+      if (
+        !this.pool.reattach(
+          row,
+          state && isClaimState(state) ? state : undefined,
+        )
+      ) {
+        continue;
+      }
 
       await this.publisher.log(
         `${row.name} is still running ${row.task_id} as pid ${row.pid}; leaving it alone`,
@@ -88,12 +86,7 @@ export class Recovery {
       );
       await this.pool.harvest(task.workspace);
       await this.graph.releaseClaim(id);
-
-      for (const runner of this.pool.runners()) {
-        if (runner.taskId === id) {
-          await this.pool.release(runner.slot.name);
-        }
-      }
+      await this.pool.releaseTask(id);
     }
   }
 }

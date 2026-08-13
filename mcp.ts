@@ -39,7 +39,7 @@ export function build(startup: Startup): McpServer {
     { capabilities: { tools: {}, resources: {} } },
   );
 
-  function live(): Manager {
+  function started(): Manager {
     if (!startup.server) {
       throw new Error(
         startup.error ?? "the server did not start, and said nothing about why",
@@ -48,13 +48,21 @@ export function build(startup: Startup): McpServer {
     return startup.server;
   }
 
-  function applied<T>(work: (manager: Manager) => Promise<T>): Promise<T> {
+  function live(): Manager {
+    const manager = started();
+    if (manager.lastError) {
+      throw new Error(manager.lastError);
+    }
+    return manager;
+  }
+
+  async function applied<T>(
+    work: (manager: Manager) => Promise<T>,
+  ): Promise<T> {
     const manager = live();
-    return manager.enqueue(async () => {
-      const value = await work(manager);
-      await manager.writeViews();
-      return value;
-    });
+    const value = await work(manager);
+    await manager.writeViews();
+    return value;
   }
 
   mcp.registerTool(
@@ -280,13 +288,13 @@ export function build(startup: Startup): McpServer {
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () => JSON.stringify(live().pathReport(), undefined, 2),
+    () => JSON.stringify(started().pathReport(), undefined, 2),
   );
 
   resource(
     "error",
     "orchestrator://error",
-    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Absent when there is none. Every other tool and resource fails with this message while it is set.",
+    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Absent when there is none. Every tool and every view fails with this message while it is set; the paths and workspace_path resources answer anyway, because they are how the failure is diagnosed. A running server clears it on the first tick that comes round cleanly.",
     "application/json",
     () =>
       JSON.stringify(
@@ -301,7 +309,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => live().pathReport().runtime_root,
+    () => started().pathReport().runtime_root,
   );
 
   return mcp;
