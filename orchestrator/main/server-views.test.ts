@@ -3,19 +3,19 @@ import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { applyTransition } from "../adapters/task-documents.ts";
-import { takeClaim } from "../adapters/task-documents.ts";
-import { writeAtomic } from "../adapters/files.ts";
-import { viewJson } from "../adapters/runtime.ts";
+import { applyTransition } from "../tasks/adapters/task-documents.ts";
+import { takeClaim } from "../tasks/adapters/task-documents.ts";
+import { writeAtomic } from "../kernel/adapters/files.ts";
+import { viewJson } from "../runtime/adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
   readyTask,
   setPlan,
 } from "../testing/fixture.ts";
-import { writeCommand } from "../adapters/command.ts";
-import { readView } from "../adapters/tui.ts";
-import { idleRow } from "../domain/agents.ts";
+import { writeCommand } from "../runtime/adapters/command.ts";
+import { readView } from "../console/adapters/tui.ts";
+import { idleRow } from "../agents/domain/slots.ts";
 import { aSlot } from "../testing/ports.ts";
 import {
   compactionsOf,

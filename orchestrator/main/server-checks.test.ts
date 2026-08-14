@@ -1,13 +1,13 @@
 import { describe, expect } from "bun:test";
-import { requireWorkspace } from "../domain/task.ts";
+import { requireWorkspace } from "../vocabulary/task.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { takeClaim } from "../adapters/task-documents.ts";
-import { branchName } from "../domain/workspace.ts";
-import { readView } from "../adapters/tui.ts";
-import { activeTaskPath } from "../adapters/task-store.ts";
-import * as git from "../adapters/git.ts";
+import { takeClaim } from "../tasks/adapters/task-documents.ts";
+import { branchName } from "../workspaces/domain/workspace.ts";
+import { readView } from "../console/adapters/tui.ts";
+import { activeTaskPath } from "../tasks/adapters/task-store.ts";
+import * as git from "../workspaces/adapters/git.ts";
 import {
   type Fixture,
   makeFixture,
@@ -15,7 +15,7 @@ import {
   readyTask,
   setPlan,
 } from "../testing/fixture.ts";
-import type { App } from "../main/compose.ts";
+import type { App } from "./compose.ts";
 import {
   dispatchOnce,
   transitionsOf,

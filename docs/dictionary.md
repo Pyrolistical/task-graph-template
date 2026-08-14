@@ -66,8 +66,9 @@ An **agent** is configured, a **slot** is dispatched to, a **runner** is that sl
 | runtime directory | `/tmp/task-graph-server/<repo>/`                               |
 | task directory    | `~/task-graph/<key>/` — documents, pool, overrides             |
 | command channel   | the one file the console writes back on                        |
-| port              | what the application needs, one file in `app/ports/`           |
+| port              | what a slice needs of the world, one file in its `ports/`      |
 | adapter           | the one implementation of a port that touches the world        |
+| slice             | one vertical of the onion, with its own layers inside it       |
 
 ## Rejected synonyms
 
@@ -81,4 +82,4 @@ journal → transition log · worker (pool member) → runner · agent (seat) �
 - app modules are one noun per file: `dispatcher.ts` holds `Dispatcher`
 - `xOf(y)` derives, `isX`/`hasX` predicates, `requireX` throws, `XRow` is a view projection
 - anything off disk or wire is one zod schema plus its inferred type of the same name, parsed and never asserted
-- no `as`: `memberOf` narrows, `tableOf` keys, `requireX` throws; the two unprovable assertions live in [`domain/lookup.ts`](../orchestrator/domain/lookup.ts)
+- no `as`: `memberOf` narrows, `tableOf` keys, `requireX` throws; the two unprovable assertions live in [`kernel/domain/lookup.ts`](../orchestrator/kernel/kernel/domain/lookup.ts)

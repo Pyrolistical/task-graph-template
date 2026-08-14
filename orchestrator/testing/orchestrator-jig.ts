@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import * as git from "../adapters/git.ts";
+import * as git from "../workspaces/adapters/git.ts";
 import { tempDir } from "./temp-dirs.ts";
 
 export const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");

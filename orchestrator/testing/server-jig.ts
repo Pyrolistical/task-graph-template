@@ -5,16 +5,16 @@ import {
   rebuildDocument,
   requireSession,
   requireWorkspace,
-} from "../domain/task.ts";
-import type { Awaitable } from "../domain/awaitable.ts";
+} from "../vocabulary/task.ts";
+import type { Awaitable } from "../kernel/domain/awaitable.ts";
 import { present } from "./present.ts";
-import { activeTaskPath, readTaskFile } from "../adapters/task-store.ts";
+import { activeTaskPath, readTaskFile } from "../tasks/adapters/task-store.ts";
 import type { Fixture } from "./fixture.ts";
 import type { App } from "../main/compose.ts";
-import { PromptFiles } from "../adapters/prompt-files.ts";
-import type { Runtime } from "../adapters/runtime.ts";
-import { TaskFiles } from "../adapters/task-files.ts";
-import { TransitionLog } from "../adapters/transition-log.ts";
+import { PromptFiles } from "../prompting/adapters/prompt-files.ts";
+import type { Runtime } from "../runtime/adapters/runtime.ts";
+import { TaskFiles } from "../runtime/adapters/task-files.ts";
+import { TransitionLog } from "../runtime/adapters/transition-log.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 import { wire } from "../main/compose.ts";
 

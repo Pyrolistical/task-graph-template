@@ -25,9 +25,9 @@ Tests assert on the graph, on `held_reason`, or on the fragment the agent was pr
 
 ## Where a test lives
 
-Each decision is tested where it lives ([the layers](architecture.md)): the state machine and the document in `domain/`, settle, ranking and the console's frame in `policy/`, the pool and reaper over fakes in `app/`, real git and rpc in `adapters/`, the wired server against the fake `pi` and the tool surface over a real MCP client in `main/`.
+Each decision is tested where it lives ([the slices](architecture.md)): the state machine and the document in `vocabulary/`, settle, ranking and the console's frame in a slice's `policy/`, the pool and reaper over fakes in a slice's `app/`, real git and rpc in its `adapters/`, the wired server against the fake `pi` and the tool surface over a real MCP client in `main/`.
 
-Only `adapters/` and `main/` may touch the filesystem in a test; a suite needing a real repo, task directory or subprocess belongs there. `architecture.test.ts` and `bdd.test.ts` guard the layering and the test style.
+Only an `adapters/` or `main/` suite may touch the filesystem; a suite needing a real repo, task directory or subprocess belongs there. `architecture.test.ts` and `bdd.test.ts` guard the slicing and the test style.
 
 The console is the most-formatted code in the repo and is tested with exact-output tests, which is what lets the drawing code stay free of defensive checks.
 

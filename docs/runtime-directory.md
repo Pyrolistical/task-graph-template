@@ -31,7 +31,7 @@ Five snapshots, one per question a reader asks: `inbox` (what waits on a person)
 - a queued task is one waiting on a slot; everything else is waiting on a person, a check or an agent, and lives in `inbox.json` or `tasks.json`
 - `blocking` is the transitive dependent count: the scheduler's tiebreak, the inbox's tiebreak, and the manager's reason to review one branch before another
 
-Row shapes are zod schemas in [`domain/`](../orchestrator/domain/); slot states are the [agent state machine](agents.md#the-agent-state-machine).
+Row shapes are zod schemas in [`views/`](../orchestrator/views/), the contract the two processes share; slot states are the [agent state machine](agents.md#the-agent-state-machine).
 
 ## The transition log
 

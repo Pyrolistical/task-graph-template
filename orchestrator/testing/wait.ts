@@ -1,4 +1,4 @@
-import type { Awaitable } from "../domain/awaitable.ts";
+import type { Awaitable } from "../kernel/domain/awaitable.ts";
 
 export async function eventually(
   done: () => Awaitable<boolean>,

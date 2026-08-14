@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import path from "node:path";
-import { main } from "./orchestrator/adapters/tui.ts";
+import { main } from "./orchestrator/console/adapters/tui.ts";
 
 if (import.meta.main) {
   await main(path.resolve(process.argv[2] ?? process.cwd()));

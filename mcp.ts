@@ -3,14 +3,17 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
-import { messageOf } from "./orchestrator/domain/errors.ts";
-import { isValidId } from "./orchestrator/domain/task.ts";
-import type { EntryName } from "./orchestrator/domain/state-machine.ts";
-import type { ViewName } from "./orchestrator/app/ports/publisher.ts";
-import type { Awaitable } from "./orchestrator/domain/awaitable.ts";
+import { messageOf } from "./orchestrator/kernel/domain/errors.ts";
+import { isValidId } from "./orchestrator/vocabulary/task.ts";
+import type { EntryName } from "./orchestrator/vocabulary/state-machine.ts";
+import type { ViewName } from "./orchestrator/runtime/ports/publisher.ts";
+import type { Awaitable } from "./orchestrator/kernel/domain/awaitable.ts";
 import type { App } from "./orchestrator/main/compose.ts";
-import { Paced } from "./orchestrator/adapters/paced.ts";
-import { Runtime, defaultTasksDir } from "./orchestrator/adapters/runtime.ts";
+import { Paced } from "./orchestrator/kernel/adapters/paced.ts";
+import {
+  Runtime,
+  defaultTasksDir,
+} from "./orchestrator/runtime/adapters/runtime.ts";
 import { type WiringOptions, wire } from "./orchestrator/main/compose.ts";
 
 const TICK_MS = 500;

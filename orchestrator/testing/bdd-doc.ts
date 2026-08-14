@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { memberOf } from "../domain/lookup.ts";
-import { groupOf } from "../domain/pattern.ts";
+import { memberOf } from "../kernel/domain/lookup.ts";
+import { groupOf } from "../kernel/domain/pattern.ts";
 
 const ORCHESTRATOR = path.join(import.meta.dir, "..");
 const REPO_ROOT = path.join(ORCHESTRATOR, "..");

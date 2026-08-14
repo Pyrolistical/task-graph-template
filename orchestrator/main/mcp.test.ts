@@ -5,18 +5,18 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { SlotRow, SlotsView } from "../domain/agents.ts";
-import { TaskRow } from "../domain/graph.ts";
-import { parse } from "../domain/schema.ts";
-import { QueueView } from "../policy/scheduler.ts";
-import { applyTransition } from "../adapters/task-documents.ts";
-import { takeClaim } from "../adapters/task-documents.ts";
+import { SlotRow, SlotsView } from "../views/slots.ts";
+import { TaskRow } from "../views/tasks.ts";
+import { parse } from "../kernel/domain/schema.ts";
+import { QueueView } from "../views/queue.ts";
+import { applyTransition } from "../tasks/adapters/task-documents.ts";
+import { takeClaim } from "../tasks/adapters/task-documents.ts";
 import {
   activeTaskPath,
   closedTaskPath,
   readTaskFile,
-} from "../adapters/task-store.ts";
-import { defaultAgentsPath } from "../adapters/runtime.ts";
+} from "../tasks/adapters/task-store.ts";
+import { defaultAgentsPath } from "../runtime/adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
@@ -30,7 +30,7 @@ import {
   reaches,
   serverFor,
 } from "../testing/server-jig.ts";
-import type { App } from "../main/compose.ts";
+import type { App } from "./compose.ts";
 import { type Ticking, boot, build, startTicking } from "../../mcp.ts";
 import { at, present } from "../testing/present.ts";
 

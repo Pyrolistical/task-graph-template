@@ -1,16 +1,16 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PiProcess } from "../adapters/pi-process.ts";
+import { PiProcess } from "../agents/adapters/pi-process.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
-import { PromptFiles } from "../adapters/prompt-files.ts";
-import type { ResultCall } from "../domain/results.ts";
+import { PromptFiles } from "../prompting/adapters/prompt-files.ts";
+import type { ResultCall } from "../agents/domain/results.ts";
 import {
   CLAIM_STATES,
   isClaimState,
   STAGE_OF,
   type ClaimState,
-} from "../domain/state-machine.ts";
+} from "../vocabulary/state-machine.ts";
 
 const PROMPTS = await PromptFiles.open(ORCHESTRATOR_DIR);
 

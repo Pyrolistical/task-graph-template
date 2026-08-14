@@ -3,10 +3,10 @@ import { at, present } from "../testing/present.ts";
 import { testInTempDirs } from "../testing/temp-dirs.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { activeTaskPath } from "../adapters/task-store.ts";
-import { SlotsView } from "../domain/agents.ts";
-import { parse } from "../domain/schema.ts";
-import * as git from "../adapters/git.ts";
+import { activeTaskPath } from "../tasks/adapters/task-store.ts";
+import { SlotsView } from "../views/slots.ts";
+import { parse } from "../kernel/domain/schema.ts";
+import * as git from "../workspaces/adapters/git.ts";
 import {
   makeFixture,
   promptsOverlapping,
@@ -15,8 +15,8 @@ import {
   setBody,
   setPlan,
 } from "../testing/fixture.ts";
-import { ISSUES } from "../domain/issues.ts";
-import { LOOP_LIMIT } from "../domain/protocol.ts";
+import { ISSUES } from "../prompting/domain/issues.ts";
+import { LOOP_LIMIT } from "../agents/domain/protocol.ts";
 import { bodyOf } from "../testing/graph-jig.ts";
 import {
   filesOf,

@@ -15,7 +15,7 @@ One markdown file per task, outside the repo. The file **is** the graph — no d
 
 Outside every worktree, which is what makes it unreadable to an agent ([why](assignment.md#the-graph-is-not-in-the-worktree)). The first positional argument to `mcp.ts` overrides the directory.
 
-Frontmatter is one **strict** zod object ([`domain/task.ts`](../orchestrator/domain/task.ts)) so an unknown key errors rather than being ignored; the body under it is the assignment, verbatim, and an accepted assignment replaces it. Errors name path and value; a task that fails to parse throws rather than being skipped, because a graph with one unreadable node cannot be scheduled against.
+Frontmatter is one **strict** zod object ([`vocabulary/task.ts`](../orchestrator/vocabulary/task.ts)) so an unknown key errors rather than being ignored; the body under it is the assignment, verbatim, and an accepted assignment replaces it. Errors name path and value; a task that fails to parse throws rather than being skipped, because a graph with one unreadable node cannot be scheduled against.
 
 Past the types:
 

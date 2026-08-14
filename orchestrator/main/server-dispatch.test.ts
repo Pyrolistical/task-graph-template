@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { requireWorkspace } from "../domain/task.ts";
+import { requireWorkspace } from "../vocabulary/task.ts";
 import {
   tempDir,
   testInTempDirs,
@@ -7,9 +7,9 @@ import {
 } from "../testing/temp-dirs.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { applyTransition } from "../adapters/task-documents.ts";
-import { takeClaim } from "../adapters/task-documents.ts";
-import { branchName } from "../domain/workspace.ts";
+import { applyTransition } from "../tasks/adapters/task-documents.ts";
+import { takeClaim } from "../tasks/adapters/task-documents.ts";
+import { branchName } from "../workspaces/domain/workspace.ts";
 import {
   activeTaskPath,
   closedTaskPath,
@@ -17,10 +17,10 @@ import {
   readTaskFile,
   writeTaskBody,
   requireTaskFile,
-} from "../adapters/task-store.ts";
-import { readView } from "../adapters/tui.ts";
-import { defaultTasksDir } from "../adapters/runtime.ts";
-import * as git from "../adapters/git.ts";
+} from "../tasks/adapters/task-store.ts";
+import { readView } from "../console/adapters/tui.ts";
+import { defaultTasksDir } from "../runtime/adapters/runtime.ts";
+import * as git from "../workspaces/adapters/git.ts";
 import {
   commitGraph,
   enteredTask,
@@ -34,7 +34,7 @@ import {
   writeOverride,
 } from "../testing/fixture.ts";
 import { startServer } from "../testing/server-jig.ts";
-import { ISSUES } from "../domain/issues.ts";
+import { ISSUES } from "../prompting/domain/issues.ts";
 import {
   dispatchOnce,
   transitionsOf,

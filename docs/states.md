@@ -10,7 +10,7 @@ back edges: review feedback → its author state; CHECK fail → WORK;
             any phase → HELD_DESIGN / HELD_PLAN / HELD_WORK → its phase state
 ```
 
-Edges, guards and roles are declared once in [`domain/state-machine.ts`](../orchestrator/domain/state-machine.ts); `NEXT_STATE`, `CLAIM_STATES`, the scheduler's ranks, the issue table's state lists and the settle all derive from that one table, so adding a stage is one entry. A stage row is a union keyed by role, so only real combinations compile, and the two roleless stages (`CHECK`, `MANAGER_REVIEW`) drop out of every agent-facing derivation by construction.
+Edges, guards and roles are declared once in [`vocabulary/state-machine.ts`](../orchestrator/vocabulary/state-machine.ts); `NEXT_STATE`, `CLAIM_STATES`, the scheduler's ranks, the issue table's state lists and the settle all derive from that one table, so adding a stage is one entry. A stage row is a union keyed by role, so only real combinations compile, and the two roleless stages (`CHECK`, `MANAGER_REVIEW`) drop out of every agent-facing derivation by construction.
 
 - six stages spend model tokens; [`CHECK`](checks.md) is the server and `MANAGER_REVIEW`/`NEW`/`HELD_*` are the manager
 

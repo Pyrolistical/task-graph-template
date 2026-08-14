@@ -1,36 +1,41 @@
-import type { AgentProcess, Agents } from "../app/ports/agents.ts";
-import type { Assignments } from "../app/ports/assignments.ts";
-import type { Checks } from "../app/ports/checks.ts";
-import type { Messages } from "../app/ports/messages.ts";
-import type { Paths } from "../app/ports/paths.ts";
-import type { Prompts } from "../app/ports/prompts.ts";
-import type { Publisher, ViewName, Views } from "../app/ports/publisher.ts";
-import type { Reviews } from "../app/ports/reviews.ts";
-import type { CreatedTask, Tasks } from "../app/ports/tasks.ts";
-import type { TransitionEntry, Transitions } from "../app/ports/transitions.ts";
-import type { Workspaces } from "../app/ports/workspaces.ts";
+import type { AgentProcess, Agents } from "../agents/ports/agents.ts";
+import type { Assignments } from "../runtime/ports/assignments.ts";
+import type { Checks } from "../checks/ports/checks.ts";
+import type { Messages } from "../runtime/ports/messages.ts";
+import type { Paths } from "../runtime/ports/paths.ts";
+import type { Prompts } from "../prompting/ports/prompts.ts";
+import type { Publisher, ViewName, Views } from "../runtime/ports/publisher.ts";
+import type { Reviews } from "../runtime/ports/reviews.ts";
+import type { CreatedTask, Tasks } from "../tasks/ports/tasks.ts";
+import type {
+  TransitionEntry,
+  Transitions,
+} from "../runtime/ports/transitions.ts";
+import type { Workspaces } from "../workspaces/ports/workspaces.ts";
 import {
   type Checkout,
   type Reservation as PoolReservation,
   type Run,
   Pool,
-} from "../app/pool.ts";
-import type { Awaitable } from "../domain/awaitable.ts";
-import type { StreamState } from "../domain/protocol.ts";
-import type { Activity } from "../domain/activity.ts";
-import type { SlotRow, Slot } from "../domain/agents.ts";
-import type { Schedule } from "../domain/schedule.ts";
-import type { CheckResult, RunningCheck } from "../domain/checks.ts";
-import type { Cost } from "../domain/costs.ts";
-import { type TaskId, type TaskMeta, formatId } from "../domain/task.ts";
+} from "../agents/app/pool.ts";
+import type { Awaitable } from "../kernel/domain/awaitable.ts";
+import type { StreamState } from "../agents/domain/protocol.ts";
+import type { Activity } from "../views/activity.ts";
+import type { SlotRow } from "../views/slots.ts";
+import type { Slot } from "../agents/domain/slots.ts";
+import type { Schedule } from "../agents/domain/schedule.ts";
+import type { CheckResult } from "../checks/domain/checks.ts";
+import type { RunningCheck } from "../views/checks.ts";
+import type { Cost } from "../vocabulary/costs.ts";
+import { type TaskId, type TaskMeta, formatId } from "../vocabulary/task.ts";
 import type {
   Role,
   TransitionArgs,
   TransitionName,
   TransitionResult,
-} from "../domain/state-machine.ts";
-import type { FragmentVars } from "../domain/fragment.ts";
-import type { ResultCall } from "../domain/results.ts";
+} from "../vocabulary/state-machine.ts";
+import type { FragmentVars } from "../prompting/domain/fragment.ts";
+import type { ResultCall } from "../agents/domain/results.ts";
 
 export interface Reservation extends PoolReservation {
   slotName: string;

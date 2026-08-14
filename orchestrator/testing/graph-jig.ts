@@ -7,21 +7,21 @@ import {
   parseDocument,
   rebuildDocument,
   splitDocument,
-} from "../domain/task.ts";
+} from "../vocabulary/task.ts";
 import {
   activeTaskPath,
   createTask,
   nextTaskIdPath,
   readTaskFile,
-} from "../adapters/task-store.ts";
+} from "../tasks/adapters/task-store.ts";
 import {
   type TransitionArgs,
   type TransitionName,
   type TransitionResult,
-} from "../domain/state-machine.ts";
-import { applyTransition } from "../adapters/task-documents.ts";
-import { clearClaim, takeClaim } from "../adapters/task-documents.ts";
-import type { ClaimArgs } from "../app/ports/tasks.ts";
+} from "../vocabulary/state-machine.ts";
+import { applyTransition } from "../tasks/adapters/task-documents.ts";
+import { clearClaim, takeClaim } from "../tasks/adapters/task-documents.ts";
+import type { ClaimArgs } from "../tasks/ports/tasks.ts";
 import { ORCHESTRATOR_DIR } from "./orchestrator-jig.ts";
 
 export { ORCHESTRATOR_DIR };

@@ -1,6 +1,6 @@
 # Settling an agent
 
-Everything the server does to a task in a role stage comes out of this path ([`policy/settle.ts`](../orchestrator/policy/settle.ts)).
+Everything the server does to a task in a role stage comes out of this path ([`tasks/policy/settle.ts`](../orchestrator/tasks/tasks/policy/settle.ts)).
 
 Two inputs, not interchangeable: the **event stream** says how the turn ended and carries the result tool calls; **`ASSIGNMENT.md` on disk** says what the agent believes it accomplished. The file is only worth reading once the stream says the turn settled, because a run whose every attempt failed still fires `agent_end` per attempt ([reading the stream](sandbox.md#reading-the-stream)).
 
@@ -20,7 +20,7 @@ A `length` or resultless outcome keeps the branch, so the next attempt starts fr
 
 ## Issues
 
-Every way a settle can be wrong is a **named issue** with its own [fragment](prompts.md) and attempt budget ([`domain/issues.ts`](../orchestrator/domain/issues.ts)). Raising one prompts the live session with that fragment; the attempt after the last is a `hold` naming the issue. Attempts are counted per issue per dispatch.
+Every way a settle can be wrong is a **named issue** with its own [fragment](prompts.md) and attempt budget ([`prompts/domain/issues.ts`](../orchestrator/prompts/prompts/domain/issues.ts)). Raising one prompts the live session with that fragment; the attempt after the last is a `hold` naming the issue. Attempts are counted per issue per dispatch.
 
 - **4** for the ordinary recoverable ones: a retry costs one turn against a session that already holds the whole task, and the alternative costs a person
 - **8** for `missing-result`: the work is done and only the reporting call is missing, the causes are what a nudge clears (prose instead of a call, exhausted context, aborted turn), and a compaction between attempts changes the conditions

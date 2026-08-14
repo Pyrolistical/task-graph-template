@@ -1,6 +1,6 @@
 # The server
 
-One `bun` process, started by the manager over stdio, owning every mutation of the graph. `app/server.ts` is the lifecycle only: the locks, the tick, the console channel, detach and shutdown. What it used to front — the task verbs, the slots, the views, the scheduler switch — belongs to the modules it ticks ([Structure](architecture.md#structure)).
+One `bun` process, started by the manager over stdio, owning every mutation of the graph. `tasks/app/server.ts` is the lifecycle only: the locks, the tick, the console channel, detach and shutdown. What it used to front — the task verbs, the slots, the views, the scheduler switch — belongs to the modules it ticks ([Structure](architecture.md#structure)).
 
 ## Starting
 
@@ -20,7 +20,7 @@ Dispatch is last because everything before it can free a slot or move a task: th
 
 ## Every edit through one door
 
-The graph is a directory of whole documents, and rewriting one is a read and a write with an `await` between them. Nothing in the server writes a document itself: every mutation is a method on [the task graph](architecture.md#what-the-layers-are-not), which runs them one at a time. So a cost recorded as a slot is released cannot land on top of a body the manager just wrote, and the tick that follows reads what both of them left.
+The graph is a directory of whole documents, and rewriting one is a read and a write with an `await` between them. Nothing in the server writes a document itself: every mutation is a method on [the task graph](architecture.md#what-the-slices-are-not), which runs them one at a time. So a cost recorded as a slot is released cannot land on top of a body the manager just wrote, and the tick that follows reads what both of them left.
 
 A tool call returns once its edit has been applied, not once a tick has picked it up.
 

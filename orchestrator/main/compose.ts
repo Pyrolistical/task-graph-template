@@ -1,39 +1,42 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { Dispatcher } from "../app/dispatcher.ts";
-import { Lander } from "../app/lander.ts";
-import { Pool } from "../app/pool.ts";
-import { Recovery } from "../app/recovery.ts";
-import { Checker } from "../app/checker.ts";
-import { Server } from "../app/server.ts";
-import type { ServerConfig } from "../app/config.ts";
-import { Health } from "../app/health.ts";
-import { Views } from "../app/views.ts";
-import { Settler } from "../app/settler.ts";
-import { TaskGraph } from "../app/task-graph.ts";
-import { Latch } from "../domain/latch.ts";
-import { branchName } from "../domain/workspace.ts";
-import { loadAgents } from "../adapters/agent-pool.ts";
-import { CommandFile } from "../adapters/command.ts";
-import { exists } from "../adapters/files.ts";
-import * as git from "../adapters/git.ts";
-import { GitWorkspaces } from "../adapters/git-workspaces.ts";
-import { PiAgents } from "../adapters/pi-agents.ts";
-import { PromptFiles } from "../adapters/prompt-files.ts";
-import { type Runtime, defaultAgentsPath } from "../adapters/runtime.ts";
+import { Dispatcher } from "../tasks/app/dispatcher.ts";
+import { Lander } from "../tasks/app/lander.ts";
+import { Pool } from "../agents/app/pool.ts";
+import { Recovery } from "../tasks/app/recovery.ts";
+import { Checker } from "../tasks/app/checker.ts";
+import { Server } from "../tasks/app/server.ts";
+import type { ServerConfig } from "../tasks/app/config.ts";
+import { Health } from "../tasks/app/health.ts";
+import { Views } from "../tasks/app/views.ts";
+import { Settler } from "../tasks/app/settler.ts";
+import { TaskGraph } from "../tasks/app/task-graph.ts";
+import { Latch } from "../kernel/domain/latch.ts";
+import { branchName } from "../workspaces/domain/workspace.ts";
+import { loadAgents } from "../agents/adapters/agent-pool.ts";
+import { CommandFile } from "../runtime/adapters/command.ts";
+import { exists } from "../kernel/adapters/files.ts";
+import * as git from "../workspaces/adapters/git.ts";
+import { GitWorkspaces } from "../workspaces/adapters/git-workspaces.ts";
+import { PiAgents } from "../agents/adapters/pi-agents.ts";
+import { PromptFiles } from "../prompting/adapters/prompt-files.ts";
+import {
+  type Runtime,
+  defaultAgentsPath,
+} from "../runtime/adapters/runtime.ts";
 import {
   LIMIT_COMMAND,
   SANDBOX_COMMAND,
   hasLimits,
   hasOverlay,
-} from "../adapters/sandbox.ts";
-import { SandboxedChecks } from "../adapters/sandboxed-checks.ts";
-import { isProcessAlive } from "../adapters/processes.ts";
-import { TaskDocuments } from "../adapters/task-documents.ts";
-import { TaskFiles } from "../adapters/task-files.ts";
-import { TransitionLog } from "../adapters/transition-log.ts";
-import { ViewFiles } from "../adapters/view-files.ts";
+} from "../agents/adapters/sandbox.ts";
+import { SandboxedChecks } from "../checks/adapters/sandboxed-checks.ts";
+import { isProcessAlive } from "../kernel/adapters/processes.ts";
+import { TaskDocuments } from "../tasks/adapters/task-documents.ts";
+import { TaskFiles } from "../runtime/adapters/task-files.ts";
+import { TransitionLog } from "../runtime/adapters/transition-log.ts";
+import { ViewFiles } from "../runtime/adapters/view-files.ts";
 
 const ORCHESTRATOR_DIR = path.join(import.meta.dir, "..");
 

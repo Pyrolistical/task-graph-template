@@ -1,19 +1,15 @@
-import {
-  type Slot,
-  type SlotRow,
-  idleRow,
-  parseAgents,
-} from "../domain/agents.ts";
-import type { TaskRow } from "../domain/graph.ts";
-import type { Entry } from "../domain/session.ts";
-import type { Line } from "../domain/text.ts";
+import { type Slot, idleRow, parseAgents } from "../agents/domain/slots.ts";
+import { type SlotRow } from "../views/slots.ts";
+import type { TaskRow } from "../views/tasks.ts";
+import type { Entry } from "../console/domain/session.ts";
+import type { Line } from "../console/domain/text.ts";
 import {
   type Layout,
   type Pane,
   type ConsoleView,
   panes,
-} from "../policy/console.ts";
-import type { Candidate } from "../policy/scheduler.ts";
+} from "../console/policy/console.ts";
+import type { Candidate } from "../views/queue.ts";
 import { present } from "./present.ts";
 
 const POOL = parseAgents({

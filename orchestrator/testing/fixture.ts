@@ -7,13 +7,13 @@ import {
   readTaskFile,
   requireTaskFile,
   writeTaskFile,
-} from "../adapters/task-store.ts";
-import { applyTransition } from "../adapters/task-documents.ts";
-import { takeClaim } from "../adapters/task-documents.ts";
-import { git, gitOrThrow } from "../adapters/git.ts";
-import { Runtime } from "../adapters/runtime.ts";
+} from "../tasks/adapters/task-store.ts";
+import { applyTransition } from "../tasks/adapters/task-documents.ts";
+import { takeClaim } from "../tasks/adapters/task-documents.ts";
+import { git, gitOrThrow } from "../workspaces/adapters/git.ts";
+import { Runtime } from "../runtime/adapters/runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
-import type { ClaimState, EntryName } from "../domain/state-machine.ts";
+import type { ClaimState, EntryName } from "../vocabulary/state-machine.ts";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 

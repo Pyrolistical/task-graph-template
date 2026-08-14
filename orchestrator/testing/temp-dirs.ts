@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "bun:test";
-import { type Awaitable } from "../domain/awaitable.ts";
+import { type Awaitable } from "../kernel/domain/awaitable.ts";
 
 const STALE_MS = 60 * 60 * 1000;
 

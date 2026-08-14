@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { groupOf } from "./domain/pattern.ts";
+import { groupOf } from "./kernel/domain/pattern.ts";
 
 const ROOT = import.meta.dir;
 
