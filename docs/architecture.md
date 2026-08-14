@@ -32,6 +32,57 @@ app/       the use cases that hold state and drive the ports
 adapters/  the one implementation of a port that touches the world
 ```
 
+Drawn down the `tasks/` slice, with `main/` above it and the world below:
+
+```mermaid
+flowchart TB
+  compose["main/compose.ts<br/>the composition root"]
+
+  subgraph slice["tasks/ — one slice"]
+    app["app/task-graph · app/settler<br/><b>the module</b>: holds state, drives the ports"]
+    port["ports/tasks<br/><b>the port</b>: interface Tasks — read · apply · claim"]
+    policy["policy/settle · policy/inbox<br/><b>the policy</b>: decideSettle — observations in, intent out"]
+    domain["domain/rows<br/><b>the domain</b>: what a task row is"]
+    adapter["adapters/task-documents<br/><b>the adapter</b>: TaskDocuments implements Tasks"]
+  end
+
+  world(["the world<br/>markdown on disk"])
+
+  compose -->|constructs| adapter
+  compose -->|constructs| app
+  compose -. "hands the TaskDocuments in as a Tasks" .-> app
+  app -->|calls| port
+  app -->|asks| policy
+  policy --> domain
+  port --> domain
+  adapter -->|implements| port
+  adapter --> world
+```
+
+Every import points down the page but one: the adapter's, which points back up
+at the port. That reversal is the whole of it — the module names an interface,
+never a file that spawns a process, and `compose.ts` is the only module that
+holds both ends.
+
+### Why `ports/` is its own file
+
+It cannot join the adapter, and that side is checked. `app/` may not name
+`adapters/` at all — the layer test matches every `from "…"` line, `import type`
+included — so the interface cannot live in the file that implements it, or the
+module could not give a type to its own constructor parameter. There is more
+than one implementation in any case: the real adapter and the fake in
+`testing/ports.ts`, and neither may own the interface the other is checked
+against.
+
+It could join the domain, and does not. Nothing in `architecture.test.ts` fails
+if `Tasks` is pasted into `tasks/domain/rows.ts` — only the test that pins the
+port's path, and the generated import graph. That side is a rule about what the
+words mean rather than a check: `domain/` says what a task _is_, in total
+functions over values; `ports/` says what someone must _do_ to one, every method
+`Awaitable` and able to fail. Fold them together and the innermost layer starts
+naming effects, and the layer a peer imports as the API stops being told apart
+from the rules it happens to reuse.
+
 - the same rule applies inside a slice as between them: `domain/` cannot see `policy/`, `policy/` cannot see `ports/`, and nothing points at `adapters/`
 - `domain/`, `policy/` and `ports/` name no filesystem, subprocess or environment, in any slice
 - their tests name no effect either — they run over the fakes in `testing/ports.ts`
