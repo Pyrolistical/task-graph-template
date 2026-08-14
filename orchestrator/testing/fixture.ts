@@ -286,10 +286,12 @@ async function handle(command) {
     }
     case "abort": {
       respond("abort", command.id);
+      endTool(true);
       if (busyTimer !== null) {
         clearTimeout(busyTimer);
         busyTimer = null;
       }
+      pendingFinish = null;
       busy = false;
       emit({
         type: "message_end",
@@ -299,19 +301,6 @@ async function handle(command) {
         },
       });
       emit({ type: "agent_settled" });
-      break;
-    }
-    case "abort_bash": {
-      respond("abort_bash", command.id);
-      endTool(true);
-      if (busyTimer !== null) {
-        clearTimeout(busyTimer);
-        busyTimer = null;
-      }
-      if (pendingFinish !== null) {
-        const finish = pendingFinish;
-        finish();
-      }
       break;
     }
     case "steer": {

@@ -257,6 +257,30 @@ describe("Feature: the issues an agent is sent back for", () => {
     // Then it gets twice as many, being the cheapest thing an agent can fix
     expect(budgets).toEqual([8, 4]);
   });
+  testInTempDirs("an aborted command is quoted back to the agent", async () => {
+    // Given a prompt set as it ships, and a command that was aborted under it
+    const prompts = await PromptFiles.open(ORCHESTRATOR_DIR);
+    // When the agent is prompted after the abort
+    const fragment = prompts.issue("aborted", "WORK", {
+      command: "bun test --watch",
+    });
+    // Then it reads the command it lost, so it knows what to do instead
+    expect(fragment).toContain("bun test --watch");
+  });
+  testInTempDirs(
+    "an abort is worth fewer nudges than a rule the agent broke",
+    () => {
+      // Given the issue raised when a command is aborted under an agent
+      const aborted = ISSUES.aborted;
+      // When its budget is compared with the issues an agent can fix itself
+      const between = [
+        aborted.attempts < ISSUES.uncommitted.attempts,
+        aborted.attempts > ISSUES.blocked.attempts,
+      ];
+      // Then it sits between them: each abort is a person stepping in
+      expect(between).toEqual([true, true]);
+    },
+  );
   testInTempDirs("a loop is worth fewer nudges, being dearer to reach", () => {
     // Given the issue raised when an agent repeats one command
     const looping = ISSUES.looping;

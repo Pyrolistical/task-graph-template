@@ -78,9 +78,13 @@ When an enabled agent may be dispatched, as segments of 24 hour `hh:mm` on the s
 - the clock is read at every tick and every view, and a tick is a second, so an agent starts taking work within a second of its segment opening, with nothing to restart
 - `enabled` outranks it: an agent turned off inside its schedule reads `DISABLED`, not `OFF_SCHEDULE`
 
-## Aborting one tool call
+## Aborting a stuck command
 
-`slot_abort` targets one slot by full name — the only case where a slot, not an agent, is the unit. Refused unless that process is inside a `bash` call: `bash` is the only tool that runs long enough to be stuck, and it kills the command, not the turn. The tool result comes back as an error and **the agent reacts** — a failed tool call is something it already knows how to read, and ending the turn would throw away the context that produced it. Session, claim and slot are untouched. Anything worse is `looping` or a held state.
+`slot_abort` targets one slot by full name — the only case where a slot, not an agent, is the unit. Refused unless that process is inside a `bash` call: `bash` is the only tool that runs long enough to be stuck, and a runaway command is the only thing worth reaching into a live turn for. Anything worse is `looping` or a held state.
+
+It sends `abort`, the same command a shutdown sends, and that **ends the turn**. There is no gentler command: `pi` has an `abort_bash`, but it only aborts commands the rpc itself started; an agent's own `bash` tool call runs under the turn's signal, so `abort_bash` answers success and the runaway keeps running.
+
+The turn is what ends, not the run. The pool remembers which command it killed, so the settle reads that abort as the [`aborted` issue](settle.md#issues) rather than an abandon: the same session is prompted with the command that died and told to check what it touched and carry on. Session, claim, slot and worktree are untouched, and the agent keeps the context that produced the command. Only a shutdown's abort — nobody's command recorded — abandons the run. Three aborts in one dispatch hold the task instead: at that point the command is not the problem.
 
 ## Compaction
 

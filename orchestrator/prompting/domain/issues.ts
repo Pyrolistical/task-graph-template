@@ -8,6 +8,7 @@ export const ISSUE_NAMES = [
   "modified-assignment",
   "uncommitted",
   "looping",
+  "aborted",
   "blocked",
   "modified-worktree",
 ] as const;
@@ -59,6 +60,12 @@ export const ISSUES: Record<IssueName, Issue> = {
     attempts: 3,
     fragment: () => "looping",
     held: (detail) => `the agent kept repeating one command: ${detail}`,
+  },
+  aborted: {
+    attempts: 3,
+    fragment: () => "aborted",
+    held: (detail) =>
+      `the agent's command was aborted for the last time: ${detail}`,
   },
   blocked: {
     attempts: 1,

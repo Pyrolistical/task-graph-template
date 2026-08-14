@@ -153,10 +153,6 @@ export class PiProcess implements AgentProcess {
     this.signal({ type: "abort" });
   }
 
-  abortBash(): void {
-    this.signal({ type: "abort_bash" });
-  }
-
   async steer(message: string): Promise<void> {
     await this.send({ type: "steer", message });
   }

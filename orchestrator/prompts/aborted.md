@@ -1,0 +1,5 @@
+This was aborted:
+
+```
+{{command}}
+```

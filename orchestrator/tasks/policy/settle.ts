@@ -19,6 +19,7 @@ export interface Settlement {
   alive: boolean;
   stopReason?: StopReason;
   looping?: string;
+  aborted?: string;
   calls: ResultCall[];
   diff: AssignmentDiff;
   worktree: WorktreeStatus;
@@ -51,6 +52,9 @@ export function decideSettle(settled: Settlement): Intent[] {
     ];
   }
   if (settled.stopReason === "aborted") {
+    if (settled.aborted) {
+      return [raise("aborted", settled.aborted, { command: settled.aborted })];
+    }
     return [{ kind: "abandon" }];
   }
 

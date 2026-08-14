@@ -10,6 +10,7 @@ import { viewJson } from "../runtime/adapters/runtime.ts";
 import {
   type Fixture,
   makeFixture,
+  promptsTo,
   readyTask,
   setPlan,
 } from "../testing/fixture.ts";
@@ -22,12 +23,12 @@ import {
   editTaskFile,
   transitionsOf,
   pathsOf,
+  promptsOf,
   reaches,
   serverFor,
   settle,
   stateOf,
   ticksUntil,
-  until,
   walkTo,
 } from "../testing/server-jig.ts";
 
@@ -648,20 +649,21 @@ describe("Feature: turning an agent off and on", () => {
 
 describe("Feature: aborting the command an agent is running", () => {
   testInTempDirs(
-    "aborting a busy slot kills the bash call and the agent finishes its turn",
+    "aborting a busy slot kills the turn and prompts the same session with the command it lost",
     async () => {
       const fixture = await makeFixture();
       const id = await readyTask(fixture, "A task to abort");
       await setPlan(fixture, {
         [id]: {
           WORK: [
+            { busy_ms: 30000 },
             {
-              busy_ms: 30000,
               submit: true,
               notes: "did the work",
               commit: { path: "a.txt", contents: "a" },
             },
           ],
+          WORK_REVIEW: [{ submit: true }],
         },
       });
 
@@ -676,13 +678,13 @@ describe("Feature: aborting the command an agent is running", () => {
       // When the manager aborts that command
       await app.pool.abortSlot(row.name);
 
-      // Then the command is killed and the agent finishes its turn from there
-      await app.dispatcher.setEnabled(false);
-      await app.server.drain();
-      await until(app, async () => (await stateOf(app, id)) !== "WORK", 20);
-      expect(await stateOf(app, id)).not.toBe("WORK");
+      // Then the same session is prompted with the command that died, and carries on
+      await walkTo(app, id, "MANAGER_REVIEW", 40);
+      expect((await promptsTo(pathsOf(app).sessionDir(id, "worker")))[1]).toBe(
+        promptsOf(app).issue("aborted", "WORK", { command: "git status" }),
+      );
       expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
-        "aborted bash: git status",
+        "aborted the turn inside bash: git status",
       );
 
       await app.server.shutdown();
@@ -698,13 +700,14 @@ describe("Feature: aborting the command an agent is running", () => {
       await setPlan(fixture, {
         [id]: {
           WORK: [
+            { busy_ms: 30000 },
             {
-              busy_ms: 30000,
               submit: true,
               notes: "did the work",
               commit: { path: "a.txt", contents: "a" },
             },
           ],
+          WORK_REVIEW: [{ submit: true }],
         },
       });
 
@@ -720,17 +723,18 @@ describe("Feature: aborting the command an agent is running", () => {
         slot: "pi-fake-fake-1",
       });
 
-      // Then the command is killed, exactly as the manager's own abort would
+      // Then the turn is killed and the session prompted, exactly as the manager's own abort would
       await ticksUntil(app, async () =>
         (await fs.readFile(pathsOf(app).serverLog, "utf-8")).includes(
-          "aborted bash",
+          "aborted the turn",
         ),
       );
-      await app.dispatcher.setEnabled(false);
-      await app.server.drain();
-      await until(app, async () => (await stateOf(app, id)) !== "WORK", 20);
+      await walkTo(app, id, "MANAGER_REVIEW", 40);
+      expect((await promptsTo(pathsOf(app).sessionDir(id, "worker")))[1]).toBe(
+        promptsOf(app).issue("aborted", "WORK", { command: "git status" }),
+      );
       expect(await fs.readFile(pathsOf(app).serverLog, "utf-8")).toContain(
-        "aborted bash: git status",
+        "aborted the turn inside bash: git status",
       );
 
       await app.server.shutdown();

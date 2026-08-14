@@ -45,7 +45,7 @@ Every key moves every pane by the same amount, counted back from the bottom, so 
 
 SGR mouse reporting; targets are recomputed every frame from the layout that drew them, so a resize cannot leave a stale one. The scheduler switch, an agent switch and `[abort]` become [commands](server.md#the-console-command-channel); hiding disabled agents and the new-message marker are handled in the console.
 
-The agent switch names the **agent** and toggles every slot of it; abort names the **slot**, because it kills one command in one process. The same three commands exist over MCP, so the console adds no authority.
+The agent switch names the **agent** and toggles every slot of it; abort names the **slot**, because it kills the command one process is stuck in, and the turn with it; the agent is prompted straight back with what died. The same three commands exist over MCP, so the console adds no authority.
 
 A switch flips on the click, before the server has seen it: the clicked value is drawn over the views until one of them agrees. It takes **two** views that still disagree to reset it, because the first one is likely to have been published before the server read the command — resetting on it would flip the switch back and then forward again as the next view lands. Two disagreeing views mean the command was dropped or refused, and the switch springs back. Clicking again starts the two over.
 

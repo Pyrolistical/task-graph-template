@@ -95,6 +95,7 @@ export class Settler {
       alive: run.process.alive,
       stopReason: run.process.stream.state.stopReason,
       looping: run.process.stream.state.looping,
+      aborted: run.aborted,
       calls: run.results,
       diff: diffAssignment(run.checkout.dispatched, live),
       worktree:

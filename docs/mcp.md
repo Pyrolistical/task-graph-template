@@ -9,7 +9,7 @@ Tools, beyond what their names say ([who may call what](authority.md)):
 - `task_submit_designing` / `task_submit_planning` / `task_submit_working` take a task out of `NEW`/`BLOCKED_*` into that phase — one tool per entry, because "skip the design" is a judgement and an argument would hide it
 - `task_write_body` exists for rewriting a body the manager does **not** hold
 - `disable_scheduler` / `disable_agent` are one verb at two scopes — the whole pool, or one model on one provider that is misbehaving; running work still settles, and both return what is draining
-- `slot_abort` is the one place a slot is the unit ([why](agents.md#aborting-one-tool-call))
+- `slot_abort` is the one place a slot is the unit; it ends the turn it interrupts and prompts the session with the command it killed ([why](agents.md#aborting-a-stuck-command))
 - `reload_prompts` re-reads prompts cached at startup and returns each resolved absolute path, which is how a broken or deleted override is seen
 
 Resources: the five [views](runtime-directory.md#the-views) served as they sit on disk, plus `paths`, `workspace_path` for file watchers, and `error`.

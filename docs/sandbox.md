@@ -59,7 +59,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 
 JSONL on stdin, one object per line, `\n` only; a command may carry an `id` and gets a `response` back on stdout. Split stdout on `\n` alone — Node's `readline` also splits U+2028/U+2029 and would corrupt such a stream.
 
-Commands used: `new_session`/`switch_session`, `prompt`, `steer` (re-dispatch after a compaction, mid-turn), `abort_bash` (the console's abort: one command, not a turn), `abort` (shutdown, and a detected loop), `get_state` (the session path), `get_session_stats` (tokens and context percent), `get_last_assistant_text`.
+Commands used: `new_session`/`switch_session`, `prompt`, `steer` (re-dispatch after a compaction, mid-turn), `abort` (shutdown, a detected loop, and the console's abort), `get_state` (the session path), `get_session_stats` (tokens and context percent), `get_last_assistant_text`.
 
 ## Reading the stream
 

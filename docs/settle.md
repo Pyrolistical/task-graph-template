@@ -6,13 +6,14 @@ Two inputs, not interchangeable: the **event stream** says how the turn ended an
 
 By outcome:
 
-| Turn ended with             | Server does                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| provider error              | back off, re-prompt the same session ([outages](agents.md#when-the-provider-is-down)) |
-| aborted (shutdown, loop)    | close stdin, release the slot                                                         |
-| `length`, or no result call | raise `missing-result`                                                                |
-| `blocked`                   | raise `blocked`                                                                       |
-| `submit`                    | the checks below, then apply                                                          |
+| Turn ended with                                                           | Server does                                                                           |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| provider error                                                            | back off, re-prompt the same session ([outages](agents.md#when-the-provider-is-down)) |
+| aborted, no command recorded (shutdown)                                   | close stdin, release the slot                                                         |
+| aborted on a command ([`slot_abort`](agents.md#aborting-a-stuck-command)) | raise `aborted`                                                                       |
+| `length`, or no result call                                               | raise `missing-result`                                                                |
+| `blocked`                                                                 | raise `blocked`                                                                       |
+| `submit`                                                                  | the checks below, then apply                                                          |
 
 Then, in order: the stage's section must have been appended; nothing above it may have changed; the stage's worktree guard must hold; non-empty findings are feedback back to the author state; otherwise `submit`, handing the assignment in as the new body where the stage says so. A wrong-shaped result never reaches here — `pi` refuses it in-session against the schema.
 
@@ -24,6 +25,7 @@ Every way a settle can be wrong is a **named issue** with its own [fragment](pro
 
 - **4** for the ordinary recoverable ones: a retry costs one turn against a session that already holds the whole task, and the alternative costs a person
 - **8** for `missing-result`: the work is done and only the reporting call is missing, the causes are what a nudge clears (prose instead of a call, exhausted context, aborted turn), and a compaction between attempts changes the conditions
+- **3** for `aborted`: nothing was broken by the agent, so the fragment names the dead command and nothing else; a third abort in one dispatch is a person deciding the same thing three times, which is a hold
 - **1** for `blocked`: it is a stated outcome, not a failure. The second look catches only resolvable confusion; a third would argue with the answer
 - one fragment per issue whatever state it fires from, since the words do not depend on the state; `modified-assignment` is per state because each names the section that state may append
 - named so the log says which issue and how many attempts are gone, `held_reason` says which won, and each fragment is rewritable without a server diff

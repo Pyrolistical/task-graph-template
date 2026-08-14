@@ -23,7 +23,6 @@ export interface AgentProcess {
   prompt(message: string): Awaitable<void>;
   steer(message: string): Awaitable<void>;
   abort(): void;
-  abortBash(): void;
   stats(): Awaitable<{
     tokens?: number;
     cost?: number;

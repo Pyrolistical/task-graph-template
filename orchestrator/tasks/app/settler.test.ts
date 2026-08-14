@@ -21,6 +21,7 @@ import {
 import type { SlotRow } from "../../views/slots.ts";
 import { BACKOFF_CAP_MS } from "../../agents/domain/backoff.ts";
 import { type IssueName, ISSUES } from "../../prompting/domain/issues.ts";
+import type { Activity } from "../../views/activity.ts";
 import type { StreamState } from "../../agents/domain/protocol.ts";
 import type { ResultCall } from "../../agents/domain/results.ts";
 import type { TaskId, TaskMeta } from "../../vocabulary/task.ts";
@@ -33,6 +34,7 @@ async function aRig(
   alive = true,
   results: ResultCall[] = [],
   stream: Partial<StreamState> = {},
+  activity: Activity = { kind: "none" },
 ) {
   const task: TaskMeta = aTask({
     claimed_by: "pi-fake-fake-1",
@@ -57,7 +59,7 @@ async function aRig(
   const pool = new Pool(
     fakeAgents(
       [aSlot()],
-      () => aSession({ kind: "none" }, alive, prompted, {}, stream),
+      () => aSession(activity, alive, prompted, {}, stream),
       () => true,
       results,
     ),
@@ -103,6 +105,16 @@ async function aRig(
     prompted,
     publisher,
   };
+}
+
+function anAbortedRig(): ReturnType<typeof aRig> {
+  return aRig(
+    DISPATCHED,
+    true,
+    [],
+    { stopReason: "aborted" },
+    { kind: "tool-call", tool: "bash", target: "sleep 600", started_at: 0 },
+  );
 }
 
 function exhausted(pool: Pool, run: Run, issue: IssueName): void {
@@ -186,6 +198,43 @@ describe("Feature: what the server does with a settled turn", () => {
     // Then nothing is asked of it and the slot goes back to idle
     expect(prompted).toEqual([]);
     expect(at(pool.rows(), 0).state).toBe("IDLE");
+  });
+});
+
+describe("Feature: an agent whose command was aborted", () => {
+  test("the same session is told which command died, not thrown away", async () => {
+    // Given an agent inside a bash call the manager aborts
+    const { settle, pool, prompted, store, rowOf } = await anAbortedRig();
+    await pool.abortSlot("pi-fake-fake-1");
+
+    // When the server settles the turn the abort ended
+    await settle();
+
+    // Then it is prompted with the command it lost, and keeps its task
+    expect(prompted).toEqual(['issue:aborted:WORK:{"command":"sleep 600"}']);
+    expect(store.applied).toEqual([]);
+    expect(rowOf().state).toBe("BUSY");
+  });
+
+  test("an agent aborted once too often has its task held", async () => {
+    // Given an agent that has already used every abort it is given
+    const { settle, pool, run, store } = await anAbortedRig();
+    exhausted(pool, run, "aborted");
+    await pool.abortSlot("pi-fake-fake-1");
+
+    // When the server settles another aborted turn
+    await settle();
+
+    // Then the task is held for a person, naming the command that died
+    expect(store.applied).toEqual([
+      {
+        id: "000042",
+        name: "hold",
+        args: {
+          reason: ISSUES.aborted.held("sleep 600"),
+        },
+      },
+    ]);
   });
 });
 

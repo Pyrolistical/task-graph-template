@@ -375,7 +375,7 @@ describe("Feature: what a running session has cost so far", () => {
 });
 
 describe("Feature: aborting the tool call an agent is inside", () => {
-  test("a slot running a bash call has that call aborted", async () => {
+  test("a slot running a bash call has that turn aborted", async () => {
     // Given a slot whose agent is inside a bash tool call
     const { pool, log } = aPool(
       [aSlot()],
@@ -394,8 +394,10 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     // When the slot is aborted
     await pool.abortSlot("pi-fake-fake-1");
 
-    // Then the pool records that it killed the command the agent was running
-    expect(log).toEqual(["pi-fake-fake-1 aborted bash: sleep 600"]);
+    // Then the pool records the command it killed, and that the turn went with it
+    expect(log).toEqual([
+      "pi-fake-fake-1 aborted the turn inside bash: sleep 600",
+    ]);
   });
 
   test("a slot that is thinking is refused", async () => {

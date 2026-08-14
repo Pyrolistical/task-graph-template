@@ -13,6 +13,7 @@ function anAgent(state: ClaimState): Settlement {
     alive: true,
     stopReason: "toolUse",
     looping: undefined,
+    aborted: undefined,
     calls: [{ tool: "submit", args: submitArgs(state) }],
     diff: state.endsWith("_REVIEW") ? "unchanged" : "ok",
     worktree: { dirty: [], commits: state === "WORK" ? 1 : 0 },
@@ -288,7 +289,7 @@ describe("Feature: settling an agent that finished its turn", () => {
   });
 
   test("an aborted turn releases the slot without touching the graph", () => {
-    // Given a worker whose turn was aborted
+    // Given a worker whose turn was aborted by a shutdown
     const settled = anAgent("WORK");
     settled.stopReason = "aborted";
 
@@ -297,6 +298,26 @@ describe("Feature: settling an agent that finished its turn", () => {
 
     // Then the agent is abandoned and nothing is submitted
     expect(intents).toEqual([{ kind: "abandon" }]);
+  });
+
+  test("a turn aborted on one command is prompted with that command", () => {
+    // Given a worker whose turn was aborted with the command it was running
+    const settled = anAgent("WORK");
+    settled.stopReason = "aborted";
+    settled.aborted = "sleep 600";
+
+    // When the server decides what to do with the settle
+    const intents = decideSettle(settled);
+
+    // Then the session is kept and told which command died under it
+    expect(intents).toEqual([
+      {
+        kind: "raise",
+        issue: "aborted",
+        detail: "sleep 600",
+        vars: { command: "sleep 600" },
+      },
+    ]);
   });
 
   test("a process that died before settling is abandoned", () => {

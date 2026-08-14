@@ -56,6 +56,7 @@ interface Runner {
   results: ResultCall[];
   issues: Map<IssueName, number>;
   wait?: Wait;
+  aborted?: string;
 }
 
 function freshRunner(slot: Slot): Runner {
@@ -79,6 +80,7 @@ function freshRunner(slot: Slot): Runner {
     results: [],
     issues: new Map(),
     wait: undefined,
+    aborted: undefined,
   };
 }
 
@@ -106,6 +108,10 @@ export class Run {
 
   get wait(): Wait | undefined {
     return this.runner.wait;
+  }
+
+  get aborted(): string | undefined {
+    return this.runner.aborted;
   }
 
   attempts(issue: IssueName): number {
@@ -266,8 +272,11 @@ export class Pool {
       throw new Error(`${name} is not running a bash tool call to abort`);
     }
 
-    runner.process.abortBash();
-    await this.publisher.log(`${name} aborted bash: ${activity.target}`);
+    runner.aborted = activity.target;
+    runner.process.abort();
+    await this.publisher.log(
+      `${name} aborted the turn inside bash: ${activity.target}`,
+    );
 
     return this.rowOf(runner);
   }
@@ -352,6 +361,7 @@ export class Pool {
   raised(run: Run, issue: IssueName): void {
     const runner = this.held(run);
     runner.issues.set(issue, run.attempts(issue) + 1);
+    runner.aborted = undefined;
     runner.state = "BUSY";
   }
 

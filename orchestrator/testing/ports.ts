@@ -136,7 +136,6 @@ export function aSession(
       prompts.push(message);
     },
     abort: () => {},
-    abortBash: () => {},
     stats: () => yielded(stats),
     lastAssistantText: () => {},
     close: () => {},
