@@ -14,7 +14,7 @@ import { Settler } from "../tasks/app/settler.ts";
 import { TaskGraph } from "../tasks/app/task-graph.ts";
 import { Latch } from "../kernel/domain/latch.ts";
 import { branchName } from "../workspaces/domain/workspace.ts";
-import { loadAgents } from "../agents/adapters/agent-pool.ts";
+import { checkWrite, loadAgents } from "../agents/adapters/agent-pool.ts";
 import { CommandFile } from "../runtime/adapters/command.ts";
 import { exists } from "../kernel/adapters/files.ts";
 import * as git from "../workspaces/adapters/git.ts";
@@ -30,7 +30,7 @@ import {
   SANDBOX_COMMAND,
   hasLimits,
   hasOverlay,
-} from "../agents/adapters/sandbox.ts";
+} from "../kernel/adapters/sandbox.ts";
 import { SandboxedChecks } from "../checks/adapters/sandboxed-checks.ts";
 import { isProcessAlive } from "../kernel/adapters/processes.ts";
 import { TaskDocuments } from "../tasks/adapters/task-documents.ts";
@@ -107,7 +107,12 @@ export async function wire(options: WiringOptions): Promise<App> {
     );
   }
 
-  const checks = new SandboxedChecks(runtime, slots, repo, sandboxCommand);
+  const checks = new SandboxedChecks(
+    runtime,
+    checkWrite(slots),
+    repo,
+    sandboxCommand,
+  );
 
   const tasks = new TaskDocuments(tasksDir, orchestratorDir);
 

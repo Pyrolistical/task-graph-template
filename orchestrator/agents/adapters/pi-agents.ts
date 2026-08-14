@@ -6,10 +6,10 @@ import { HEALTH_TIMEOUT_MS, probe } from "../domain/health.ts";
 import type { Sample } from "../../kernel/domain/rates.ts";
 import type { ResultCall } from "../domain/results.ts";
 import { STAGE_OF } from "../../vocabulary/state-machine.ts";
-import { agentWrite } from "./agent-pool.ts";
+import { AGENT_OOM_SCORE_ADJUST, agentWrite } from "./agent-pool.ts";
 import { exists } from "../../kernel/adapters/files.ts";
 import { PiProcess } from "./pi-process.ts";
-import { AGENT_OOM_SCORE_ADJUST, overlays, sandbox } from "./sandbox.ts";
+import { overlays, sandbox } from "../../kernel/adapters/sandbox.ts";
 
 export interface ModelInfo {
   api: string;

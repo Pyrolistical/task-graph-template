@@ -8,29 +8,33 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { agentOf } from "../domain/slots.ts";
-import { parsePool } from "./agent-pool.ts";
-import { agentWrite, checkWrite, loadAgents } from "./agent-pool.ts";
+import {
+  AGENT_OOM_SCORE_ADJUST,
+  DEFAULT_WRITE,
+  PI_HOME,
+  ZIG_WRITE,
+  agentWrite,
+  checkWrite,
+  loadAgents,
+  parsePool,
+} from "./agent-pool.ts";
+import { CHECK_OOM_SCORE_ADJUST } from "../../checks/adapters/sandboxed-checks.ts";
 import * as git from "../../workspaces/adapters/git.ts";
 import {
   CACHE_HOME,
-  DEFAULT_WRITE,
   NON_INTERACTIVE_ENV,
-  PI_HOME,
   SANDBOX_COMMAND,
-  ZIG_WRITE,
   expandHome,
   hasOverlay,
   overlays,
   sandbox,
   sandboxArgs,
-  AGENT_OOM_SCORE_ADJUST,
-  CHECK_OOM_SCORE_ADJUST,
   LIMIT_COMMAND,
   OOM_COMMAND,
   MEMORY_MAX,
   TASKS_MAX,
   limitArgs,
-} from "./sandbox.ts";
+} from "../../kernel/adapters/sandbox.ts";
 import { ORCHESTRATOR_DIR } from "../../testing/graph-jig.ts";
 import { tempRepo } from "../../testing/orchestrator-jig.ts";
 import { at } from "../../testing/present.ts";

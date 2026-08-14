@@ -32,7 +32,7 @@ export interface Edge {
   to: string;
 }
 
-function valueImport(clause: string): boolean {
+export function valueImport(clause: string): boolean {
   if (clause.startsWith("type ")) {
     return false;
   }

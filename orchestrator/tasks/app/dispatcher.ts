@@ -3,7 +3,7 @@ import type { Messages } from "../../runtime/ports/messages.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import { type Checkout, Pool } from "../../agents/app/pool.ts";
+import type { Checkout, Pool } from "../../agents/app/pool.ts";
 import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../../agents/domain/slots.ts";

@@ -3,7 +3,7 @@ import type { Prompts } from "../../prompting/ports/prompts.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Reviews } from "../../runtime/ports/reviews.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import { type Run, Pool } from "../../agents/app/pool.ts";
+import type { Run, Pool } from "../../agents/app/pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { orUndefined } from "../../kernel/domain/awaitable.ts";
 import { nextWait } from "../../agents/domain/backoff.ts";

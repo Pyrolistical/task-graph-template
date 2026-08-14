@@ -1,23 +1,19 @@
-import type { Checks } from "../ports/checks.ts";
+import { overlays, sandbox } from "../../kernel/adapters/sandbox.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
-import type { Slot } from "../../agents/domain/slots.ts";
-import type { CheckResult } from "../domain/checks.ts";
-import type { RunningCheck } from "../../views/checks.ts";
 import type { TaskId } from "../../vocabulary/task.ts";
-import { checkWrite } from "../../agents/adapters/agent-pool.ts";
+import type { RunningCheck } from "../../views/checks.ts";
+import type { CheckResult } from "../domain/checks.ts";
+import type { Checks } from "../ports/checks.ts";
 import { CheckRunner } from "./check-runner.ts";
-import {
-  CHECK_OOM_SCORE_ADJUST,
-  overlays,
-  sandbox,
-} from "../../agents/adapters/sandbox.ts";
+
+export const CHECK_OOM_SCORE_ADJUST = 400;
 
 export class SandboxedChecks implements Checks {
   private readonly runner = new CheckRunner();
 
   constructor(
     private readonly paths: Paths,
-    private readonly slots: Slot[],
+    private readonly write: string[],
     private readonly repo: string,
     private readonly sandboxCommand: string,
   ) {}
@@ -47,7 +43,7 @@ export class SandboxedChecks implements Checks {
           cwd: worktree,
           writable: [worktree],
           readable: [this.repo],
-          overlay: await overlays(checkWrite(this.slots)),
+          overlay: await overlays(this.write),
           oomScoreAdjust: CHECK_OOM_SCORE_ADJUST,
         },
         this.sandboxCommand,

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Awaitable } from "../../kernel/domain/awaitable.ts";
+import type { Awaitable } from "../domain/awaitable.ts";
 
 export const SANDBOX_COMMAND = "bwrap";
 
@@ -13,18 +13,8 @@ export const MEMORY_MAX = "8G";
 
 export const TASKS_MAX = "512";
 
-export const AGENT_OOM_SCORE_ADJUST = 300;
-
-export const CHECK_OOM_SCORE_ADJUST = 400;
-
-export const PI_HOME = path.join(os.homedir(), ".pi");
-
 export const CACHE_HOME =
   process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache");
-
-export const ZIG_WRITE = CACHE_HOME;
-
-export const DEFAULT_WRITE: string[] = [ZIG_WRITE];
 
 export const NON_INTERACTIVE_ENV: Record<string, string> = {
   GIT_EDITOR: "true",

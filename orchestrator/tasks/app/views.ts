@@ -4,7 +4,7 @@ import type { Transitions } from "../../runtime/ports/transitions.ts";
 import type { ServerConfig } from "./config.ts";
 import { Checker } from "./checker.ts";
 import { Dispatcher } from "./dispatcher.ts";
-import { Pool } from "../../agents/app/pool.ts";
+import type { Pool } from "../../agents/app/pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Awaitable } from "../../kernel/domain/awaitable.ts";
 import { inbox } from "../policy/inbox.ts";

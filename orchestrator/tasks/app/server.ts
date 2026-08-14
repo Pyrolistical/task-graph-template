@@ -6,7 +6,7 @@ import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { ServerConfig } from "./config.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { Health } from "./health.ts";
-import { Pool } from "../../agents/app/pool.ts";
+import type { Pool } from "../../agents/app/pool.ts";
 import { Settler } from "./settler.ts";
 import { Recovery } from "./recovery.ts";
 import { Checker } from "./checker.ts";

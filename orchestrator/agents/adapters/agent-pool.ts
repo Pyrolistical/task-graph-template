@@ -1,8 +1,16 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { CACHE_HOME, expandAll } from "../../kernel/adapters/sandbox.ts";
 import { type Slot, parseAgents } from "../domain/slots.ts";
-import { DEFAULT_WRITE, PI_HOME, expandAll } from "./sandbox.ts";
 
-export { DEFAULT_WRITE };
+export const AGENT_OOM_SCORE_ADJUST = 300;
+
+export const PI_HOME = path.join(os.homedir(), ".pi");
+
+export const ZIG_WRITE = CACHE_HOME;
+
+export const DEFAULT_WRITE: string[] = [ZIG_WRITE];
 
 export function agentWrite(slot: Slot): string[] {
   return expandAll(

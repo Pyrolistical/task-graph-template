@@ -4,7 +4,7 @@ import path from "node:path";
 import { groupOf } from "./kernel/domain/pattern.ts";
 import { memberOf } from "./kernel/domain/lookup.ts";
 import { at } from "./testing/present.ts";
-import { graph, render } from "./testing/import-graph.ts";
+import { graph, render, valueImport } from "./testing/import-graph.ts";
 
 const ROOT = import.meta.dir;
 
@@ -116,6 +116,18 @@ function importsOf(module: Module): string[] {
   });
 }
 
+function valueImportsOf(module: Module): string[] {
+  return [
+    ...module.source.matchAll(
+      /^import\s+([\s\S]*?)\s*from\s*"(\.[^"]*\.ts)";?$/gm,
+    ),
+  ]
+    .filter((match) => valueImport(groupOf(match, 1)))
+    .map((match) =>
+      path.normalize(path.join(path.dirname(module.path), groupOf(match, 2))),
+    );
+}
+
 function pure(module: Module): boolean {
   return (
     (module.slice ? PURE_SLICES.includes(module.slice) : false) ||
@@ -189,6 +201,26 @@ describe("Feature: the slices", () => {
 
     // Then inside a slice too, nothing points outward
     expect(crossings).toEqual([]);
+  });
+
+  test("a slice's use cases are private to it, and to the wiring", async () => {
+    // Given every module outside the composition root
+    const outside = (await modules()).filter(
+      (module) => module.slice && module.slice !== "main",
+    );
+
+    // When each is searched for a value import of another slice's app layer
+    const reaching = outside.flatMap((module) =>
+      valueImportsOf(module)
+        .filter(
+          (target) =>
+            layerOf(target) === "app" && sliceOf(target) !== module.slice,
+        )
+        .map((target) => `${module.path} -> ${target}`),
+    );
+
+    // Then only `main/compose.ts` holds one: a peer names the ports and the pure layers
+    expect(reaching).toEqual([]);
   });
 
   test("the layers that only decide reach for no effect at all", async () => {

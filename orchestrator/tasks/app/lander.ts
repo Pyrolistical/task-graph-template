@@ -1,5 +1,5 @@
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import { Pool } from "../../agents/app/pool.ts";
+import type { Pool } from "../../agents/app/pool.ts";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
 import { HELD_STATES, type TaskState } from "../../vocabulary/state-machine.ts";

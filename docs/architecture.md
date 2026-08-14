@@ -6,14 +6,14 @@ Eleven slices, each an onion of its own, ordered so that every dependency points
 main/        composition root — mcp.ts · console.ts      builds adapters, wires the app
 console/     the reader: panes · frame · keys · tty      a whole second process
 tasks/       the graph, the tick, and what a turn meant  the pipeline
-checks/      run a task's checks, sandboxed              one port, one runner
-agents/      what an agent is, how many, who runs next   pool · scheduler · pi · bwrap
+checks/      run a task's checks, sandboxed              one port, one runner, no peer
+agents/      what an agent is, how many, who runs next   pool · scheduler · pi
 runtime/     the runtime directory and the files in it   views · messages · commands
 workspaces/  worktrees, branches and their guards        git
 prompting/   fragments, issues and the files they load   the prompt library
 views/       the five published schemas                  the wire the console reads
 vocabulary/  state machine · task document · costs       the words every slice says
-kernel/      lookup · latch · queue · files · processes  no domain in it at all
+kernel/      lookup · latch · queue · files · bwrap      no domain in it at all
 ```
 
 A slice may import a slice above it in that list and never one below.
@@ -35,7 +35,31 @@ adapters/  the one implementation of a port that touches the world
 - the same rule applies inside a slice as between them: `domain/` cannot see `policy/`, `policy/` cannot see `ports/`, and nothing points at `adapters/`
 - `domain/`, `policy/` and `ports/` name no filesystem, subprocess or environment, in any slice
 - their tests name no effect either — they run over the fakes in `testing/ports.ts`
+- **`app/` is private to its slice.** No peer may import another slice's use cases as a value; `main/compose.ts` constructs them and hands each one to whoever was declared to need it
 - `main/compose.ts` is the only module that knows both halves of every slice
+
+## What a slice exposes
+
+`ports/` is the API. There is no `index.ts` re-exporting a slice's public names, and there should not be: a barrel is a value module, so importing one binds every module it re-exports at runtime, and it would collapse [the import graph](import-graph.md) — every consumer edge would land on the barrel instead of the module it actually needs, turning a generated picture of the coupling into a picture of nothing.
+
+What does the work instead is `import type`. It erases at compile time, so a slice that is only named for its types is not bound to at runtime at all. Of the imports that cross a slice boundary, leaving out the three shared tiers:
+
+```text
+52  type-only     the shape of what compose will hand over
+11  value         a pure function or constant genuinely reused
+```
+
+and by the layer they land in:
+
+```text
+36  ports/     the declared API
+17  domain/    pure rules, reused on purpose
+ 6  app/       all type-only — a constructor parameter's type
+ 2  policy/    the scheduler's ranking, called by the dispatcher and the views
+ 2  adapters/  the console over the runtime directory: one process reading another's files
+```
+
+So a slice is self-contained already, in the sense that matters: nothing but the composition root holds a running piece of another slice. A slice's `app/` may be _named_ by a peer — `dispatcher` must give a type to the `Pool` it is handed — and never _called into_.
 
 ## Why this shape
 
@@ -49,7 +73,7 @@ Slicing on top of that buys something the layers alone did not: **the console is
 
 `kernel/`, `vocabulary/` and `views/` are what every slice is allowed to say. They are shared on purpose, and each has a rule about what may go in:
 
-- **`kernel/`** — no domain at all. A latch, a lock, a queue, a rate window, a schema helper, and the five adapters over files and processes that everything else is built from. If it mentions a task or an agent it does not belong here.
+- **`kernel/`** — no domain at all. A latch, a lock, a queue, a rate window, a schema helper, and the adapters over files, processes and `bwrap` that everything else is built from. If it mentions a task or an agent it does not belong here — the sandbox lives here and the OOM scores an agent and a check each ask for live with their callers.
 - **`vocabulary/`** — the words: the state machine, the task document, what a task costs, what blocks what. No slice owns these because every slice says them.
 - **`views/`** — the wire contract: the five published schemas the server writes and the console reads, and the pure functions over those rows. Nothing else may declare a `*View`; `architecture.test.ts` checks that every schema the console parses is declared here.
 
@@ -126,6 +150,6 @@ flowchart TB
 - `tasks/app/task-graph.ts` is the only module that holds that port, and the only door onto the graph. A whole-document rewrite is a read and a write with an `await` between them, so two of them running at once lose one; the queue that stops it lives **inside** the graph, not at the call sites. Dispatch, settle, checks, reap and every MCP tool all go through the same methods, and `architecture.test.ts` fails if a second module names either `Tasks` or the queue
 - `Messages`, `Reviews` and `Assignments` share one adapter over the runtime directory, because it is one place with one convention; a file per verb only spreads the layout
 - the pool and the scheduler are in `agents/`, not a slice of their own: how many run at once is not separable from what a slot is, and a three-file slice that imports one other slice entirely is a directory, not a boundary
-- `checks/`, `workspaces/` and `prompting/` are four or five files each. They are slices because they are genuinely independent — each names only `kernel/` and the shared tiers — not because they are large
+- `checks/`, `workspaces/` and `prompting/` are four or five files each. They are slices because they are genuinely independent — each names only `kernel/` and the shared tiers — not because they are large. `checks/` used to reach into `agents/adapters/` for the sandbox and for the write list a check may touch; the sandbox was never about agents, and the write list is now handed in by `compose`
 - `orchestrator/prompts/` is the prompt markdown, not the `prompting/` slice. It keeps that name because the manager's overrides sit in `<task dir>/prompts/` and the two are searched by the same convention
 - no `Clock` port: `kernel/domain/rates.ts` takes `nowMs` as a defaulted parameter

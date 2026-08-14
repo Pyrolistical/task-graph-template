@@ -1,7 +1,7 @@
 import type { Paths } from "../../runtime/ports/paths.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import { Pool } from "../../agents/app/pool.ts";
+import type { Pool } from "../../agents/app/pool.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { Awaitable } from "../../kernel/domain/awaitable.ts";
 import { isClaimState } from "../../vocabulary/state-machine.ts";
