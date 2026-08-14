@@ -176,8 +176,7 @@ describe("Feature: reaping claims whose process is gone", () => {
     // Given the slot was reattached to an hour ago and priced by nobody
     pool.reattach(
       {
-        ...at(pool.rows(), 0),
-        state: "BUSY",
+        name: at(pool.rows(), 0).name,
         task_id: task.id,
         role: "worker",
         pid: DEAD_PID,
@@ -234,8 +233,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     const { recover, pool, publisher, log } = aRig([]);
     publisher.rows = [
       {
-        ...at(pool.rows(), 0),
-        state: "BUSY",
+        name: at(pool.rows(), 0).name,
         task_id: "000042",
         role: "worker",
         pid: LIVE_PID,
@@ -266,8 +264,7 @@ describe("Feature: picking the pool back up after a restart", () => {
     const { recover, pool, publisher, store } = aRig([task]);
     publisher.rows = [
       {
-        ...at(pool.rows(), 0),
-        state: "BUSY",
+        name: at(pool.rows(), 0).name,
         task_id: task.id,
         role: "worker",
         pid: LIVE_PID,
@@ -289,11 +286,12 @@ describe("Feature: picking the pool back up after a restart", () => {
     const { recover, pool, publisher } = aRig([]);
     publisher.rows = [
       {
-        ...at(pool.rows(), 0),
-        state: "BUSY",
+        name: at(pool.rows(), 0).name,
         task_id: "000042",
         role: "worker",
         pid: DEAD_PID,
+        started_at: undefined,
+        session: undefined,
       },
     ];
 

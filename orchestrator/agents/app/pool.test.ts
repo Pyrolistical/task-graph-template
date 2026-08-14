@@ -14,12 +14,12 @@ import type { AgentProcess } from "../ports/agents.ts";
 import type { Activity } from "../../views/activity.ts";
 import type { Slot } from "../domain/slots.ts";
 import type { Cost } from "../../vocabulary/costs.ts";
-import { at } from "../../testing/present.ts";
+import { at, present } from "../../testing/present.ts";
 
 function aPool(
   slots: Slot[] = [aSlot()],
   alive = true,
-  health: () => boolean = () => true,
+  health: () => string | undefined = () => undefined,
   session: () => AgentProcess = () => aSession(),
 ) {
   const workspaces = new FakeWorkspaces();
@@ -57,7 +57,7 @@ describe("Feature: the pool of agent slots", () => {
     // When the pool is asked for its rows
     const rows = pool.rows();
 
-    // Then both slots read as idle, because the pool is fixed at load
+    // Then both slots read as idle, because a slot holds nothing until it is dispatched
     expect(rows.map((row) => row.state)).toEqual(["IDLE", "IDLE"]);
   });
 
@@ -182,7 +182,7 @@ describe("Feature: the pool of agent slots", () => {
 
   test("a slot whose agent asks for no health check is offered unasked", async () => {
     // Given a pool whose only agent leaves healthCheck off
-    const { pool, probed } = aPool([aSlot()], true, () => false);
+    const { pool, probed } = aPool([aSlot()], true, () => "nothing answered");
 
     // When the scheduler asks what is free
     const free = await pool.freeSlots();
@@ -195,7 +195,11 @@ describe("Feature: the pool of agent slots", () => {
   test("a slot whose provider answers its health check is offered", async () => {
     // Given a pool whose only agent asks for a health check
     // Given the provider behind it answers
-    const { pool } = aPool([aSlot({ healthCheck: true })], true, () => true);
+    const { pool } = aPool(
+      [aSlot({ healthCheck: true })],
+      true,
+      () => undefined,
+    );
 
     // When the scheduler asks what is free
     const free = await pool.freeSlots();
@@ -210,7 +214,7 @@ describe("Feature: the pool of agent slots", () => {
     const { pool, log } = aPool(
       [aSlot({ healthCheck: true })],
       true,
-      () => false,
+      () => "nothing answered",
     );
 
     // When the scheduler asks what is free
@@ -219,7 +223,7 @@ describe("Feature: the pool of agent slots", () => {
     // Then nothing is dispatched into a provider that is down, and the log says which one
     expect(free).toEqual([]);
     expect(log).toEqual([
-      "provider fake failed its health check: its slots are held back",
+      "provider fake failed its health check: nothing answered; its slots are held back",
     ]);
   });
 
@@ -243,7 +247,7 @@ describe("Feature: the pool of agent slots", () => {
     const { pool, log } = aPool(
       [aSlot({ healthCheck: true })],
       true,
-      () => false,
+      () => "nothing answered",
     );
     await pool.freeSlots();
 
@@ -252,17 +256,21 @@ describe("Feature: the pool of agent slots", () => {
 
     // Then the outage is still one line in the log
     expect(log).toEqual([
-      "provider fake failed its health check: its slots are held back",
+      "provider fake failed its health check: nothing answered; its slots are held back",
     ]);
   });
 
   test("a provider that comes back is said to be dispatchable again", async () => {
     // Given a pool whose only agent asks for a health check
     // Given the provider behind it has already been found down
-    let up = false;
-    const { pool, log } = aPool([aSlot({ healthCheck: true })], true, () => up);
+    let down: string | undefined = "nothing answered";
+    const { pool, log } = aPool(
+      [aSlot({ healthCheck: true })],
+      true,
+      () => down,
+    );
     await pool.freeSlots();
-    up = true;
+    down = undefined;
 
     // When the scheduler asks what is free again
     const free = await pool.freeSlots();
@@ -277,7 +285,11 @@ describe("Feature: the pool of agent slots", () => {
   test("an idle slot of a provider that is down reads as unreachable", async () => {
     // Given a pool whose only agent asks for a health check
     // Given the provider behind it does not answer
-    const { pool } = aPool([aSlot({ healthCheck: true })], true, () => false);
+    const { pool } = aPool(
+      [aSlot({ healthCheck: true })],
+      true,
+      () => "nothing answered",
+    );
     await pool.freeSlots();
 
     // When the pool is asked for its rows
@@ -294,7 +306,7 @@ describe("Feature: the pool of agent slots", () => {
     const slots = [1, 2].map((index) =>
       aSlot({ name: `pi-fake-fake-${index}`, index, healthCheck: true }),
     );
-    const { pool } = aPool(slots, true, () => false);
+    const { pool } = aPool(slots, true, () => "nothing answered");
     await onATask(pool);
 
     // When the provider behind them fails its health check
@@ -316,7 +328,11 @@ describe("Feature: the pool of agent slots", () => {
       agent: "pi-fake-other",
       model: "other",
     });
-    const { pool } = aPool([checked, unchecked], true, () => false);
+    const { pool } = aPool(
+      [checked, unchecked],
+      true,
+      () => "nothing answered",
+    );
 
     // When the scheduler asks what is free
     const free = await pool.freeSlots();
@@ -336,7 +352,7 @@ describe("Feature: what a running session has cost so far", () => {
     const { pool } = aPool(
       [aSlot({ wattage: 300, costPerKwh: 0.2 })],
       true,
-      () => true,
+      () => undefined,
       () => aSession({ kind: "none" }, true, [], { cost: 0.45 }),
     );
     await onATask(pool);
@@ -380,7 +396,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     const { pool, log } = aPool(
       [aSlot()],
       true,
-      () => true,
+      () => undefined,
       () =>
         aSession({
           kind: "tool-call",
@@ -406,7 +422,7 @@ describe("Feature: aborting the tool call an agent is inside", () => {
     const { pool } = aPool(
       [aSlot()],
       true,
-      () => true,
+      () => undefined,
       () => aSession(activity),
     );
     await onATask(pool);
@@ -521,7 +537,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     const { pool, costs } = aPool(
       [aSlot()],
       true,
-      () => true,
+      () => undefined,
       () => aSession({ kind: "none" }, true, [], { cost: 0.45 }),
     );
     await onATask(pool);
@@ -573,7 +589,7 @@ describe("Feature: releasing a slot when its work ends", () => {
     const { pool, costs } = aPool(
       [aSlot()],
       true,
-      () => true,
+      () => undefined,
       () => aSession({ kind: "none" }, true, [], { cost: 0.7 }),
     );
     await onATask(pool, undefined, { seconds: 900, cost: 0.3 });
@@ -618,5 +634,216 @@ describe("Feature: releasing a slot when its work ends", () => {
 
     // Then there is none, so a tick has nothing to wait on
     expect(running).toBe(0);
+  });
+});
+
+describe("Feature: changing how many slots an agent runs with", () => {
+  const twoSlots = () =>
+    aPool([aSlot(), aSlot({ name: "pi-fake-fake-2", index: 2 })]);
+
+  const onASecondTask = (pool: Pool) =>
+    aRun(
+      pool,
+      { ...aReservation(), slotName: "pi-fake-fake-2", taskId: "000043" },
+      A_SESSION,
+    );
+
+  test("every row says how many slots its agent is meant to have", () => {
+    // Given a pool built from two slots of one agent
+    const { pool } = twoSlots();
+
+    // When the pool is asked for its rows
+    const rows = pool.rows();
+
+    // Then each row carries the count, so a reader can say which of how many it is
+    expect(rows.map((row) => [row.index, row.total])).toEqual([
+      [1, 2],
+      [2, 2],
+    ]);
+  });
+
+  test("a slot added at runtime takes the next free number and starts idle", async () => {
+    // Given a pool of two slots
+    const { pool, log } = twoSlots();
+
+    // When the agent is set to three slots
+    const rows = await pool.setAgentSlots("pi-fake-fake", 3);
+
+    // Then the new slot is named for the number it took, and holds nothing
+    expect(rows.map((row) => row.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-2",
+      "pi-fake-fake-3",
+    ]);
+    expect(at(rows, 2).state).toBe("IDLE");
+    expect(rows.map((row) => row.total)).toEqual([3, 3, 3]);
+    expect(log).toEqual([
+      "agent pi-fake-fake set to 3 slots; took pi-fake-fake-3",
+    ]);
+  });
+
+  test("a slot added at runtime is dispatchable", async () => {
+    // Given a pool of one slot the scheduler can have
+    const { pool } = aPool();
+    expect(await pool.freeSlots()).toHaveLength(1);
+
+    // When the agent is set to two slots
+    await pool.setAgentSlots("pi-fake-fake", 2);
+
+    // Then the free list has both, because a runtime slot is a slot like any other
+    expect((await pool.freeSlots()).map((slot) => slot.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-2",
+    ]);
+  });
+
+  test("a slot added at runtime is spawned against its agent's settings", async () => {
+    // Given a pool whose only agent may only work
+    const { pool } = aPool([aSlot({ roles: ["worker"], wattage: 300 })]);
+
+    // When a second slot is added
+    await pool.setAgentSlots("pi-fake-fake", 2);
+
+    // Then it carries the same settings as the slot it was copied from
+    const added = present(
+      pool.slots.find((slot) => slot.name === "pi-fake-fake-2"),
+      "the added slot",
+    );
+    expect(added.roles).toEqual(["worker"]);
+    expect(added.wattage).toBe(300);
+  });
+
+  test("dropping a slot takes an idle one out of the pool at once", async () => {
+    // Given a pool of two idle slots
+    const { pool, log } = twoSlots();
+
+    // When the agent is set to one slot
+    const rows = await pool.setAgentSlots("pi-fake-fake", 1);
+
+    // Then the last one is gone rather than kept as a row that cannot be dispatched
+    expect(rows.map((row) => row.name)).toEqual(["pi-fake-fake-1"]);
+    expect(log).toEqual([
+      "agent pi-fake-fake set to 1 slots; dropped pi-fake-fake-2",
+    ]);
+  });
+
+  test("dropping a slot leaves the busy ones alone and takes the idle one", async () => {
+    // Given a pool of two slots, the first of them busy on a task
+    const { pool } = twoSlots();
+    await onATask(pool);
+
+    // When the agent is set to one slot
+    const rows = await pool.setAgentSlots("pi-fake-fake", 1);
+
+    // Then the idle slot is what leaves, and the task keeps running
+    expect(rows.map((row) => row.name)).toEqual(["pi-fake-fake-1"]);
+    expect(at(rows, 0).task_id).toBe("000042");
+  });
+
+  test("with every slot busy the first one to go idle is the one that leaves", async () => {
+    // Given a pool of two slots, both of them busy on a task
+    const { pool } = twoSlots();
+    const run = await onATask(pool);
+    await onASecondTask(pool);
+
+    // When the agent is set to one slot
+    const rows = await pool.setAgentSlots("pi-fake-fake", 1);
+
+    // Then both keep their task, the extra one reading as a number above the count
+    expect(rows.map((row) => [row.index, row.total])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+
+    // Then the one whose work ends first is the one that leaves the pool
+    await pool.finish(run);
+    expect(pool.rows().map((row) => row.name)).toEqual(["pi-fake-fake-2"]);
+  });
+
+  test("a slot waiting to be dropped is kept if the count goes back up", async () => {
+    // Given a pool of two busy slots the agent has been told to drop one of
+    const { pool } = twoSlots();
+    const run = await onATask(pool);
+    await onASecondTask(pool);
+    await pool.setAgentSlots("pi-fake-fake", 1);
+
+    // When the agent is set back to two slots
+    await pool.setAgentSlots("pi-fake-fake", 2);
+
+    // Then work ending returns that slot to the pool rather than taking it out
+    await pool.finish(run);
+    expect(pool.rows().map((row) => row.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-2",
+    ]);
+  });
+
+  test("a number freed by a dropped slot is the one the next slot takes", async () => {
+    // Given a pool of three slots whose middle one has been dropped
+    const { pool } = aPool([
+      aSlot(),
+      aSlot({ name: "pi-fake-fake-2", index: 2 }),
+      aSlot({ name: "pi-fake-fake-3", index: 3 }),
+    ]);
+    const run = await aRun(
+      pool,
+      { ...aReservation(), slotName: "pi-fake-fake-3" },
+      A_SESSION,
+    );
+    await pool.setAgentSlots("pi-fake-fake", 2);
+    expect(pool.rows().map((row) => row.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-3",
+    ]);
+
+    // When the agent is set to three slots again
+    await pool.setAgentSlots("pi-fake-fake", 3);
+
+    // Then the gap is filled rather than the numbers climbing past the busy slot
+    expect(pool.rows().map((row) => row.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-2",
+      "pi-fake-fake-3",
+    ]);
+    await pool.finish(run);
+  });
+
+  test("the last slot of an agent cannot be dropped", async () => {
+    // Given a pool of one slot
+    const { pool } = aPool();
+
+    // When the agent is set to no slots at all
+    const attempt = pool.setAgentSlots("pi-fake-fake", 0);
+
+    // Then it is refused, because an agent with no slots is one that should be disabled
+    await expect(attempt).rejects.toThrow(/cannot go below one slot/);
+  });
+
+  test("an agent the pool does not have is refused", async () => {
+    // Given a pool of one agent
+    const { pool } = aPool();
+
+    // When another agent's count is set
+    const attempt = pool.setAgentSlots("pi-fake-other", 2);
+
+    // Then it is refused by name, as enabling an unknown agent is
+    await expect(attempt).rejects.toThrow(/no agent named "pi-fake-other"/);
+  });
+
+  test("a slot dropped as it goes idle says so, so a reader sees it leave", async () => {
+    // Given a pool of two busy slots the agent has been told to drop one of
+    const { pool, log } = twoSlots();
+    const run = await onATask(pool);
+    await onASecondTask(pool);
+    await pool.setAgentSlots("pi-fake-fake", 1);
+    log.length = 0;
+
+    // When its work ends
+    await pool.finish(run);
+
+    // Then the pool says which slot left and what the agent is down to
+    expect(log).toEqual([
+      "pi-fake-fake-1 went idle and left the pool: agent pi-fake-fake is down to 1 slots",
+    ]);
   });
 });

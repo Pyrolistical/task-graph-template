@@ -33,6 +33,19 @@
 - rejected **on load**, not at spawn: a config that would fail on the tenth dispatch should fail on startup
 - an empty pool still loads, so tasks can be authored and queued; [starting the scheduler is refused](scheduler.md#dispatch-order)
 
+## slots
+
+How many tasks the agent runs at once, defaulting to one. Each is a row of its own in `slots.json`, numbered from one, and the number is part of the slot's name.
+
+### changing the count while the server runs
+
+`set_agent_slots` and the console's `[-]` `[+]` set a count for as long as the server lives; like `enabled` it is never written back to the file, so a restart is what puts the declared pool back. The count is the unit, not "add one": a command that lands twice leaves the same pool as a command that lands once.
+
+- growing takes the free numbers below the count, so a gap left by a dropped slot is filled before the numbers climb; a slot added this way is idle, dispatchable and priced exactly like one the file declared
+- shrinking takes idle slots first, highest number first. With none idle nothing is interrupted: the count is what changed, and the first slot to go idle is the one that leaves
+- a slot still running above the count reads as `slot 3 / 2` until it settles, because a pane that is drawing a live transcript must not disappear on a click
+- one slot is the floor. An agent with no slots is one that should be [disabled](#enabled), which drains rather than deletes and can be undone
+
 ## roles
 
 Defaults to all four; the only knob on what a slot may be handed. The task's state decides the role needed and a slot lacking it is skipped, so a pool can say the cheap local model only works and the expensive one only reviews. Restricting does not promise capacity: a worker-only pool leaves planners and reviewers waiting, visible as queued work beside idle slots.
@@ -55,7 +68,8 @@ For the local inference server that is not always running. Off, the slot is disp
 
 - base url and api come from pi's own `ModelRuntime`, opened at startup over the same `models.json` agents are spawned against — no second copy of the endpoint
 - the request is that api's model list, authenticated with the credential pi would stream with; an api with no model list is refused by name rather than guessed at
-- down = anything but 2xx, a refused connection, or 5s of silence
+- down = anything but 2xx, a refused connection, 5s of silence, an api with no model list, or a `provider`/`model` pair pi does not know — every one of them is a reason held back and logged once, never an exception out of the tick
+- the reason is what the log line carries: `provider cuda failed its health check: pi knows no model "qwen" on provider "cuda"; its slots are held back`, so a typo in the file reads as a typo and not as an outage
 - one request per provider per scheduling tick, not per slot, and only for otherwise-free enabled slots
 - gates dispatch only: a hosted provider wants this off, since a hosted outage is the backoff's job
 

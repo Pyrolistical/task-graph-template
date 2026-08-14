@@ -456,6 +456,8 @@ describe("Feature: reading the views the server publishes", () => {
       expect(hits.map((hit) => hit.command.command)).toEqual([
         "scheduler",
         "agent",
+        "slots",
+        "slots",
         "slot_abort",
       ]);
     },
@@ -471,7 +473,7 @@ describe("Feature: reading the views the server publishes", () => {
         viewJson(
           1,
           "slots",
-          SLOTS.map((slot) => idleRow(slot, false)),
+          SLOTS.map((slot) => idleRow(slot, SLOTS.length, false)),
           { agents_file: AGENTS_FILE },
         ),
       );

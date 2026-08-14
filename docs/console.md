@@ -5,17 +5,18 @@
 A **reader**: no state the server needs, no rpc channel, startable and killable while agents run. Everything drawn comes from the JSON views and the session `.jsonl` they point at. Its own slice, laid out the same way the server's are — text and session records in `console/domain/`, panes, frame, scroll anchor and key decoding in `console/policy/`, tailing and the tty in `console/adapters/tui.ts`. It reaches for nothing of the server's but the [wire contract](../orchestrator/views/) and the runtime directory the views sit in.
 
 ```text
-[─●] scheduler │ 000042 WORK 000057 WORK_REVIEW              2 queued
-──────────────────────────┬──────────────────────────┬──────────────────────────
-[─●] pi anthropic/claude… │ [─●] pi anthropic/claude…│ [●─] pi llama.cpp-remote…
-task 000042 worker WORK   │ task 000057 reviewer WOR…│ no task
-tool: bash — bun test     │ thinking (12s)           │
-3.4k tok/s ctx 30% $1.20  │ 820 tok/s ctx 8% x2 $0.31│
-──────────────────────────┼──────────────────────────┼──────────────────────────
-01:58:02 bash: bun test   │ 02:09:44 read: src/app.ts│
+[─●] scheduler │ 000042 WORK 000057 WORK_REVIEW                                                       2 queued
+────────────────────────────────────┬────────────────────────────────────┬────────────────────────────────────
+[─●] pi anthro… slot 1 / 2 [-][+] 1s│[─●] pi anthro… slot 2 / 2 [-][+] 5s│[●─] pi llama.cpp-r… slot 1 [+] idle
+task 000042 worker WORK pid 4242    │task 000057 reviewer WORK_REVIEW pi…│no task
+tool: bash — bun test (12s)  [abort]│thinking (12s)                      │
+3.4k tok/s ctx 30% $1.20            │820 tok/s ctx 8% x2 $0.31           │
+────────────────────────────────────┼────────────────────────────────────┼────────────────────────────────────
+01:58:02 bash: bun test             │02:09:44 read: src/app.ts           │
 ```
 
 - one queue line (scheduler switch, queue head with ranks, total) and four header lines per pane; `xN` counts compactions on the current task and `$` the session's cost, drawn only when the provider or the [meter](agents.md#wattage-and-costperkwh) charges
+- `slot 1 / 2` is this slot of its agent's [count](agents.md#slots), `slot 1` alone when the agent runs one; the model name is what gives way as a pane narrows, since the switch, the slot and the state are what a reader is scanning for
 - each pane joins three sources by slot: its `slots.json` row, the `tasks.json` row for the task it holds, and that task's `checks.json` row — a running check displaces the activity line, because a task in `CHECK` has no agent doing anything
 - a slot whose provider failed its [health check](agents.md#healthcheck) reads `unreachable` with its switch still on: the agent is enabled, the provider is not there
 - a slot the clock has taken outside its [schedule](agents.md#schedule) reads `off schedule`, switch on for the same reason: nobody turned it off, its next segment has not come round
@@ -43,11 +44,15 @@ Every key moves every pane by the same amount, counted back from the bottom, so 
 
 ## Clicking
 
-SGR mouse reporting; targets are recomputed every frame from the layout that drew them, so a resize cannot leave a stale one. The scheduler switch, an agent switch and `[abort]` become [commands](server.md#the-console-command-channel); hiding disabled agents and the new-message marker are handled in the console.
+SGR mouse reporting; targets are recomputed every frame from the layout that drew them, so a resize cannot leave a stale one. The scheduler switch, an agent switch, `[-]` `[+]` and `[abort]` become [commands](server.md#the-console-command-channel); hiding disabled agents and the new-message marker are handled in the console.
 
-The agent switch names the **agent** and toggles every slot of it; abort names the **slot**, because it kills the command one process is stuck in, and the turn with it; the agent is prompted straight back with what died. The same three commands exist over MCP, so the console adds no authority.
+The agent switch names the **agent** and toggles every slot of it; `[-]` and `[+]` name the agent too, and set its [slot count](agents.md#changing-the-count-while-the-server-runs) rather than asking for one more or one fewer, so a command that lands twice is the same pool as one that lands once; abort names the **slot**, because it kills the command one process is stuck in, and the turn with it; the agent is prompted straight back with what died. The same four commands exist over MCP, so the console adds no authority.
 
-A switch flips on the click, before the server has seen it: the clicked value is drawn over the views until one of them agrees. It takes **two** views that still disagree to reset it, because the first one is likely to have been published before the server read the command — resetting on it would flip the switch back and then forward again as the next view lands. Two disagreeing views mean the command was dropped or refused, and the switch springs back. Clicking again starts the two over.
+`[-]` is not drawn on an agent down to its last slot, and the count a click asks for is the one on the screen either side — so clicking `[+]` twice asks for two more, the second reading the first click's count rather than the view's.
+
+A switch flips on the click, before the server has seen it: the clicked value is drawn over the views until one of them agrees. So does the pool: `[+]` puts a pane on the screen at once, at the number the server will give it, reading `loading` until the view carries it; `[-]` takes an idle pane off at once, the highest-numbered one, and never a pane holding a task — a click must not be what makes a live transcript disappear.
+
+Both are drawn over the views the same way a switch is, so the screen a click produces is either confirmed or undone within two views. It takes **two** views that still disagree to reset it, because the first one is likely to have been published before the server read the command — resetting on it would flip the switch back and then forward again as the next view lands. Two disagreeing views mean the command was dropped or refused, and the switch springs back. Clicking again starts the two over.
 
 ## The command channel
 

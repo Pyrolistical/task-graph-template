@@ -36,7 +36,7 @@ export interface AgentProcess {
 export interface Agents {
   slots(): Slot[];
   hasSession(path: string): Awaitable<boolean>;
-  healthy(slot: Slot): Awaitable<boolean>;
+  unhealthy(slot: Slot): Awaitable<string | undefined>;
   spawn(
     spec: AgentSpec,
     onUsage: (sample: Sample) => void,

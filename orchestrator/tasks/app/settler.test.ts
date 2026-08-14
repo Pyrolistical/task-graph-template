@@ -60,7 +60,7 @@ async function aRig(
     fakeAgents(
       [aSlot()],
       () => aSession(activity, alive, prompted, {}, stream),
-      () => true,
+      () => undefined,
       results,
     ),
     workspaces,

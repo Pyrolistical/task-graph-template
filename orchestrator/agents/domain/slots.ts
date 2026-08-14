@@ -77,6 +77,10 @@ export function agentOf(name: string): string {
   return name.slice(0, name.lastIndexOf("-"));
 }
 
+export function slotAt(template: Slot, index: number): Slot {
+  return { ...template, name: `${template.agent}-${index}`, index };
+}
+
 export function parseAgents(
   raw: unknown,
   source = "agents.json",
@@ -124,6 +128,7 @@ function idleState(
 
 export function idleRow(
   slot: Slot,
+  total: number,
   enabled = true,
   reachable = true,
   scheduled = withinSchedule(slot.schedule),
@@ -135,6 +140,7 @@ export function idleRow(
     provider: slot.provider,
     model: slot.model,
     index: slot.index,
+    total,
     enabled,
     state: idleState(enabled, reachable, scheduled),
     task_id: undefined,

@@ -1,8 +1,12 @@
 import type { AgentProcess, Agents } from "../ports/agents.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import { type SlotRow, type SlotState } from "../../views/slots.ts";
-import { type Slot, idleRow } from "../domain/slots.ts";
+import {
+  type DetachedSlot,
+  type SlotRow,
+  type SlotState,
+} from "../../views/slots.ts";
+import { type Slot, idleRow, slotAt } from "../domain/slots.ts";
 import { type Awaitable, orUndefined } from "../../kernel/domain/awaitable.ts";
 import { abortable } from "../../views/activity.ts";
 import { type Wait, due, retryOf } from "../domain/backoff.ts";
@@ -120,10 +124,11 @@ export class Run {
 }
 
 export class Pool {
-  readonly slots: Slot[];
   readonly rates = new Rates();
 
   private readonly byName = new Map<string, Runner>();
+  private readonly targets = new Map<string, number>();
+  private readonly order = new Map<string, number>();
   private readonly disabled = new Set<string>();
   private readonly unreachable = new Set<string>();
   private readonly tracked = new Set<Promise<void>>();
@@ -139,13 +144,20 @@ export class Pool {
       resumed: boolean,
     ) => Awaitable<void>,
   ) {
-    this.slots = agents.slots();
-    for (const slot of this.slots) {
+    for (const slot of agents.slots()) {
       this.byName.set(slot.name, freshRunner(slot));
+      this.targets.set(slot.agent, (this.targets.get(slot.agent) ?? 0) + 1);
+      if (!this.order.has(slot.agent)) {
+        this.order.set(slot.agent, this.order.size);
+      }
       if (!slot.enabled) {
         this.disabled.add(slot.agent);
       }
     }
+  }
+
+  get slots(): Slot[] {
+    return this.runners().map((runner) => runner.slot);
   }
 
   private runner(name: string): Runner {
@@ -180,10 +192,10 @@ export class Pool {
       )
       .map((runner) => runner.slot);
 
-    const probes = new Map<string, Awaitable<boolean>>();
+    const probes = new Map<string, Awaitable<string | undefined>>();
     for (const slot of idle) {
       if (slot.healthCheck && !probes.has(slot.provider)) {
-        probes.set(slot.provider, this.agents.healthy(slot));
+        probes.set(slot.provider, this.agents.unhealthy(slot));
       }
     }
 
@@ -198,7 +210,8 @@ export class Pool {
     return !slot.healthCheck || !this.unreachable.has(slot.provider);
   }
 
-  private async noteHealth(provider: string, healthy: boolean): Promise<void> {
+  private async noteHealth(provider: string, reason?: string): Promise<void> {
+    const healthy = !reason;
     if (healthy === !this.unreachable.has(provider)) {
       return;
     }
@@ -210,7 +223,7 @@ export class Pool {
     await this.publisher.log(
       healthy
         ? `provider ${provider} answered its health check: its slots are dispatchable again`
-        : `provider ${provider} failed its health check: its slots are held back`,
+        : `provider ${provider} failed its health check: ${reason}; its slots are held back`,
     );
   }
 
@@ -230,12 +243,89 @@ export class Pool {
     return [...new Set(this.runners().map((runner) => runner.slot.agent))];
   }
 
-  async setAgentEnabled(agent: string, enabled: boolean): Promise<SlotRow[]> {
+  private known(agent: string): void {
     if (!this.agentNames().includes(agent)) {
       throw new Error(
         `no agent named "${agent}"; the pool has ${this.agentNames().join(", ")}`,
       );
     }
+  }
+
+  private mine(agent: string): Runner[] {
+    return this.runners().filter((runner) => runner.slot.agent === agent);
+  }
+
+  private grow(agent: string): string[] {
+    const target = this.targets.get(agent) ?? 0;
+    const template = this.mine(agent)[0]?.slot;
+    if (!template) {
+      throw new Error(`agent ${agent} has no slot to grow from`);
+    }
+
+    const added: string[] = [];
+    while (this.mine(agent).length < target) {
+      const taken = new Set(
+        this.mine(agent).map((runner) => runner.slot.index),
+      );
+      let index = 1;
+      while (taken.has(index)) {
+        index += 1;
+      }
+      const slot = slotAt(template, index);
+      this.byName.set(slot.name, freshRunner(slot));
+      added.push(slot.name);
+    }
+    return added;
+  }
+
+  private reap(agent: string): string[] {
+    const target = this.targets.get(agent) ?? 0;
+    const removed: string[] = [];
+
+    for (;;) {
+      const mine = this.mine(agent);
+      if (mine.length <= target) {
+        return removed;
+      }
+      const idle = mine
+        .filter((runner) => runner.state === "IDLE")
+        .sort((one, two) => two.slot.index - one.slot.index)[0];
+      if (!idle) {
+        return removed;
+      }
+      this.byName.delete(idle.slot.name);
+      removed.push(idle.slot.name);
+    }
+  }
+
+  async setAgentSlots(agent: string, total: number): Promise<SlotRow[]> {
+    this.known(agent);
+    if (total < 1) {
+      throw new Error(`agent ${agent} cannot go below one slot`);
+    }
+
+    this.targets.set(agent, total);
+    const added = this.grow(agent);
+    const removed = this.reap(agent);
+    const rows = this.rows().filter((row) => row.agent === agent);
+
+    const parts = [`agent ${agent} set to ${total} slots`];
+    if (added.length > 0) {
+      parts.push(`took ${added.join(", ")}`);
+    }
+    if (removed.length > 0) {
+      parts.push(`dropped ${removed.join(", ")}`);
+    }
+    if (rows.length > total) {
+      parts.push(`${rows.length - total} still running`);
+    }
+    await this.publisher.log(parts.join("; "));
+
+    return rows;
+  }
+
+  async setAgentEnabled(agent: string, enabled: boolean): Promise<SlotRow[]> {
+    this.known(agent);
 
     if (enabled) {
       this.disabled.delete(agent);
@@ -379,7 +469,7 @@ export class Pool {
       );
   }
 
-  reattach(row: SlotRow, state?: ClaimState): boolean {
+  reattach(row: DetachedSlot, state?: ClaimState): boolean {
     const runner = this.byName.get(row.name);
     if (!runner || !row.pid || !row.task_id) {
       return false;
@@ -428,14 +518,14 @@ export class Pool {
   }
 
   async stop(run: Run): Promise<void> {
-    if (this.runner(run.slot.name).run !== run) {
+    if (this.byName.get(run.slot.name)?.run !== run) {
       return;
     }
     await this.stopSlot(run.slot.name);
   }
 
   async finish(run: Run): Promise<void> {
-    if (this.runner(run.slot.name).run !== run) {
+    if (this.byName.get(run.slot.name)?.run !== run) {
       return;
     }
     await this.finishSlot(run.slot.name);
@@ -482,6 +572,13 @@ export class Pool {
       );
     }
     Object.assign(runner, freshRunner(runner.slot));
+
+    const agent = runner.slot.agent;
+    for (const dropped of this.reap(agent)) {
+      await this.publisher.log(
+        `${dropped} went idle and left the pool: agent ${agent} is down to ${this.targets.get(agent) ?? 0} slots`,
+      );
+    }
   }
 
   private elapsed(runner: Runner): number {
@@ -501,18 +598,26 @@ export class Pool {
   }
 
   rows(): SlotRow[] {
-    return this.runners().map((runner) => this.rowOf(runner));
+    return this.runners()
+      .sort(
+        (one, two) =>
+          (this.order.get(one.slot.agent) ?? 0) -
+            (this.order.get(two.slot.agent) ?? 0) ||
+          one.slot.index - two.slot.index,
+      )
+      .map((runner) => this.rowOf(runner));
   }
 
   private rowOf(runner: Runner): SlotRow {
     const enabled = !this.disabled.has(runner.slot.agent);
     const reachable = this.reachable(runner.slot);
+    const total = this.targets.get(runner.slot.agent) ?? 0;
     if (runner.state === "IDLE") {
-      return idleRow(runner.slot, enabled, reachable);
+      return idleRow(runner.slot, total, enabled, reachable);
     }
 
     return {
-      ...idleRow(runner.slot, enabled, reachable),
+      ...idleRow(runner.slot, total, enabled, reachable),
       state: runner.state,
       task_id: runner.taskId,
       role: runner.role,

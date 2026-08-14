@@ -36,8 +36,10 @@ The failure is kept, and served as `error`. Every tool and view refuses with tha
 
 The MCP server dies with the manager; agents do not. The next manager reads `slots.json`, finds live pids and reattaches to their streams instead of orphaning live work — which is why the [runtime directory](runtime-directory.md) exists: everything needed to pick the pool back up is a file, not process memory.
 
+That file was written by the server before this one, which may be a different build, so startup reads it as a detached slot — name, task, pid, role, start, session — and nothing the console draws with. A row key added or dropped since that publish leaves the reattach alone; the console reads the same file under the full row schema, but only after this server has published it.
+
 `shutdown` is the other exit — it aborts every live turn and kills the processes, which is what a test harness or an operator wants and what a manager exiting does not.
 
 ## The console command channel
 
-The server watches its runtime root for `console-command`: one JSON object, validated against a three-arm union, read and deleted in one step so it applies exactly once. Unparseable files are dropped silently, since anything on the machine can write there. It is the only channel besides MCP that changes server behaviour, and it can only do what [the console](console.md) can do.
+The server watches its runtime root for `console-command`: one JSON object, validated against a four-arm union, read and deleted in one step so it applies exactly once. Unparseable files are dropped silently, since anything on the machine can write there. It is the only channel besides MCP that changes server behaviour, and it can only do what [the console](console.md) can do.

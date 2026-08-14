@@ -8,6 +8,7 @@ import type { ResultCall } from "../domain/results.ts";
 import { STAGE_OF } from "../../vocabulary/state-machine.ts";
 import { AGENT_OOM_SCORE_ADJUST, agentWrite } from "./agent-pool.ts";
 import { exists } from "../../kernel/adapters/files.ts";
+import { messageOf } from "../../kernel/domain/errors.ts";
 import { PiProcess } from "./pi-process.ts";
 import { overlays, sandbox } from "../../kernel/adapters/sandbox.ts";
 
@@ -54,28 +55,26 @@ export class PiAgents implements Agents {
     return exists(sessionPath);
   }
 
-  async healthy(slot: Slot): Promise<boolean> {
+  async unhealthy(slot: Slot): Promise<string | undefined> {
     const model = this.models.getModel(slot.provider, slot.model);
     if (!model) {
-      throw new Error(
-        `pi knows no model "${slot.model}" on provider "${slot.provider}"`,
-      );
+      return `pi knows no model "${slot.model}" on provider "${slot.provider}"`;
     }
     const auth = await this.models.getAuth(model);
-    const { url, headers } = probe(
-      auth?.auth.baseUrl ?? model.baseUrl,
-      model.api,
-      auth?.auth.apiKey,
-    );
 
     try {
+      const { url, headers } = probe(
+        auth?.auth.baseUrl ?? model.baseUrl,
+        model.api,
+        auth?.auth.apiKey,
+      );
       const response = await fetch(url, {
         headers: { ...headers, ...sent(auth?.auth.headers) },
         signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
       });
-      return response.ok;
-    } catch {
-      return false;
+      return response.ok ? undefined : `${url} answered ${response.status}`;
+    } catch (err) {
+      return messageOf(err);
     }
   }
 

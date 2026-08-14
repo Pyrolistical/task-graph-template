@@ -33,7 +33,7 @@ export function busyRow(
   nowMs = Date.now(),
 ): SlotRow {
   return {
-    ...idleRow(SLOTS[0]),
+    ...idleRow(SLOTS[0], SLOTS.length),
     state: "BUSY",
     task_id: "000123",
     role: "worker",

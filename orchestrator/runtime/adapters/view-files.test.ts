@@ -40,7 +40,7 @@ describe("Feature: reading back the slots the last server published", () => {
       await publisher.publish({
         seq: 1,
         agentsFile: "/tasks/agents.json",
-        slots: [idleRow(aSlot())],
+        slots: [idleRow(aSlot(), 1)],
         checks: [],
         tasks: [],
         inbox: [],
@@ -79,7 +79,7 @@ describe("Feature: reading back the slots the last server published", () => {
     async () => {
       // Given a slots view an older server wrote, with keys rows no longer use
       const { runtime, publisher } = await viewsFor();
-      const row = { ...idleRow(aSlot()), log: "legacy" };
+      const row = { ...idleRow(aSlot(), 1), log: "legacy" };
       await writeAtomic(
         runtime.slotsView,
         `${JSON.stringify(
@@ -105,6 +105,41 @@ describe("Feature: reading back the slots the last server published", () => {
       );
     },
   );
+
+  testInTempDirs(
+    "a slots view written before a row key existed still reattaches",
+    async () => {
+      // Given a slots view an older server wrote, before rows carried a total
+      const { runtime, publisher } = await viewsFor();
+      const { total: _total, ...row } = idleRow(aSlot(), 1);
+      await writeAtomic(
+        runtime.slotsView,
+        `${JSON.stringify(
+          {
+            at: new Date().toISOString(),
+            seq: 4,
+            agents_file: "/tasks/agents.json",
+            slots: [
+              { ...row, task_id: "000001", pid: 4321, session: "/sessions/1" },
+            ],
+          },
+          undefined,
+          2,
+        )}\n`,
+      );
+
+      // When the next server reads the slots back
+      const rows = await publisher.lastSlots();
+
+      // Then it gets what reattaching needs, and no key it draws with
+      const slot = at(present(rows, "the slots view"), 0);
+      expect(slot.name).toBe("pi-fake-fake-1");
+      expect(slot.pid).toBe(4321);
+      expect(slot.task_id).toBe("000001");
+      expect(slot.session).toBe("/sessions/1");
+      expect(slot).not.toHaveProperty("state");
+    },
+  );
 });
 
 describe("Feature: publishing the views a console reads", () => {
@@ -116,7 +151,7 @@ describe("Feature: publishing the views a console reads", () => {
       const views = {
         seq: 1,
         agentsFile: "/tasks/agents.json",
-        slots: [idleRow(aSlot())],
+        slots: [idleRow(aSlot(), 1)],
         checks: [],
         tasks: [],
         inbox: [],

@@ -117,6 +117,8 @@ export class Server {
         await this.dispatcher.setEnabled(command.enabled);
       } else if (command.command === "slot_abort") {
         await this.pool.abortSlot(command.slot);
+      } else if (command.command === "slots") {
+        await this.pool.setAgentSlots(command.agent, command.total);
       } else {
         await this.pool.setAgentEnabled(command.agent, command.enabled);
       }

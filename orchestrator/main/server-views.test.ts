@@ -743,6 +743,37 @@ describe("Feature: aborting the command an agent is running", () => {
   );
 
   testInTempDirs(
+    "a written slots command grows the pool and the view the console reads",
+    async () => {
+      // Given a server whose pool file declares one slot
+      const fixture = await makeFixture();
+      const app = await serverFor(fixture);
+      expect((await readView(fixture.runtime)).slots).toHaveLength(1);
+
+      // When the console asks for a second slot
+      await writeCommand(pathsOf(app), {
+        command: "slots",
+        agent: "pi-fake-fake",
+        total: 2,
+      });
+
+      // Then the pool takes it, and both rows say which of how many they are
+      await ticksUntil(
+        app,
+        async () => (await readView(fixture.runtime)).slots.length === 2,
+      );
+      const view = await readView(fixture.runtime);
+      expect(view.slots.map((slot) => [slot.index, slot.total])).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
+
+      await app.server.shutdown();
+    },
+    30000,
+  );
+
+  testInTempDirs(
     "a written slot_abort naming an idle slot is logged and dropped",
     async () => {
       // Given a slot the scheduler has dispatched nothing to
@@ -819,7 +850,7 @@ describe("Feature: a manager that exits while its agents run on", () => {
           "slots",
           [
             {
-              ...idleRow(aSlot()),
+              ...idleRow(aSlot(), 1),
               state: "BUSY",
               task_id: id,
               role: "worker",

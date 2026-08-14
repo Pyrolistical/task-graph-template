@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import type { Publisher, ViewName, Views } from "../ports/publisher.ts";
-import { type SlotRow, SlotsViewOfAnyServer } from "../../views/slots.ts";
+import { type DetachedSlot, SlotsViewOfAnyServer } from "../../views/slots.ts";
 import { parse } from "../../kernel/domain/schema.ts";
 import { exists, writeAtomic } from "../../kernel/adapters/files.ts";
 import { Runtime, viewJson } from "./runtime.ts";
@@ -40,7 +40,7 @@ export class ViewFiles implements Publisher {
     return (await exists(filePath)) ? fs.readFile(filePath, "utf-8") : "{}";
   }
 
-  async lastSlots(): Promise<SlotRow[] | undefined> {
+  async lastSlots(): Promise<DetachedSlot[] | undefined> {
     if (!(await exists(this.runtime.slotsView))) {
       return undefined;
     }

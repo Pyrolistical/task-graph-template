@@ -36,6 +36,8 @@ export const MIN_PANE_WIDTH = 24;
 
 export const SWITCH_ON = "[─●]";
 export const SWITCH_OFF = "[●─]";
+export const FEWER = "[-]";
+export const MORE = "[+]";
 export const NEWS = " New messages ↓ ";
 export const HIDE = " hide disabled ";
 export const SHOW = ["  show  ", "disabled", " agents "];
@@ -43,9 +45,11 @@ export const COLLAPSED_WIDTH = 8;
 
 export type Local = { command: "hide_disabled" } | { command: "show_disabled" };
 
+export type ConsoleSlot = SlotRow & { pending?: boolean };
+
 export interface ConsoleView {
   agentsFile: string;
-  slots: SlotRow[];
+  slots: ConsoleSlot[];
   tasks: TaskRow[];
   checks: RunningCheck[];
   queue: Candidate[];
@@ -53,7 +57,7 @@ export interface ConsoleView {
 }
 
 export interface Pane {
-  slot: SlotRow;
+  slot: ConsoleSlot;
   task?: TaskRow;
   check?: RunningCheck;
   sinceMs?: number;
@@ -170,15 +174,46 @@ export function queueHeader(
   };
 }
 
-function identity(slot: SlotRow): string {
-  return [
-    slot.type,
-    `${slot.provider}/${slot.model}`,
-    `slot ${slot.index}`,
-  ].join(" ");
+export function slotLabel(slot: SlotRow): string {
+  return slot.index === 1 && slot.total === 1
+    ? `slot ${slot.index}`
+    : `slot ${slot.index} / ${slot.total}`;
 }
 
+function identity(slot: SlotRow): string {
+  return [slot.type, `${slot.provider}/${slot.model}`].join(" ");
+}
+
+export function slotButtons(slot: SlotRow): Line {
+  const fewer: Line = slot.total > 1 ? [{ text: FEWER, sgr: DIM }] : [];
+  return [...fewer, { text: MORE, sgr: DIM }];
+}
+
+function slotHits(slot: SlotRow, at: number): Hit[] {
+  let from = at;
+  return slotButtons(slot).map((span) => {
+    const to = from + textWidth(span.text);
+    const hit: Hit = {
+      row: 0,
+      from,
+      to,
+      command: {
+        command: "slots",
+        agent: slot.agent,
+        total: span.text === FEWER ? slot.total - 1 : slot.total + 1,
+      },
+    };
+    from = to;
+    return hit;
+  });
+}
+
+export const LOADING = "loading";
+
 function stateLine(pane: Pane, nowMs: number): string {
+  if (pane.slot.pending) {
+    return LOADING;
+  }
   const state =
     pane.slot.state === "DISABLED"
       ? "idle"
@@ -192,6 +227,9 @@ function stateLine(pane: Pane, nowMs: number): string {
 
 export function detailLine(pane: Pane): string {
   const { slot, task } = pane;
+  if (slot.pending) {
+    return "waiting for the server";
+  }
   if (slot.state === "UNREACHABLE") {
     return "provider not answering";
   }
@@ -248,15 +286,28 @@ export function header(
   width: number,
   nowMs: number,
   rate?: number,
-): Line[] {
+): { lines: Line[]; hits: Hit[] } {
   const enabled = toggle(pane.slot.enabled, "");
+  const slots = slotButtons(pane.slot);
+  const label = ` ${slotLabel(pane.slot)} `;
   const right = stateLine(pane, nowMs);
   const unreachable = pane.slot.state === "UNREACHABLE";
-  const room = width - spanWidth(enabled) - textWidth(right) - 1;
-  const left = clip([{ text: ` ${identity(pane.slot)}` }], room);
+  const room =
+    width - spanWidth(enabled) - spanWidth(slots) - textWidth(right) - 1;
+  const left = clip(
+    [
+      ...clip([{ text: ` ${identity(pane.slot)}` }], room - textWidth(label)),
+      { text: label },
+    ],
+    room,
+  );
   const gap = Math.max(
     1,
-    width - spanWidth(enabled) - spanWidth(left) - textWidth(right),
+    width -
+      spanWidth(enabled) -
+      spanWidth(left) -
+      spanWidth(slots) -
+      textWidth(right),
   );
   const button = abortButton(pane);
   const buttonWidth = spanWidth(button);
@@ -291,20 +342,46 @@ export function header(
       ...button,
     ];
   })();
-  return [
-    clip(
-      [
-        ...enabled,
-        ...left,
-        { text: " ".repeat(gap) },
-        { text: right, sgr: unreachable ? RED : undefined },
-      ],
-      width,
-    ),
-    clip([{ text: detailLine(pane), sgr: unreachable ? RED : DIM }], width),
-    activityRow,
-    clip([{ text: statsLine(pane, rate), sgr: DIM }], width),
+  const hits: Hit[] = [
+    {
+      row: 0,
+      from: 0,
+      to: spanWidth(enabled),
+      command: {
+        command: "agent",
+        agent: pane.slot.agent,
+        enabled: !pane.slot.enabled,
+      },
+    },
+    ...slotHits(pane.slot, spanWidth(enabled) + spanWidth(left)),
   ];
+  if (buttonWidth > 0) {
+    hits.push({
+      row: 2,
+      from: width - buttonWidth,
+      to: width,
+      command: { command: "slot_abort", slot: pane.slot.name },
+    });
+  }
+
+  return {
+    lines: [
+      clip(
+        [
+          ...enabled,
+          ...left,
+          ...slots,
+          { text: " ".repeat(gap) },
+          { text: right, sgr: unreachable ? RED : undefined },
+        ],
+        width,
+      ),
+      clip([{ text: detailLine(pane), sgr: unreachable ? RED : DIM }], width),
+      activityRow,
+      clip([{ text: statsLine(pane, rate), sgr: DIM }], width),
+    ],
+    hits,
+  };
 }
 
 export function entryLines(entry: Entry, width: number): Line[] {
@@ -533,31 +610,17 @@ export function screen(
     bases.push(base);
     unread = unread || topOf(paneLines.length, height) > base;
     const from = index * (width + 1);
-    hits.push({
-      row: QUEUE_LINES,
-      from,
-      to: from + spanWidth(toggle(pane.slot.enabled, "")),
-      command: {
-        command: "agent",
-        agent: pane.slot.agent,
-        enabled: !pane.slot.enabled,
-      },
-    });
-    const button = abortButton(pane);
-    if (button.length > 0) {
-      const buttonWidth = spanWidth(button);
-      hits.push({
-        row: QUEUE_LINES + 2,
-        from: from + width - buttonWidth,
-        to: from + width,
-        command: {
-          command: "slot_abort",
-          slot: pane.slot.name,
-        },
-      });
-    }
+    const drawn = header(pane, width, nowMs, rate);
+    hits.push(
+      ...drawn.hits.map((hit) => ({
+        ...hit,
+        row: hit.row + QUEUE_LINES,
+        from: hit.from + from,
+        to: hit.to + from,
+      })),
+    );
     return [
-      ...header(pane, width, nowMs, rate),
+      ...drawn.lines,
       [{ text: "─".repeat(width), sgr: DIM }],
       ...body(paneLines, height, base, scroll.offsets[index] ?? 0),
     ];

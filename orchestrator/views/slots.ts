@@ -31,6 +31,7 @@ export const SlotRow = z.strictObject({
   provider: z.string(),
   model: z.string(),
   index: z.int(),
+  total: z.int(),
   enabled: z.boolean(),
   state: SlotState,
   task_id: maybe(z.string()),
@@ -48,12 +49,35 @@ export const SlotRow = z.strictObject({
 
 export type SlotRow = z.infer<typeof SlotRow>;
 
+export const HOLDING_STATES: SlotState[] = [
+  "SPAWNING",
+  "BUSY",
+  "WAITING",
+  "ABORTING",
+  "SETTLED",
+];
+
+export function holding(row: SlotRow): boolean {
+  return HOLDING_STATES.includes(row.state);
+}
+
 export const SlotsView = z.looseObject({
   agents_file: z.string(),
   slots: z.array(SlotRow),
 });
 
+export const DetachedSlot = z.object({
+  name: z.string(),
+  task_id: maybe(z.string()),
+  role: maybe(z.enum(ALL_ROLES)),
+  pid: maybe(z.int()),
+  started_at: maybe(z.string()),
+  session: maybe(z.string()),
+});
+
+export type DetachedSlot = z.infer<typeof DetachedSlot>;
+
 export const SlotsViewOfAnyServer = z.looseObject({
   agents_file: z.string(),
-  slots: z.array(SlotRow.strip()),
+  slots: z.array(DetachedSlot),
 });

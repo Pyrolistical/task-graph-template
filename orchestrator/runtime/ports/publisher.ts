@@ -1,4 +1,4 @@
-import type { SlotRow } from "../../views/slots.ts";
+import type { DetachedSlot, SlotRow } from "../../views/slots.ts";
 import type { Awaitable } from "../../kernel/domain/awaitable.ts";
 import type { RunningCheck } from "../../views/checks.ts";
 import type { TaskRow } from "../../views/tasks.ts";
@@ -29,6 +29,6 @@ export type ViewName = (typeof VIEW_NAMES)[number];
 export interface Publisher {
   publish(views: Views): Awaitable<void>;
   read(name: ViewName): Awaitable<string>;
-  lastSlots(): Awaitable<SlotRow[] | undefined>;
+  lastSlots(): Awaitable<DetachedSlot[] | undefined>;
   log(line: string): Awaitable<void>;
 }

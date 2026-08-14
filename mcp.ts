@@ -226,6 +226,20 @@ export function build(startup: Startup): McpServer {
   );
 
   mcp.registerTool(
+    "set_agent_slots",
+    {
+      description:
+        "Set how many slots an agent runs with, for as long as this server lives. Names an agent, not a slot: type-provider-model, without the trailing slot number. Growing takes the free numbers below the count; shrinking drops idle slots first, and a slot that is running finishes its task before it leaves, reading as a slot number above the count until it does. One slot is the floor, and a restart puts the count back to agents.json.",
+      inputSchema: z.object({
+        agent: z.string().min(1),
+        slots: z.int().min(1),
+      }),
+    },
+    async ({ agent, slots }) =>
+      json(await applied((app) => app.pool.setAgentSlots(agent, slots))),
+  );
+
+  mcp.registerTool(
     "slot_abort",
     {
       description:

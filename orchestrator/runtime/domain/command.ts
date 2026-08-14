@@ -11,6 +11,11 @@ export const Command = z.discriminatedUnion("command", [
     enabled: z.boolean(),
   }),
   z.strictObject({
+    command: z.literal("slots"),
+    agent: z.string().min(1),
+    total: z.int().min(1),
+  }),
+  z.strictObject({
     command: z.literal("slot_abort"),
     slot: z.string().min(1),
   }),

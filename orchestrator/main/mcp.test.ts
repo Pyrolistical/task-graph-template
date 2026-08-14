@@ -147,6 +147,7 @@ describe("Feature: the tool surface the manager works through", () => {
         "enable_agent",
         "enable_scheduler",
         "reload_prompts",
+        "set_agent_slots",
         "slot_abort",
         "task_abort",
         "task_create",
@@ -654,6 +655,66 @@ describe("Feature: the tool surface the manager works through", () => {
         ),
       );
       expect(enabled.every((row) => row.state === "IDLE")).toBe(true);
+
+      await client.close();
+    },
+    60000,
+  );
+
+  testInTempDirs(
+    "set_agent_slots changes how many slots one agent runs with",
+    async () => {
+      // Given a pool of two agents, one slot each
+      const fixture = await makeFixture();
+      await fs.promises.writeFile(
+        defaultAgentsPath(fixture.tasksDir),
+        JSON.stringify({
+          agents: [
+            { type: "pi", provider: "a", model: "a", slots: 1 },
+            { type: "pi", provider: "b", model: "b", slots: 1 },
+          ],
+        }),
+      );
+      const client = await connect(fixture);
+
+      // When the manager asks one of them for three slots
+      const grown = z.array(SlotRow).parse(
+        JSON.parse(
+          textOf(
+            await client.callTool({
+              name: "set_agent_slots",
+              arguments: { agent: "pi-a-a", slots: 3 },
+            }),
+          ),
+        ),
+      );
+
+      // Then that agent has three idle slots and the other still has one
+      expect(grown.map((row) => [row.name, row.state, row.total])).toEqual([
+        ["pi-a-a-1", "IDLE", 3],
+        ["pi-a-a-2", "IDLE", 3],
+        ["pi-a-a-3", "IDLE", 3],
+      ]);
+      const view = await resourceOf(client, "orchestrator://slots", SlotsView);
+      expect(view.slots.map((slot) => slot.name)).toEqual([
+        "pi-a-a-1",
+        "pi-a-a-2",
+        "pi-a-a-3",
+        "pi-b-b-1",
+      ]);
+
+      // Then asking for fewer takes the idle ones back out of the pool
+      const shrunk = z.array(SlotRow).parse(
+        JSON.parse(
+          textOf(
+            await client.callTool({
+              name: "set_agent_slots",
+              arguments: { agent: "pi-a-a", slots: 1 },
+            }),
+          ),
+        ),
+      );
+      expect(shrunk.map((row) => row.name)).toEqual(["pi-a-a-1"]);
 
       await client.close();
     },

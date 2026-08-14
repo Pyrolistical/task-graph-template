@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { at, present } from "../../testing/present.ts";
 import { type Activity, elapsed } from "../../views/activity.ts";
-import { idleRow } from "../../agents/domain/slots.ts";
+import { idleRow, slotAt } from "../../agents/domain/slots.ts";
 import {
   type Line,
   pad,
@@ -25,6 +25,7 @@ import {
   QUEUE_LINES,
   COLLAPSED_WIDTH,
   HIDE,
+  LOADING,
   SHOW,
   emptyPool,
   errorFrame,
@@ -37,6 +38,8 @@ import {
   body,
   bodyHeight,
   detailLine,
+  FEWER,
+  MORE,
   entryLines,
   header,
   newsButton,
@@ -49,6 +52,8 @@ import {
   scrollBottom,
   scrollForward,
   scrollTop,
+  slotButtons,
+  slotLabel,
   statsLine,
   thousands,
   toggle,
@@ -111,7 +116,7 @@ describe("Feature: joining a slot to the task it is running", () => {
   test("a disabled slot's pane is drawn to the right of a running one", () => {
     // Given a view whose first slot is disabled and whose second is running
     const view = {
-      slots: [idleRow(SLOTS[0], false), busyRow({ ...SLOTS[1] })],
+      slots: [idleRow(SLOTS[0], SLOTS.length, false), busyRow({ ...SLOTS[1] })],
     };
 
     // When the view is joined into one pane per slot
@@ -124,7 +129,7 @@ describe("Feature: joining a slot to the task it is running", () => {
 
   test("an unreachable slot says why it is holding no task", () => {
     // Given a view whose only slot is idle because its provider failed its health check
-    const view = { slots: [idleRow(SLOTS[1], true, false)] };
+    const view = { slots: [idleRow(SLOTS[1], SLOTS.length, true, false)] };
 
     // When the pane's detail line is drawn
     const detail = detailLine(paneOf(view));
@@ -135,7 +140,9 @@ describe("Feature: joining a slot to the task it is running", () => {
 
   test("a slot outside its schedule says why it is holding no task", () => {
     // Given a view whose only slot is idle because the clock is outside its schedule
-    const view = { slots: [idleRow(SLOTS[1], true, true, false)] };
+    const view = {
+      slots: [idleRow(SLOTS[1], SLOTS.length, true, true, false)],
+    };
 
     // When the pane's detail line is drawn
     const detail = detailLine(paneOf(view));
@@ -146,7 +153,7 @@ describe("Feature: joining a slot to the task it is running", () => {
 
   test("an idle slot shows no task, no check and no clock", () => {
     // Given a view whose only slot is idle
-    const view = { slots: [idleRow(SLOTS[1])] };
+    const view = { slots: [idleRow(SLOTS[1], SLOTS.length)] };
 
     // When the view is joined into one pane per slot
     const pane = paneOf(view);
@@ -712,7 +719,7 @@ describe("Feature: drawing the whole screen", () => {
   function disabledCell(index: number) {
     return {
       pane: paneOf({
-        slots: [idleRow(at(SLOTS, index % SLOTS.length), false)],
+        slots: [idleRow(at(SLOTS, index % SLOTS.length), SLOTS.length, false)],
       }),
       rate: undefined,
       lines: (width: number) => new PaneLines().update([], width),
@@ -902,7 +909,7 @@ describe("Feature: drawing the whole screen", () => {
 
     // Then the queue is the top row and the panes start below it
     expect(lines[0]).toContain("the queue");
-    expect(lines[QUEUE_LINES]).toContain("anthropic/claude-sonnet-4-5");
+    expect(lines[QUEUE_LINES]).toContain("slot 1 / 2");
   });
 
   test("a rule under the queue splits it from the panes", () => {
@@ -1102,7 +1109,7 @@ describe("Feature: drawing the whole screen", () => {
     // Given a pane whose slot is idle
     const panes = [
       {
-        pane: paneOf({ slots: [idleRow(SLOTS[0])] }),
+        pane: paneOf({ slots: [idleRow(SLOTS[0], SLOTS.length)] }),
         rate: undefined,
         lines: (width: number) =>
           new PaneLines().update([entryOf("nothing")], width),
@@ -1203,70 +1210,212 @@ describe("Feature: the switches on a pane header", () => {
     const pane = paneOf();
 
     // When its header is drawn
-    const lines = header(pane, 60, 1000);
+    const lines = header(pane, 60, 1000).lines;
 
-    // Then the switch comes first, then the identity, then how long it has run
+    // Then the switch comes first, then the identity, its slot buttons, then how long it has run
     expect(renderLine(at(lines, 0))).toBe(
-      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1                0s",
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1 / 2 \x1b[2m[-]\x1b[0m\x1b[2m[+]\x1b[0m     0s",
     );
   });
 
-  test("a narrow pane clips the identity rather than the switch or the state", () => {
+  test("a narrow pane clips the model rather than the switch, the slot or the state", () => {
     // Given a busy pane in a thirty-column terminal
     const pane = paneOf();
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, 30, 1000), 0));
+    const line = renderLine(at(header(pane, 30, 1000).lines, 0));
 
-    // Then the identity is what gives way, and the row still fills the pane
-    expect(line).toBe("\x1b[32m[─●]\x1b[0m pi anthropic/claude-s… 0s");
+    // Then the model is what gives way, and the row still fills the pane
+    expect(line).toBe(
+      "\x1b[32m[─●]\x1b[0m pi … slot 1 / 2 \x1b[2m[-]\x1b[0m\x1b[2m[+]\x1b[0m 0s",
+    );
     expect(textWidth(bare(line))).toBe(30);
   });
 
   test("a slot of a provider that is down reads as unreachable, in red", () => {
     // Given an idle slot whose provider failed its health check
-    const pane = paneOf({ slots: [idleRow(SLOTS[0], true, false)] });
+    const pane = paneOf({
+      slots: [idleRow(SLOTS[0], SLOTS.length, true, false)],
+    });
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, 60, 1000), 0));
+    const line = renderLine(at(header(pane, 60, 1000).lines, 0));
 
     // Then the switch is still on, because the agent is enabled, and the state is red
     expect(line).toBe(
-      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1       \x1b[31munreachable\x1b[0m",
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonn… slot 1 / 2 \x1b[2m[-]\x1b[0m\x1b[2m[+]\x1b[0m \x1b[31munreachable\x1b[0m",
     );
   });
 
   test("a slot outside its schedule reads as off schedule", () => {
     // Given an idle slot the clock has taken outside its schedule
-    const pane = paneOf({ slots: [idleRow(SLOTS[0], true, true, false)] });
+    const pane = paneOf({
+      slots: [idleRow(SLOTS[0], SLOTS.length, true, true, false)],
+    });
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, 60, 1000), 0));
+    const line = renderLine(at(header(pane, 60, 1000).lines, 0));
 
     // Then the switch is still on, and the state is two words rather than one underscored
     expect(line).toBe(
-      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1      off schedule",
+      "\x1b[32m[─●]\x1b[0m pi anthropic/claude-son… slot 1 / 2 \x1b[2m[-]\x1b[0m\x1b[2m[+]\x1b[0m off schedule",
     );
   });
 
   test("a disabled slot reads as idle behind an off switch", () => {
     // Given a slot whose agent has been turned off
-    const pane = paneOf({ slots: [idleRow(SLOTS[0], false)] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], SLOTS.length, false)] });
 
     // When its header is drawn
-    const line = renderLine(at(header(pane, 60, 1000), 0));
+    const line = renderLine(at(header(pane, 60, 1000).lines, 0));
 
     // Then the switch says disabled and the slot itself still reads as idle
     expect(line).toBe(
-      "\x1b[2m[●─]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1              idle",
+      "\x1b[2m[●─]\x1b[0m pi anthropic/claude-sonnet-4-5 slot 1 / 2 \x1b[2m[-]\x1b[0m\x1b[2m[+]\x1b[0m   idle",
     );
+  });
+});
+
+describe("Feature: the slot count on a pane header", () => {
+  const cells = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      pane: paneOf({
+        slots: [busyRow({ ...SLOTS[index % SLOTS.length], task_id: "000123" })],
+      }),
+      rate: undefined,
+      lines: (width: number) =>
+        new PaneLines().update([entryOf("working")], width),
+    }));
+
+  test("the only slot of an agent is drawn without a count", () => {
+    // Given a pane whose agent runs one slot
+    const slot = busyRow({ index: 1, total: 1 });
+
+    // When its slot is labelled
+    const label = slotLabel(slot);
+
+    // Then it is the number alone, because one of one is what a number already says
+    expect(label).toBe("slot 1");
+  });
+
+  test("one slot of several says which of how many", () => {
+    // Given a pane whose agent runs three slots
+    const slot = busyRow({ index: 1, total: 3 });
+
+    // When its slot is labelled
+    const label = slotLabel(slot);
+
+    // Then the count is beside the number, so a reader sees the whole agent from one pane
+    expect(label).toBe("slot 1 / 3");
+  });
+
+  test("a slot above its agent's count says so until it goes idle", () => {
+    // Given a slot still running after its agent was told to drop to two slots
+    const slot = busyRow({ index: 3, total: 2 });
+
+    // When its slot is labelled
+    const label = slotLabel(slot);
+
+    // Then it reads above the count, which is why the pane is still drawn at all
+    expect(label).toBe("slot 3 / 2");
+  });
+
+  test("the only slot of an agent can be added to but not taken away", () => {
+    // Given a pane whose agent runs one slot
+    const slot = busyRow({ index: 1, total: 1 });
+
+    // When its buttons are drawn
+    const drawn = plain(slotButtons(slot));
+
+    // Then only the plus is offered, because an agent with no slots should be disabled
+    expect(drawn).toBe(MORE);
+  });
+
+  test("a slot of an agent running several offers both buttons", () => {
+    // Given a pane whose agent runs two slots
+    const slot = busyRow({ index: 1, total: 2 });
+
+    // When its buttons are drawn
+    const drawn = plain(slotButtons(slot));
+
+    // Then both are offered, in the order they change the count
+    expect(drawn).toBe(`${FEWER}${MORE}`);
+  });
+
+  test("a pane the console has asked for reads as loading", () => {
+    // Given a pane for a slot clicked into being that the server has not published
+    const pane = paneOf({
+      slots: [{ ...idleRow(slotAt(SLOTS[0], 3), 3), pending: true }],
+    });
+
+    // When its header is drawn
+    const lines = header(pane, 60, 1000).lines;
+
+    // Then it takes its place by number, reading as loading rather than idle
+    const drawn = plain(at(lines, 0));
+    expect(drawn).toContain("slot 3 / 3");
+    expect(drawn.trimEnd().endsWith(LOADING)).toBe(true);
+
+    // Then it says what it is waiting on rather than claiming to have no task
+    expect(detailLine(pane)).toBe("waiting for the server");
+  });
+
+  test("each button asks for the count either side of the one drawn", () => {
+    // Given a screen of one pane whose agent runs two slots
+    const { hits } = screen(cells(1), [], layoutOf());
+
+    // When the slot targets are read off it
+    const slots = hits.filter((hit) => hit.command.command === "slots");
+
+    // Then one asks for a slot fewer and the other for one more, both by agent
+    expect(slots.map((hit) => hit.command)).toEqual([
+      { command: "slots", agent: SLOTS[0].agent, total: 1 },
+      { command: "slots", agent: SLOTS[0].agent, total: 3 },
+    ]);
+  });
+
+  test("a click on a button sends its count, and past the pair sends nothing", () => {
+    // Given a screen with a pair of slot targets on it
+    const { hits } = screen(cells(1), [], layoutOf());
+    const slots = hits.filter((hit) => hit.command.command === "slots");
+    const fewer = at(slots, 0);
+    const more = at(slots, 1);
+
+    // When a click lands on each button and another past the pair
+    const clicked = [fewer, more, { ...more, from: more.to }].map((target) =>
+      hitAt(hits, {
+        button: 0,
+        column: target.from,
+        row: target.row,
+        pressed: true,
+      }),
+    );
+
+    // Then each button sends its own count and the column past them sends nothing
+    expect(clicked).toEqual([fewer.command, more.command, undefined]);
+  });
+
+  test("each pane's buttons sit in that pane's own columns", () => {
+    // Given two panes side by side
+    const { hits } = screen(cells(2), [], layoutOf());
+
+    // When the slot targets are read off the screen
+    const slots = hits.filter((hit) => hit.command.command === "slots");
+
+    // Then each pair falls within the columns of its own pane, after its switch
+    const width = paneWidth(100, 2);
+    expect(slots).toHaveLength(4);
+    expect(at(slots, 0).from).toBeGreaterThan(spanWidth(toggle(true, "")));
+    expect(at(slots, 1).to).toBeLessThanOrEqual(width);
+    expect(at(slots, 2).from).toBeGreaterThanOrEqual(width + 1);
+    expect(at(slots, 3).to).toBeLessThanOrEqual(2 * width + 1);
   });
 });
 
 describe("Feature: the abort button on a pane", () => {
   test("a slot doing nothing offers no button", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ slots: [idleRow(SLOTS[0])] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], SLOTS.length)] });
 
     // When the button is drawn
     const button = abortButton(pane);
@@ -1336,7 +1485,7 @@ describe("Feature: the abort button on a pane", () => {
     const pane = paneOf();
 
     // When the header is drawn
-    const line = renderLine(at(header(pane, 60, 1000), 2));
+    const line = renderLine(at(header(pane, 60, 1000).lines, 2));
 
     // Then the activity is at the left of the row and the button at its right
     expect(line).toBe(
@@ -1346,10 +1495,10 @@ describe("Feature: the abort button on a pane", () => {
 
   test("an idle pane's activity row is blank", () => {
     // Given a slot the scheduler has dispatched nothing to
-    const pane = paneOf({ slots: [idleRow(SLOTS[0])] });
+    const pane = paneOf({ slots: [idleRow(SLOTS[0], SLOTS.length)] });
 
     // When the header is drawn
-    const line = renderLine(at(header(pane, 60, 1000), 2));
+    const line = renderLine(at(header(pane, 60, 1000).lines, 2));
 
     // Then the activity row carries nothing at all
     expect(line).toBe("\x1b[2m\x1b[0m");
@@ -1371,7 +1520,7 @@ describe("Feature: the abort button on a pane", () => {
     });
 
     // When the header is drawn for a thirty-column pane
-    const line = renderLine(at(header(pane, 30, 1000), 2));
+    const line = renderLine(at(header(pane, 30, 1000).lines, 2));
 
     // Then the command is clipped, the elapsed time and button both survive
     expect(line).toBe(

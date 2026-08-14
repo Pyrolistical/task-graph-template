@@ -21,7 +21,7 @@ import {
 import type { Awaitable } from "../kernel/domain/awaitable.ts";
 import type { StreamState } from "../agents/domain/protocol.ts";
 import type { Activity } from "../views/activity.ts";
-import type { SlotRow } from "../views/slots.ts";
+import type { DetachedSlot } from "../views/slots.ts";
 import type { Slot } from "../agents/domain/slots.ts";
 import type { Schedule } from "../agents/domain/schedule.ts";
 import type { CheckResult } from "../checks/domain/checks.ts";
@@ -145,7 +145,7 @@ export function aSession(
 
 export class FakePublisher implements Publisher {
   readonly lines: string[] = [];
-  rows: SlotRow[] | undefined = undefined;
+  rows: DetachedSlot[] | undefined = undefined;
   published: Views | undefined = undefined;
 
   publish(views: Views): Awaitable<void> {
@@ -162,7 +162,7 @@ export class FakePublisher implements Publisher {
     );
   }
 
-  lastSlots(): Promise<SlotRow[] | undefined> {
+  lastSlots(): Promise<DetachedSlot[] | undefined> {
     return yielded(this.rows);
   }
 
@@ -500,13 +500,13 @@ export function fakePaths(): Paths {
 export function fakeAgents(
   slots: Slot[],
   session: () => AgentProcess = () => aSession(),
-  healthy: (slot: Slot) => Awaitable<boolean> = () => true,
+  unhealthy: (slot: Slot) => Awaitable<string | undefined> = () => undefined,
   results: ResultCall[] = [],
 ): Agents {
   return {
     slots: () => slots,
     hasSession: (_path: string) => yielded(true),
-    healthy,
+    unhealthy,
     spawn: (_spec, _onUsage, _onCompaction, onResult) => {
       for (const call of results) {
         onResult(call);
