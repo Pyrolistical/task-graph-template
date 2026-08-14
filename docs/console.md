@@ -16,7 +16,8 @@ tool: bash — bun test (12s)  [abort]│thinking (12s)                      │
 ```
 
 - one queue line (scheduler switch, queue head with ranks, total) and four header lines per pane; `xN` counts compactions on the current task and `$` the session's cost, drawn only when the provider or the [meter](agents.md#wattage-and-costperkwh) charges
-- `slot 1 / 2` is this slot of its agent's [count](agents.md#slots), `slot 1` alone when the agent runs one; the model name is what gives way as a pane narrows, since the switch, the slot and the state are what a reader is scanning for
+- `slot 1 / 2` is this pane of its agent's [count](agents.md#slots), `slot 1` alone when the agent runs one; the model name is what gives way as a pane narrows, since the switch, the slot and the state are what a reader is scanning for
+- the number is where the pane sits among its agent's panes, not the number the pool keeps: dropping slot 1 of two leaves `slot 1 / 2` and `slot 2 / 2` side by side rather than a gap. Each agent counts from one, and the order panes are drawn in never changes under it, so a number moves only when a pane beside it comes or goes
 - each pane joins three sources by slot: its `slots.json` row, the `tasks.json` row for the task it holds, and that task's `checks.json` row — a running check displaces the activity line, because a task in `CHECK` has no agent doing anything
 - a slot whose provider failed its [health check](agents.md#healthcheck) reads `unreachable` with its switch still on: the agent is enabled, the provider is not there
 - a slot the clock has taken outside its [schedule](agents.md#schedule) reads `off schedule`, switch on for the same reason: nobody turned it off, its next segment has not come round

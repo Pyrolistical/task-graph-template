@@ -58,6 +58,7 @@ export interface ConsoleView {
 
 export interface Pane {
   slot: ConsoleSlot;
+  number: number;
   task?: TaskRow;
   check?: RunningCheck;
   sinceMs?: number;
@@ -74,13 +75,20 @@ export function panes(view: ConsoleView): Pane[] {
     }
   }
 
+  const drawn = new Map<string, number>();
+
   return view.slots
-    .map((slot) => ({
-      slot,
-      task: slot.task_id ? tasks.get(slot.task_id) : undefined,
-      check: slot.task_id ? checks.get(slot.task_id) : undefined,
-      sinceMs: !slot.started_at ? undefined : Date.parse(slot.started_at),
-    }))
+    .map((slot) => {
+      const number = (drawn.get(slot.agent) ?? 0) + 1;
+      drawn.set(slot.agent, number);
+      return {
+        slot,
+        number,
+        task: slot.task_id ? tasks.get(slot.task_id) : undefined,
+        check: slot.task_id ? checks.get(slot.task_id) : undefined,
+        sinceMs: !slot.started_at ? undefined : Date.parse(slot.started_at),
+      };
+    })
     .sort((one, two) => Number(two.slot.enabled) - Number(one.slot.enabled));
 }
 
@@ -174,10 +182,10 @@ export function queueHeader(
   };
 }
 
-export function slotLabel(slot: SlotRow): string {
-  return slot.index === 1 && slot.total === 1
-    ? `slot ${slot.index}`
-    : `slot ${slot.index} / ${slot.total}`;
+export function slotLabel(slot: SlotRow, number: number): string {
+  return number === 1 && slot.total === 1
+    ? `slot ${number}`
+    : `slot ${number} / ${slot.total}`;
 }
 
 function identity(slot: SlotRow): string {
@@ -289,7 +297,7 @@ export function header(
 ): { lines: Line[]; hits: Hit[] } {
   const enabled = toggle(pane.slot.enabled, "");
   const slots = slotButtons(pane.slot);
-  const label = ` ${slotLabel(pane.slot)} `;
+  const label = ` ${slotLabel(pane.slot, pane.number)} `;
   const right = stateLine(pane, nowMs);
   const unreachable = pane.slot.state === "UNREACHABLE";
   const room =

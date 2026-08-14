@@ -44,6 +44,7 @@ How many tasks the agent runs at once, defaulting to one. Each is a row of its o
 - growing takes the free numbers below the count, so a gap left by a dropped slot is filled before the numbers climb; a slot added this way is idle, dispatchable and priced exactly like one the file declared
 - shrinking takes idle slots first, highest number first. With none idle nothing is interrupted: the count is what changed, and the first slot to go idle is the one that leaves
 - a slot still running above the count reads as `slot 3 / 2` until it settles, because a pane that is drawing a live transcript must not disappear on a click
+- the numbers here are the pool's own, and a hole in them is never drawn: the console [numbers its panes](console.md) by where they sit, so a pool holding slots 2 and 3 reads `slot 1 / 2` and `slot 2 / 2`
 - one slot is the floor. An agent with no slots is one that should be [disabled](#enabled), which drains rather than deletes and can be undone
 
 ## roles

@@ -1292,7 +1292,7 @@ describe("Feature: the slot count on a pane header", () => {
     const slot = busyRow({ index: 1, total: 1 });
 
     // When its slot is labelled
-    const label = slotLabel(slot);
+    const label = slotLabel(slot, 1);
 
     // Then it is the number alone, because one of one is what a number already says
     expect(label).toBe("slot 1");
@@ -1303,21 +1303,58 @@ describe("Feature: the slot count on a pane header", () => {
     const slot = busyRow({ index: 1, total: 3 });
 
     // When its slot is labelled
-    const label = slotLabel(slot);
+    const label = slotLabel(slot, 1);
 
     // Then the count is beside the number, so a reader sees the whole agent from one pane
     expect(label).toBe("slot 1 / 3");
   });
 
   test("a slot above its agent's count says so until it goes idle", () => {
-    // Given a slot still running after its agent was told to drop to two slots
+    // Given a third pane still drawn after its agent was told to drop to two slots
     const slot = busyRow({ index: 3, total: 2 });
 
     // When its slot is labelled
-    const label = slotLabel(slot);
+    const label = slotLabel(slot, 3);
 
     // Then it reads above the count, which is why the pane is still drawn at all
     expect(label).toBe("slot 3 / 2");
+  });
+
+  test("the panes of an agent are numbered by where they are drawn", () => {
+    // Given an agent whose slot 1 was taken away, leaving the pool holding 2 and 3
+    const view = viewOf({
+      slots: [
+        busyRow({ ...slotAt(SLOTS[0], 2), total: 2 }),
+        busyRow({ ...slotAt(SLOTS[0], 3), total: 2 }),
+      ],
+    });
+
+    // When the panes are labelled
+    const labels = panes(view).map((pane) => slotLabel(pane.slot, pane.number));
+
+    // Then they count from one across the panes on screen, not from the numbers the pool kept
+    expect(labels).toEqual(["slot 1 / 2", "slot 2 / 2"]);
+  });
+
+  test("each agent's panes are numbered from one", () => {
+    // Given two agents drawn side by side, each holding one slot
+    const view = viewOf({
+      slots: [
+        busyRow({ ...slotAt(SLOTS[0], 2), total: 1 }),
+        busyRow({
+          ...slotAt(SLOTS[0], 4),
+          agent: "pi-anthropic-claude-opus-4-5",
+          name: "pi-anthropic-claude-opus-4-5-4",
+          total: 1,
+        }),
+      ],
+    });
+
+    // When the panes are labelled
+    const labels = panes(view).map((pane) => slotLabel(pane.slot, pane.number));
+
+    // Then neither agent's numbering is carried into the other's
+    expect(labels).toEqual(["slot 1", "slot 1"]);
   });
 
   test("the only slot of an agent can be added to but not taken away", () => {
@@ -1344,9 +1381,14 @@ describe("Feature: the slot count on a pane header", () => {
 
   test("a pane the console has asked for reads as loading", () => {
     // Given a pane for a slot clicked into being that the server has not published
-    const pane = paneOf({
-      slots: [{ ...idleRow(slotAt(SLOTS[0], 3), 3), pending: true }],
+    const view = viewOf({
+      slots: [
+        busyRow({ ...SLOTS[0], total: 3 }),
+        busyRow({ ...SLOTS[1], total: 3 }),
+        { ...idleRow(slotAt(SLOTS[0], 3), 3), pending: true },
+      ],
     });
+    const pane = at(panes(view), 2);
 
     // When its header is drawn
     const lines = header(pane, 60, 1000).lines;
