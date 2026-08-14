@@ -1379,6 +1379,41 @@ describe("Feature: the slot count on a pane header", () => {
     expect(drawn).toBe(`${FEWER}${MORE}`);
   });
 
+  test("an agent at its limit is offered no plus to click", () => {
+    // Given a pane whose agent runs the two slots its limit allows
+    const slot = busyRow({ index: 1, total: 2, max: 2 });
+
+    // When its buttons are drawn
+    const drawn = plain(slotButtons(slot));
+
+    // Then only the minus is offered, because the limit is what the console may not pass
+    expect(drawn).toBe(FEWER);
+  });
+
+  test("an agent below its limit is still offered the plus", () => {
+    // Given a pane whose agent runs one of the three slots its limit allows
+    const slot = busyRow({ index: 1, total: 1, max: 3 });
+
+    // When its buttons are drawn
+    const drawn = plain(slotButtons(slot));
+
+    // Then the plus stands until the count reaches the limit
+    expect(drawn).toBe(MORE);
+  });
+
+  test("a slot at its agent's limit takes no growing click", () => {
+    // Given a header drawn for an agent that runs the one slot its limit allows
+    const pane = paneOf({ slots: [busyRow({ index: 1, total: 1, max: 1 })] });
+
+    // When the header is drawn
+    const { hits } = header(pane, 60, 2000);
+
+    // Then no hit region offers a count above the limit
+    expect(hits.filter((hit) => hit.command.command === "slots")).toHaveLength(
+      0,
+    );
+  });
+
   test("a pane the console has asked for reads as loading", () => {
     // Given a pane for a slot clicked into being that the server has not published
     const view = viewOf({

@@ -303,6 +303,10 @@ export class Pool {
     if (total < 1) {
       throw new Error(`agent ${agent} cannot go below one slot`);
     }
+    const max = this.mine(agent)[0]?.slot.maxSlots;
+    if (max && total > max) {
+      throw new Error(`agent ${agent} cannot go above its ${max} slot limit`);
+    }
 
     this.targets.set(agent, total);
     const added = this.grow(agent);

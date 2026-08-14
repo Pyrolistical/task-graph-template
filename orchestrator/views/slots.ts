@@ -32,6 +32,7 @@ export const SlotRow = z.strictObject({
   model: z.string(),
   index: z.int(),
   total: z.int(),
+  max: maybe(z.int()),
   enabled: z.boolean(),
   state: SlotState,
   task_id: maybe(z.string()),

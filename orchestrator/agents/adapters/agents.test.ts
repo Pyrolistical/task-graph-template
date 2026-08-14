@@ -465,6 +465,46 @@ describe("Feature: loading the pool of agents", () => {
       /agents\[1\]: repeats type\+provider\+model "pi\/anthropic\/m"/,
     );
   });
+  testInTempDirs("an agent has no slot limit unless the pool sets one", () => {
+    // Given a pool with one agent that names no limit and another capped at four
+    const pool = {
+      agents: [
+        { type: "pi", provider: "anthropic", model: "m", slots: 1 },
+        {
+          type: "pi",
+          provider: "openai",
+          model: "m",
+          slots: 1,
+          maxSlots: 4,
+        },
+      ],
+    };
+    // When the pool is loaded
+    const slots = parsePool(pool);
+    // Then only the capped agent's slots carry the limit the console reads
+    expect(slots.map((slot) => slot.maxSlots)).toEqual([undefined, 4]);
+  });
+  testInTempDirs(
+    "a limit below the slots the agent starts with is refused",
+    () => {
+      // Given a pool whose agent declares three slots under a limit of two
+      const pool = {
+        agents: [
+          {
+            type: "pi",
+            provider: "anthropic",
+            model: "m",
+            slots: 3,
+            maxSlots: 2,
+          },
+        ],
+      };
+      // When the pool is loaded
+      const attempt = () => parsePool(pool);
+      // Then it is refused on load rather than starting a pool already over its limit
+      expect(attempt).toThrow(/agents\[0\]\.maxSlots: is 2, below its 3 slots/);
+    },
+  );
   testInTempDirs("a pool with no agents at all loads as no slots", () => {
     // Given a pool file with an empty list of agents
     const pool = { agents: [] };

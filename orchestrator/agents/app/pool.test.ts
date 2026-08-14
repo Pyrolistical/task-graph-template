@@ -819,6 +819,33 @@ describe("Feature: changing how many slots an agent runs with", () => {
     await expect(attempt).rejects.toThrow(/cannot go below one slot/);
   });
 
+  test("a count above the agent's limit is refused", async () => {
+    // Given a pool of one slot whose agent may run two
+    const { pool } = aPool([aSlot({ maxSlots: 2 })]);
+
+    // When the agent is set to three slots
+    const attempt = pool.setAgentSlots("pi-fake-fake", 3);
+
+    // Then it is refused, naming the limit the file declared
+    await expect(attempt).rejects.toThrow(/cannot go above its 2 slot limit/);
+    expect(pool.rows()).toHaveLength(1);
+  });
+
+  test("a count at the agent's limit is taken", async () => {
+    // Given a pool of one slot whose agent may run two
+    const { pool } = aPool([aSlot({ maxSlots: 2 })]);
+
+    // When the agent is set to two slots
+    const rows = await pool.setAgentSlots("pi-fake-fake", 2);
+
+    // Then the limit is a ceiling to reach, not one to stop below
+    expect(rows.map((row) => row.name)).toEqual([
+      "pi-fake-fake-1",
+      "pi-fake-fake-2",
+    ]);
+    expect(rows.map((row) => row.max)).toEqual([2, 2]);
+  });
+
   test("an agent the pool does not have is refused", async () => {
     // Given a pool of one agent
     const { pool } = aPool();

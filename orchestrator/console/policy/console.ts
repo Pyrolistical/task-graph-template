@@ -194,7 +194,9 @@ function identity(slot: SlotRow): string {
 
 export function slotButtons(slot: SlotRow): Line {
   const fewer: Line = slot.total > 1 ? [{ text: FEWER, sgr: DIM }] : [];
-  return [...fewer, { text: MORE, sgr: DIM }];
+  const more: Line =
+    slot.max && slot.total >= slot.max ? [] : [{ text: MORE, sgr: DIM }];
+  return [...fewer, ...more];
 }
 
 function slotHits(slot: SlotRow, at: number): Hit[] {

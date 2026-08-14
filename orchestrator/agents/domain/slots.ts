@@ -10,6 +10,7 @@ function poolSchema(defaultWrite: string[]) {
     provider: z.string().min(1),
     model: z.string().min(1),
     slots: z.int().min(1).default(1),
+    maxSlots: z.int().min(1).optional(),
     enabled: z.boolean().default(true),
     schedule: Schedule.optional(),
     healthCheck: z.boolean().default(false),
@@ -31,6 +32,13 @@ function poolSchema(defaultWrite: string[]) {
         });
       }
       seen.add(triple);
+      if (entry.maxSlots && entry.maxSlots < entry.slots) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["agents", i, "maxSlots"],
+          message: `is ${entry.maxSlots}, below its ${entry.slots} slots`,
+        });
+      }
     });
   });
 }
@@ -40,6 +48,7 @@ export interface AgentEntry {
   provider: string;
   model: string;
   slots: number;
+  maxSlots?: number;
   enabled: boolean;
   schedule?: Schedule;
   healthCheck: boolean;
@@ -56,6 +65,7 @@ export interface Slot {
   provider: string;
   model: string;
   index: number;
+  maxSlots?: number;
   enabled: boolean;
   schedule?: Schedule;
   healthCheck: boolean;
@@ -98,6 +108,7 @@ export function parseAgents(
         provider: entry.provider,
         model: entry.model,
         index,
+        maxSlots: entry.maxSlots,
         enabled: entry.enabled,
         schedule: entry.schedule,
         healthCheck: entry.healthCheck,
@@ -141,6 +152,7 @@ export function idleRow(
     model: slot.model,
     index: slot.index,
     total,
+    max: slot.maxSlots,
     enabled,
     state: idleState(enabled, reachable, scheduled),
     task_id: undefined,

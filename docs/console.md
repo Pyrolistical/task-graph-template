@@ -49,7 +49,7 @@ SGR mouse reporting; targets are recomputed every frame from the layout that dre
 
 The agent switch names the **agent** and toggles every slot of it; `[-]` and `[+]` name the agent too, and set its [slot count](agents.md#changing-the-count-while-the-server-runs) rather than asking for one more or one fewer, so a command that lands twice is the same pool as one that lands once; abort names the **slot**, because it kills the command one process is stuck in, and the turn with it; the agent is prompted straight back with what died. The same four commands exist over MCP, so the console adds no authority.
 
-`[-]` is not drawn on an agent down to its last slot, and the count a click asks for is the one on the screen either side — so clicking `[+]` twice asks for two more, the second reading the first click's count rather than the view's.
+`[-]` is not drawn on an agent down to its last slot, `[+]` is not drawn on one at its [`maxSlots`](agents.md#maxslots), and the count a click asks for is the one on the screen either side — so clicking `[+]` twice asks for two more, the second reading the first click's count rather than the view's.
 
 A switch flips on the click, before the server has seen it: the clicked value is drawn over the views until one of them agrees. So does the pool: `[+]` puts a pane on the screen at once, at the number the server will give it, reading `loading` until the view carries it; `[-]` takes an idle pane off at once, the highest-numbered one, and never a pane holding a task — a click must not be what makes a live transcript disappear.
 

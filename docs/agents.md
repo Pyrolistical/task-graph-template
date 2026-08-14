@@ -1,6 +1,6 @@
 # Agents
 
-`agents.json` declares the pool: a model on a provider, how many slots, whether it runs, when it may run, whether its provider is asked if it is up first, what it may write outside its worktree, which roles it may take.
+`agents.json` declares the pool: a model on a provider, how many slots and at most how many, whether it runs, when it may run, whether its provider is asked if it is up first, what it may write outside its worktree, which roles it may take.
 
 ```json
 {
@@ -16,6 +16,7 @@
       "provider": "llama.cpp-rocm",
       "model": "rocm",
       "slots": 1,
+      "maxSlots": 2,
       "roles": ["worker"],
       "enabled": false,
       "schedule": [{ "start": "22:30", "end": "06:15" }],
@@ -46,6 +47,15 @@ How many tasks the agent runs at once, defaulting to one. Each is a row of its o
 - a slot still running above the count reads as `slot 3 / 2` until it settles, because a pane that is drawing a live transcript must not disappear on a click
 - the numbers here are the pool's own, and a hole in them is never drawn: the console [numbers its panes](console.md) by where they sit, so a pool holding slots 2 and 3 reads `slot 1 / 2` and `slot 2 / 2`
 - one slot is the floor. An agent with no slots is one that should be [disabled](#enabled), which drains rather than deletes and can be undone
+
+### maxSlots
+
+The ceiling on that count, for the agent whose slots cost something the machine cannot spend: a single GPU that serves one session at a time, a provider on a rate limit, a hosted model on a budget. Left out there is no ceiling and the count climbs as far as it is asked to.
+
+- declared below `slots` it is refused on load, because a pool already over its limit is a file that says two different things
+- `set_agent_slots` above it is refused by name, and the console draws no `[+]` on an agent at its limit: what may not be commanded is not offered
+- the floor still holds, so a limit of one is an agent whose count cannot move at all — the pool it declared is the pool it runs
+- like the count itself it is only what the file says: nothing writes it back, and the agent's cap cannot be raised while the server lives
 
 ## roles
 
