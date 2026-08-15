@@ -1,6 +1,6 @@
 import type { Command } from "../../runtime/domain/command.ts";
 import { groupOf } from "../../kernel/domain/pattern.ts";
-import type { Hit, Local, Region } from "./console.ts";
+import type { Hit, Local, Region } from "../domain/hits.ts";
 
 export function keys(chunk: string): string[] {
   const found: string[] = [];

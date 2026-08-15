@@ -20,25 +20,24 @@ import {
   stamp,
 } from "../domain/session.ts";
 import type { Line } from "../domain/text.ts";
+import { type ConsoleView, PaneLines, panes } from "../policy/panes.ts";
+import type { Hit, Region } from "../domain/hits.ts";
 import {
   type Frame,
-  type Hit,
   type Layout,
-  type Region,
-  type Scroll,
-  type ConsoleView,
-  PaneLines,
   emptyPool,
   errorFrame,
-  halfPage,
-  panes,
   queueHeader,
   screen,
+} from "../policy/screen.ts";
+import {
+  type Scroll,
+  halfPage,
   scrollBack,
   scrollBottom,
   scrollForward,
   scrollTop,
-} from "../policy/console.ts";
+} from "../policy/scroll.ts";
 import { hitAt, keys, mouse, within } from "../policy/keys.ts";
 import { Toggles } from "../policy/toggles.ts";
 import { QueueView } from "../../views/queue.ts";

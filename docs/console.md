@@ -2,7 +2,7 @@
 
 `bun console.ts [repo]` — terminal UI over the [views](runtime-directory.md#the-views), one pane per slot showing that agent's live transcript. `repo` defaults to cwd and only names which runtime directory to read.
 
-A **reader**: no state the server needs, no rpc channel, startable and killable while agents run. Everything drawn comes from the JSON views and the session `.jsonl` they point at. Its own slice, laid out the same way the server's are — text and session records in `console/domain/`, panes, frame, scroll anchor and key decoding in `console/policy/`, tailing and the tty in `console/adapters/tui.ts`. It reaches for nothing of the server's but the [wire contract](../orchestrator/views/) and the runtime directory the views sit in.
+A **reader**: no state the server needs, no rpc channel, startable and killable while agents run. Everything drawn comes from the JSON views and the session `.jsonl` they point at. Its own slice, laid out the same way the server's are — text, session records and what a click can land on in `console/domain/`, panes, screen, scroll anchor and key decoding in `console/policy/`, tailing and the tty in `console/adapters/tui.ts`. It reaches for nothing of the server's but the [wire contract](../orchestrator/views/) and the runtime directory the views sit in.
 
 ```text
 [─●] scheduler │ 000042 WORK 000057 WORK_REVIEW                                                       2 queued

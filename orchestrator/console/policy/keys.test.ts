@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { present } from "../../testing/present.ts";
 import { hitAt, keys, mouse, within } from "./keys.ts";
-import type { Hit } from "./console.ts";
+import type { Hit } from "../domain/hits.ts";
 
 describe("Feature: reading a chunk of terminal input", () => {
   test("a burst of wheel events is read as every event in it", () => {

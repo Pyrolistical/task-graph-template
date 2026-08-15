@@ -3,12 +3,8 @@ import { type SlotRow } from "../views/slots.ts";
 import type { TaskRow } from "../views/tasks.ts";
 import type { Entry } from "../console/domain/session.ts";
 import type { Line } from "../console/domain/text.ts";
-import {
-  type Layout,
-  type Pane,
-  type ConsoleView,
-  panes,
-} from "../console/policy/console.ts";
+import { type ConsoleView, type Pane, panes } from "../console/policy/panes.ts";
+import type { Layout } from "../console/policy/screen.ts";
 import type { Candidate } from "../views/queue.ts";
 import { present } from "./present.ts";
 

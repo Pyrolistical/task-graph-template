@@ -1,6 +1,6 @@
 import type { Command } from "../../runtime/domain/command.ts";
 import { holding } from "../../views/slots.ts";
-import type { ConsoleSlot, ConsoleView } from "./console.ts";
+import type { ConsoleSlot, ConsoleView } from "./panes.ts";
 
 export const REJECTIONS = 2;
 

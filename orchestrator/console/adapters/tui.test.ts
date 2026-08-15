@@ -13,7 +13,7 @@ import {
 import { writeAtomic } from "../../kernel/adapters/files.ts";
 import { Runtime, viewJson } from "../../runtime/adapters/runtime.ts";
 import { idleRow } from "../../agents/domain/slots.ts";
-import { HIDE, SHOW } from "../policy/console.ts";
+import { HIDE, SHOW } from "../policy/screen.ts";
 import { Toggles } from "../policy/toggles.ts";
 import {
   SLOTS,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { idleRow, slotAt } from "../../agents/domain/slots.ts";
 import { SLOTS, busyRow, viewOf } from "../../testing/console.ts";
-import type { ConsoleSlot } from "./console.ts";
+import type { ConsoleSlot } from "./panes.ts";
 import { Toggles } from "./toggles.ts";
 
 const AGENT = SLOTS[0].agent;

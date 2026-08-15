@@ -277,7 +277,7 @@ flowchart LR
 
 `console.ts` opens the runtime directory and draws what it finds. It shares the kernel, the wire contract and the runtime directory with the server, and reaches for nothing else of it.
 
-28 modules, 41 imports.
+30 modules, 46 imports.
 
 ```mermaid
 flowchart LR
@@ -286,8 +286,10 @@ flowchart LR
     orchestrator_console_adapters_tui_ts["adapters/tui"]
     orchestrator_console_domain_session_ts["domain/session"]
     orchestrator_console_domain_text_ts["domain/text"]
-    orchestrator_console_policy_console_ts["policy/console"]
     orchestrator_console_policy_keys_ts["policy/keys"]
+    orchestrator_console_policy_panes_ts["policy/panes"]
+    orchestrator_console_policy_screen_ts["policy/screen"]
+    orchestrator_console_policy_scroll_ts["policy/scroll"]
     orchestrator_console_policy_toggles_ts["policy/toggles"]
   end
   subgraph runtime["runtime"]
@@ -327,7 +329,9 @@ flowchart LR
   orchestrator_console_adapters_tui_ts --> orchestrator_kernel_domain_schema_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_kernel_domain_rates_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_console_domain_session_ts
-  orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_console_ts
+  orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_panes_ts
+  orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_screen_ts
+  orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_scroll_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_keys_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_console_policy_toggles_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_views_queue_ts
@@ -337,10 +341,13 @@ flowchart LR
   orchestrator_console_adapters_tui_ts --> orchestrator_kernel_adapters_files_ts
   orchestrator_console_adapters_tui_ts --> orchestrator_runtime_adapters_runtime_ts
   orchestrator_console_domain_session_ts --> orchestrator_console_domain_text_ts
-  orchestrator_console_policy_console_ts --> orchestrator_views_activity_ts
-  orchestrator_console_policy_console_ts --> orchestrator_console_domain_text_ts
-  orchestrator_console_policy_console_ts --> orchestrator_views_queue_ts
   orchestrator_console_policy_keys_ts --> orchestrator_kernel_domain_pattern_ts
+  orchestrator_console_policy_panes_ts --> orchestrator_views_activity_ts
+  orchestrator_console_policy_panes_ts --> orchestrator_console_domain_text_ts
+  orchestrator_console_policy_screen_ts --> orchestrator_console_policy_panes_ts
+  orchestrator_console_policy_screen_ts --> orchestrator_console_policy_scroll_ts
+  orchestrator_console_policy_screen_ts --> orchestrator_console_domain_text_ts
+  orchestrator_console_policy_screen_ts --> orchestrator_views_queue_ts
   orchestrator_console_policy_toggles_ts --> orchestrator_views_slots_ts
   orchestrator_kernel_adapters_appendable_ts --> orchestrator_kernel_domain_exclusive_lock_ts
   orchestrator_kernel_adapters_paced_ts --> orchestrator_kernel_domain_latch_ts
@@ -370,6 +377,7 @@ the same — see [The slices](architecture.md).
 
 - `orchestrator/agents/ports/agents.ts`
 - `orchestrator/checks/ports/checks.ts`
+- `orchestrator/console/domain/hits.ts`
 - `orchestrator/prompting/ports/prompts.ts`
 - `orchestrator/runtime/ports/assignments.ts`
 - `orchestrator/runtime/ports/command-channel.ts`
