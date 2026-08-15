@@ -230,7 +230,7 @@ export class Dispatcher {
   }
 
   private async requireStill(task: TaskMeta, slot: Slot): Promise<void> {
-    const current = (await this.graph.list()).get(task.id);
+    const current = await this.graph.read(task.id);
     if (current?.state !== task.state) {
       throw new Error(
         `${task.id} left ${task.state} before ${slot.name} could claim it`,

@@ -84,7 +84,7 @@ export class Lander {
   }
 
   private async requireManagerReview(taskId: TaskId): Promise<TaskMeta> {
-    const task = (await this.graph.list()).get(taskId);
+    const task = await this.graph.read(taskId);
     if (!task || task.state !== "MANAGER_REVIEW") {
       throw new Error(`task "${taskId}" is not in MANAGER_REVIEW`);
     }
@@ -92,7 +92,7 @@ export class Lander {
   }
 
   private async requireAbortable(taskId: TaskId): Promise<TaskMeta> {
-    const task = (await this.graph.list()).get(taskId);
+    const task = await this.graph.read(taskId);
     if (!task || !ABORTABLE_STATES.includes(task.state)) {
       throw new Error(
         `task "${taskId}" is not in ${ABORTABLE_STATES.join(" or ")}`,
