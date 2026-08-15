@@ -3,7 +3,7 @@ import type { Messages } from "../../runtime/ports/messages.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
-import type { Checkout, Pool } from "../../agents/app/pool.ts";
+import type { Checkout, Pool, Run } from "../../agents/app/pool.ts";
 import { Settler } from "./settler.ts";
 import { type Snapshot, TaskGraph } from "./task-graph.ts";
 import type { Slot } from "../../agents/domain/slots.ts";
@@ -16,7 +16,7 @@ import {
   requireSession,
   requireWorkspace,
 } from "../../vocabulary/task.ts";
-import { STAGE_OF } from "../../vocabulary/state-machine.ts";
+import { type ClaimState, STAGE_OF } from "../../vocabulary/state-machine.ts";
 import { branchName } from "../../workspaces/domain/workspace.ts";
 import { type Candidate } from "../../views/queue.ts";
 import { schedule } from "../../agents/policy/scheduler.ts";
@@ -118,23 +118,27 @@ export class Dispatcher {
     }
   }
 
-  private async assign(
+  private assign(
     task: TaskMeta,
     candidate: Candidate,
     slot: Slot,
   ): Promise<void> {
-    if (candidate.rank === "resume") {
-      await this.resume(task, candidate, slot);
-      return;
-    }
+    return candidate.rank === "resume"
+      ? this.resume(task, candidate, slot)
+      : this.begin(task, candidate, slot);
+  }
 
+  private async begin(
+    task: TaskMeta,
+    candidate: Candidate,
+    slot: Slot,
+  ): Promise<void> {
     this.pool.reserve(slot, {
       taskId: task.id,
       state: candidate.state,
       role: candidate.role,
     });
 
-    const state = candidate.state;
     await this.paths.prepare(task.id);
     const worktree = this.paths.worktree(task.id);
     const branch = task.workspace?.branch ?? branchName(task.id);
@@ -143,8 +147,8 @@ export class Dispatcher {
       await this.workspaces.create(branch, worktree, this.base);
     }
 
-    const section = STAGE_OF[state].section;
-    const checkout: Checkout = {
+    const section = STAGE_OF[candidate.state].section;
+    await this.dispatch(task, slot, candidate.state, {
       branch,
       worktree,
       head: await this.workspaces.head(worktree),
@@ -152,31 +156,7 @@ export class Dispatcher {
         !section && (await this.assignments.exists(task.id))
           ? await this.assignments.read(task.id)
           : await this.writeAssignment(task, section),
-    };
-
-    const run = await this.pool.spawn(slot, checkout, worktree, (settling) =>
-      this.settler.compacted(settling),
-    );
-
-    const session = await run.process.newSession();
-    this.pool.opened(run, session);
-    await this.requireStill(task, slot);
-    await this.graph.claim(task.id, {
-      slotName: slot.name,
-      pid: run.process.pid,
-      branch,
-      worktree,
-      session,
     });
-
-    this.pool.busy(run);
-    const queued = await this.messages.drain(task.id, state);
-    const message = await this.settler.nudge(task.id, state);
-    await this.settler.prompt(
-      run,
-      queued === "" ? message : `${queued}\n\n${message}`,
-    );
-    this.settler.watch(run);
   }
 
   private async resume(
@@ -189,44 +169,70 @@ export class Dispatcher {
 
     this.pool.reserve(slot, {
       taskId: task.id,
-      state: "WORK",
+      state: candidate.state,
       role: candidate.role,
       resumed: true,
-      carried: carriedOn(task.costs, "WORK"),
+      carried: carriedOn(task.costs, candidate.state),
     });
 
-    const checkout: Checkout = {
-      branch: workspace.branch,
-      worktree: workspace.worktree,
-      head: await this.workspaces.head(workspace.worktree),
-      dispatched: await this.assignments.read(task.id),
-    };
+    await this.dispatch(
+      task,
+      slot,
+      candidate.state,
+      {
+        branch: workspace.branch,
+        worktree: workspace.worktree,
+        head: await this.workspaces.head(workspace.worktree),
+        dispatched: await this.assignments.read(task.id),
+      },
+      session,
+    );
+  }
 
+  private async dispatch(
+    task: TaskMeta,
+    slot: Slot,
+    state: ClaimState,
+    checkout: Checkout,
+    resuming?: string,
+  ): Promise<void> {
     const run = await this.pool.spawn(
       slot,
       checkout,
-      workspace.worktree,
+      checkout.worktree,
       (settling) => this.settler.compacted(settling),
     );
 
-    await run.process.switchSession(session);
+    const session = await this.openSession(run, resuming);
     this.pool.opened(run, session);
     await this.requireStill(task, slot);
     await this.graph.claim(task.id, {
       slotName: slot.name,
       pid: run.process.pid,
-      branch: workspace.branch,
-      worktree: workspace.worktree,
+      branch: checkout.branch,
+      worktree: checkout.worktree,
       session,
     });
 
     this.pool.busy(run);
-    const queued = await this.messages.drain(task.id, "WORK");
-    await this.settler.prompt(
-      run,
-      queued === "" ? await this.settler.nudge(task.id, "WORK") : queued,
-    );
+    const queued = await this.messages.drain(task.id, state);
+    const parts: string[] = [];
+    if (queued !== "") {
+      parts.push(queued);
+    }
+    if (!resuming || queued === "") {
+      parts.push(await this.settler.nudge(task.id, state));
+    }
+    await this.settler.prompt(run, parts.join("\n\n"));
     this.settler.watch(run);
+  }
+
+  private async openSession(run: Run, resuming?: string): Promise<string> {
+    if (!resuming) {
+      return run.process.newSession();
+    }
+    await run.process.switchSession(resuming);
+    return resuming;
   }
 
   private async requireStill(task: TaskMeta, slot: Slot): Promise<void> {
