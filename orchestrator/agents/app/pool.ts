@@ -20,6 +20,7 @@ import { messageOf, uncaught } from "../../kernel/domain/errors.ts";
 import { type IssueName } from "../../prompting/domain/issues.ts";
 import { Rates } from "../../kernel/domain/rates.ts";
 import { withinSchedule } from "../domain/schedule.ts";
+import { dropped, taken } from "../policy/sizing.ts";
 import type { ResultCall } from "../domain/results.ts";
 import type { ClaimState, Role } from "../../vocabulary/state-machine.ts";
 import type { TaskId } from "../../vocabulary/task.ts";
@@ -256,21 +257,17 @@ export class Pool {
   }
 
   private grow(agent: string): string[] {
-    const target = this.targets.get(agent) ?? 0;
-    const template = this.mine(agent)[0]?.slot;
+    const mine = this.mine(agent);
+    const template = mine[0]?.slot;
     if (!template) {
       throw new Error(`agent ${agent} has no slot to grow from`);
     }
 
     const added: string[] = [];
-    while (this.mine(agent).length < target) {
-      const taken = new Set(
-        this.mine(agent).map((runner) => runner.slot.index),
-      );
-      let index = 1;
-      while (taken.has(index)) {
-        index += 1;
-      }
+    for (const index of taken(
+      mine.map((runner) => runner.slot.index),
+      this.targets.get(agent) ?? 0,
+    )) {
       const slot = slotAt(template, index);
       this.byName.set(slot.name, freshRunner(slot));
       added.push(slot.name);
@@ -279,23 +276,19 @@ export class Pool {
   }
 
   private reap(agent: string): string[] {
-    const target = this.targets.get(agent) ?? 0;
-    const removed: string[] = [];
+    const removed = dropped(
+      this.mine(agent).map((runner) => ({
+        name: runner.slot.name,
+        index: runner.slot.index,
+        idle: runner.state === "IDLE",
+      })),
+      this.targets.get(agent) ?? 0,
+    );
 
-    for (;;) {
-      const mine = this.mine(agent);
-      if (mine.length <= target) {
-        return removed;
-      }
-      const idle = mine
-        .filter((runner) => runner.state === "IDLE")
-        .sort((one, two) => two.slot.index - one.slot.index)[0];
-      if (!idle) {
-        return removed;
-      }
-      this.byName.delete(idle.slot.name);
-      removed.push(idle.slot.name);
+    for (const name of removed) {
+      this.byName.delete(name);
     }
+    return removed;
   }
 
   async setAgentSlots(agent: string, total: number): Promise<SlotRow[]> {
