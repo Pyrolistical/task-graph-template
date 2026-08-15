@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import type { Publisher, ViewName, Views } from "../ports/publisher.ts";
+import type { Published, Publisher, ViewName } from "../ports/publisher.ts";
 import { type DetachedSlot, SlotsViewOfAnyServer } from "../../views/slots.ts";
 import { parse } from "../../kernel/domain/schema.ts";
 import { exists, writeAtomic } from "../../kernel/adapters/files.ts";
@@ -8,29 +8,29 @@ import { Runtime, viewJson } from "./runtime.ts";
 export class ViewFiles implements Publisher {
   constructor(private readonly runtime: Runtime) {}
 
-  async publish(views: Views): Promise<void> {
+  async publish(published: Published): Promise<void> {
     await writeAtomic(
       this.runtime.slotsView,
-      viewJson(views.seq, "slots", views.slots, {
-        agents_file: views.agentsFile,
+      viewJson(published.seq, "slots", published.slots, {
+        agents_file: published.agentsFile,
       }),
     );
     await writeAtomic(
       this.runtime.checksView,
-      viewJson(views.seq, "checks", views.checks),
+      viewJson(published.seq, "checks", published.checks),
     );
     await writeAtomic(
       this.runtime.tasksView,
-      viewJson(views.seq, "tasks", views.tasks),
+      viewJson(published.seq, "tasks", published.tasks),
     );
     await writeAtomic(
       this.runtime.inboxView,
-      viewJson(views.seq, "inbox", views.inbox),
+      viewJson(published.seq, "inbox", published.inbox),
     );
     await writeAtomic(
       this.runtime.queueView,
-      viewJson(views.seq, "queue", views.queue, {
-        scheduling: views.scheduling,
+      viewJson(published.seq, "queue", published.queue, {
+        scheduling: published.scheduling,
       }),
     );
   }

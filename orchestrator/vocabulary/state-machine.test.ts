@@ -470,15 +470,22 @@ describe("Feature: the edges that read the task itself", () => {
 });
 
 describe("Feature: what a transition carries with it", () => {
-  test("holding a task records the reason it was parked", () => {
+  test("holding a task carries the reason it was parked", () => {
     // Given a task an agent is working on
     const meta = aTask("WORK");
 
     // When it is held with a reason
-    decide(meta, BODY, "hold", { reason: "the staging database is down" });
+    const decided = decide(meta, BODY, "hold", {
+      reason: "the staging database is down",
+    });
 
-    // Then the reason is written onto the task
-    expect(meta.held_reason).toBe("the staging database is down");
+    // Then the decision carries the reason, and the task it decided on is untouched
+    expect(decided).toEqual({
+      kind: "move",
+      to: "HELD_WORK",
+      heldReason: "the staging database is down",
+    });
+    expect(meta.held_reason).toBeUndefined();
   });
 
   test("a review that accepts the work carries the reviewed body forward", () => {

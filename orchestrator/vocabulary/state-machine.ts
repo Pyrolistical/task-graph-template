@@ -330,7 +330,8 @@ export type TransitionResult = Landing &
   );
 
 export type Decision =
-  { kind: "stay" } | { kind: "move"; to: TaskState; body?: string };
+  | { kind: "stay" }
+  | { kind: "move"; to: TaskState; body?: string; heldReason?: string };
 
 function stay(): Decision {
   return { kind: "stay" };
@@ -338,6 +339,10 @@ function stay(): Decision {
 
 function move(to: TaskState, body?: string): Decision {
   return { kind: "move", to, body };
+}
+
+function hold(to: HeldState, heldReason: string): Decision {
+  return { kind: "move", to, heldReason };
 }
 
 export function requireText(value: unknown, label: string): string {
@@ -382,7 +387,7 @@ function backFrom(state: StageState, name: TransitionName): ValidState {
   return back;
 }
 
-function mutate(
+function outcome(
   meta: TaskMeta,
   state: ValidState,
   name: TransitionName,
@@ -424,8 +429,10 @@ function mutate(
       if (!isStage(state)) {
         throw new Error(`Task "${meta.id}" has no phase to be held from`);
       }
-      meta.held_reason = requireText(args.reason, "reason");
-      return move(HELD_OF[STAGE_OF[state].phase]);
+      return hold(
+        HELD_OF[STAGE_OF[state].phase],
+        requireText(args.reason, "reason"),
+      );
     }
 
     case "resume": {
@@ -485,5 +492,5 @@ export function decide(
     );
   }
 
-  return mutate(meta, from, name, args, body);
+  return outcome(meta, from, name, args, body);
 }

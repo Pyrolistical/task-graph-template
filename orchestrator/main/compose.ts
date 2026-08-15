@@ -9,7 +9,7 @@ import { Checker } from "../tasks/app/checker.ts";
 import { Server } from "../tasks/app/server.ts";
 import type { ServerConfig } from "../tasks/app/config.ts";
 import { Health } from "../tasks/app/health.ts";
-import { Views } from "../tasks/app/views.ts";
+import { Reports } from "../tasks/app/reports.ts";
 import { Settler } from "../tasks/app/settler.ts";
 import { TaskGraph } from "../tasks/app/task-graph.ts";
 import { Latch } from "../kernel/domain/latch.ts";
@@ -60,7 +60,7 @@ export interface App {
   checker: Checker;
   lander: Lander;
   recovery: Recovery;
-  views: Views;
+  reports: Reports;
   health: Health;
 }
 
@@ -156,28 +156,28 @@ export async function wire(options: WiringOptions): Promise<App> {
     isProcessAlive,
     (taskId, cost, resumed) => graph.recordCost(taskId, cost, resumed),
   );
-  const settler = new Settler(
+  const settler = new Settler({
     graph,
     pool,
-    files,
-    files,
+    assignments: files,
+    reviews: files,
     prompts,
     publisher,
     workspaces,
-    config.base,
-  );
-  const dispatcher = new Dispatcher(
+    base: config.base,
+  });
+  const dispatcher = new Dispatcher({
     graph,
     pool,
     settler,
     workspaces,
-    files,
-    files,
-    runtime,
+    assignments: files,
+    messages: files,
+    paths: runtime,
     publisher,
-    config.base,
-    config.agentsPath,
-  );
+    base: config.base,
+    agentsPath: config.agentsPath,
+  });
   const checker = new Checker(graph, checks, files, prompts, publisher, repo);
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
   const recovery = new Recovery(
@@ -190,7 +190,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     config.base,
   );
 
-  const views = new Views(
+  const reports = new Reports({
     config,
     graph,
     pool,
@@ -198,11 +198,11 @@ export async function wire(options: WiringOptions): Promise<App> {
     checker,
     transitions,
     publisher,
-    runtime,
-  );
+    paths: runtime,
+  });
   const health = new Health(publisher);
 
-  const server = new Server(
+  const server = new Server({
     config,
     wake,
     graph,
@@ -213,11 +213,11 @@ export async function wire(options: WiringOptions): Promise<App> {
     recovery,
     commands,
     prompts,
-    runtime,
+    paths: runtime,
     publisher,
-    views,
+    reports,
     health,
-  );
+  });
 
   return {
     server,
@@ -228,7 +228,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     checker,
     lander,
     recovery,
-    views,
+    reports,
     health,
   };
 }

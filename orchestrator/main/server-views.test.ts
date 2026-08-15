@@ -41,7 +41,7 @@ describe("Feature: the views the console and the manager read", () => {
       const app = await serverFor(fixture);
 
       // When the views are published
-      await app.views.write();
+      await app.reports.write();
 
       // Then every slot is a row, so the console shows the whole pool
       const view = await readView(fixture.runtime);
@@ -99,7 +99,7 @@ describe("Feature: the views the console and the manager read", () => {
       const app = await serverFor(fixture);
 
       // When the views are published
-      await app.views.write();
+      await app.reports.write();
 
       // Then every one of them is stamped with the same cursor
       const seqs = [];
@@ -145,7 +145,7 @@ describe("Feature: the views the console and the manager read", () => {
       );
 
       // When the views are published
-      await app.views.write();
+      await app.reports.write();
 
       // Then its row says how much it blocks and what it is waiting on
       const view = await readView(fixture.runtime);
@@ -182,7 +182,7 @@ describe("Feature: the queue view", () => {
       const app = await serverFor(fixture);
 
       // When the views are published with the scheduler paused
-      await app.views.write();
+      await app.reports.write();
 
       // Then the queue holds only what could be dispatched, with its own rank
       const view = await readView(fixture.runtime);
@@ -194,7 +194,7 @@ describe("Feature: the queue view", () => {
 
       // Then the switch in the view follows the scheduler it draws
       await app.dispatcher.setEnabled(true);
-      await app.views.write();
+      await app.reports.write();
       expect((await readView(fixture.runtime)).scheduling).toBe(true);
 
       await app.server.shutdown();
@@ -219,7 +219,7 @@ describe("Feature: a pool with no agents in it", () => {
       const app = await serverFor(fixture);
 
       // When the views are published
-      await app.views.write();
+      await app.reports.write();
 
       // Then the task is queued, waiting for an agent to be added
       const view = await readView(fixture.runtime);
@@ -239,7 +239,7 @@ describe("Feature: a pool with no agents in it", () => {
       const app = await serverFor(fixture);
 
       // When the views are published
-      await app.views.write();
+      await app.reports.write();
 
       // Then the slots view carries the path of that file
       expect(
@@ -345,7 +345,7 @@ describe("Feature: what the slots view says about a running agent", () => {
       await app.lander.merge(id);
 
       // Then the closed task is still shown, so the manager sees what just landed
-      await app.views.write();
+      await app.reports.write();
       const view = await readView(fixture.runtime);
       const row = present(
         view.tasks.find((task) => task.id === id),

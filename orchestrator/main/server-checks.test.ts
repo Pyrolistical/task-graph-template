@@ -546,7 +546,7 @@ describe("Feature: landing or abandoning finished work", () => {
         const other = await readyTask(fixture, `filler ${i}`);
         await app.graph.claim(other, { slotName: "filler", pid: process.pid });
       }
-      await app.views.write();
+      await app.reports.write();
 
       // Then it stays gone once it falls off the end of the recent list
       expect(await fs.exists(pathsOf(app).taskRoot(id))).toBe(false);

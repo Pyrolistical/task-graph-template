@@ -1005,7 +1005,7 @@ describe("Feature: a failure while finishing with an agent", () => {
       await runOnce(app);
 
       // Then the slot is freed and the failure is logged rather than thrown away
-      await app.views.write();
+      await app.reports.write();
       const view = parse(
         SlotsView,
         JSON.parse(await fs.readFile(pathsOf(app).slotsView, "utf-8")),

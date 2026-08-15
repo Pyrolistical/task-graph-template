@@ -11,29 +11,61 @@ import { Settler } from "./settler.ts";
 import { Recovery } from "./recovery.ts";
 import { Checker } from "./checker.ts";
 import { TaskGraph } from "./task-graph.ts";
-import { Views } from "./views.ts";
+import { Reports } from "./reports.ts";
 import type { Command } from "../../runtime/domain/command.ts";
 import { Latch } from "../../kernel/domain/latch.ts";
+
+export interface ServerOptions {
+  config: ServerConfig;
+  wake: Latch;
+  graph: TaskGraph;
+  pool: Pool;
+  dispatcher: Dispatcher;
+  settler: Settler;
+  checker: Checker;
+  recovery: Recovery;
+  commands: CommandChannel;
+  prompts: Prompts;
+  paths: Paths;
+  publisher: Publisher;
+  reports: Reports;
+  health: Health;
+}
 
 export class Server {
   private watcher: { close(): void } | undefined = undefined;
 
-  constructor(
-    readonly config: ServerConfig,
-    private readonly wake: Latch,
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly dispatcher: Dispatcher,
-    private readonly settler: Settler,
-    private readonly checker: Checker,
-    private readonly recovery: Recovery,
-    private readonly commands: CommandChannel,
-    private readonly prompts: Prompts,
-    private readonly paths: Paths,
-    private readonly publisher: Publisher,
-    private readonly views: Views,
-    private readonly health: Health,
-  ) {}
+  readonly config: ServerConfig;
+  private readonly wake: Latch;
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly dispatcher: Dispatcher;
+  private readonly settler: Settler;
+  private readonly checker: Checker;
+  private readonly recovery: Recovery;
+  private readonly commands: CommandChannel;
+  private readonly prompts: Prompts;
+  private readonly paths: Paths;
+  private readonly publisher: Publisher;
+  private readonly reports: Reports;
+  private readonly health: Health;
+
+  constructor(options: ServerOptions) {
+    this.config = options.config;
+    this.wake = options.wake;
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.dispatcher = options.dispatcher;
+    this.settler = options.settler;
+    this.checker = options.checker;
+    this.recovery = options.recovery;
+    this.commands = options.commands;
+    this.prompts = options.prompts;
+    this.paths = options.paths;
+    this.publisher = options.publisher;
+    this.reports = options.reports;
+    this.health = options.health;
+  }
 
   get pending(): Latch {
     return this.wake;
@@ -54,7 +86,7 @@ export class Server {
       await this.listen();
       await this.graph.rememberMostRecent();
 
-      await this.views.write();
+      await this.reports.write();
       return this;
     } catch (err) {
       await this.release();
@@ -78,7 +110,7 @@ export class Server {
     this.checker.start(snapshot.tasks);
     await this.settler.retryDue();
     await this.dispatcher.run(snapshot);
-    await this.views.write();
+    await this.reports.write();
     await this.health.recover();
   }
 
@@ -127,7 +159,7 @@ export class Server {
       return;
     }
     try {
-      await this.views.write();
+      await this.reports.write();
     } catch (err) {
       await this.health.fail(`writing the views failed: ${messageOf(err)}`);
     }

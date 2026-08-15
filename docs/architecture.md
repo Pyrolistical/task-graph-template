@@ -106,7 +106,7 @@ and by the layer they land in:
 36  ports/     the declared API
 17  domain/    pure rules, reused on purpose
  6  app/       all type-only — a constructor parameter's type
- 2  policy/    the scheduler's ranking, called by the dispatcher and the views
+ 2  policy/    the scheduler's ranking, called by the dispatcher and the reports
  2  adapters/  the console over the runtime directory: one process reading another's files
 ```
 
@@ -155,7 +155,7 @@ flowchart TB
     taskGraph["tasks/app/task-graph<br/>every edit, one at a time"]
     pool["agents/app/pool<br/>the slots"]
     lander["tasks/app/lander<br/>rebase · recheck · merge"]
-    views["tasks/app/views<br/>publish · report"]
+    reports["tasks/app/reports<br/>publish · report"]
     health["tasks/app/health<br/>last failure"]
   end
 
@@ -163,16 +163,16 @@ flowchart TB
   mcpTs -->|submit · abort| lander
   mcpTs -->|agents · slots| pool
   mcpTs -->|scheduler| dispatcher
-  mcpTs -->|read · write| views
+  mcpTs -->|read · write| reports
   mcpTs -->|refuse while set| health
   mcpTs -->|reload prompts| server
-  consoleTs -.->|reads the view files| views
+  consoleTs -.->|reads the view files| reports
 
   server --> recovery
   server --> checker
   server --> settler
   server --> dispatcher
-  server --> views
+  server --> reports
   server --> health
 
   dispatcher --> settler
@@ -185,13 +185,13 @@ flowchart TB
   recovery --> taskGraph
   lander --> checker
   lander --> taskGraph
-  views --> taskGraph
-  views --> pool
+  reports --> taskGraph
+  reports --> pool
 ```
 
 `main/compose.ts` constructs them in dependency order and hands each port to the module that names it — no dependency bag. It returns the modules as an `App`, which is what `mcp.ts` holds: there is no interface restating the application for the protocol to talk through, so a verb is added to the module that owns the state and nowhere else. Every adapter is a class declaring `implements`, so it is checked where it is written.
 
-`tasks/app/server.ts` owns only what a process owns — the locks, the tick order, the console channel, the shutdown — and nothing else in `tasks/` imports it back. The scheduler's on switch lives on the `dispatcher` it gates, the failure on `health`, the five view files on `views`.
+`tasks/app/server.ts` owns only what a process owns — the locks, the tick order, the console channel, the shutdown — and nothing else in `tasks/` imports it back. The scheduler's on switch lives on the `dispatcher` it gates, the failure on `health`, the five view files on `reports`.
 
 [The import graph](import-graph.md) is the same picture drawn from the modules themselves, generated rather than kept by hand.
 

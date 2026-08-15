@@ -4,7 +4,11 @@ import type { Checks } from "../checks/ports/checks.ts";
 import type { Messages } from "../runtime/ports/messages.ts";
 import type { Paths } from "../runtime/ports/paths.ts";
 import type { Prompts } from "../prompting/ports/prompts.ts";
-import type { Publisher, ViewName, Views } from "../runtime/ports/publisher.ts";
+import type {
+  Published,
+  Publisher,
+  ViewName,
+} from "../runtime/ports/publisher.ts";
 import type { Reviews } from "../runtime/ports/reviews.ts";
 import type { CreatedTask, Tasks } from "../tasks/ports/tasks.ts";
 import type {
@@ -146,19 +150,19 @@ export function aSession(
 export class FakePublisher implements Publisher {
   readonly lines: string[] = [];
   rows: DetachedSlot[] | undefined = undefined;
-  published: Views | undefined = undefined;
+  published: Published | undefined = undefined;
 
-  publish(views: Views): Awaitable<void> {
-    this.published = views;
+  publish(published: Published): Awaitable<void> {
+    this.published = published;
   }
 
   read(name: ViewName): Promise<string> {
-    const views = this.published;
-    if (!views) {
+    const published = this.published;
+    if (!published) {
       return yielded("{}");
     }
     return yielded(
-      `${JSON.stringify({ at: new Date().toISOString(), seq: views.seq, [name]: views[name] }, undefined, 2)}\n`,
+      `${JSON.stringify({ at: new Date().toISOString(), seq: published.seq, [name]: published[name] }, undefined, 2)}\n`,
     );
   }
 

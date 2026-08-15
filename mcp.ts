@@ -61,7 +61,7 @@ export function build(startup: Startup): McpServer {
   async function applied<T>(work: (app: App) => Promise<T>): Promise<T> {
     const app = live();
     const value = await work(app);
-    await app.views.write();
+    await app.reports.write();
     return value;
   }
 
@@ -267,7 +267,7 @@ export function build(startup: Startup): McpServer {
       `orchestrator://${name}`,
       description,
       "application/json",
-      () => live().views.read(name),
+      () => live().reports.read(name),
     );
   }
 
@@ -297,7 +297,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://paths",
     "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
     "application/json",
-    () => JSON.stringify(started().views.report(), undefined, 2),
+    () => JSON.stringify(started().reports.report(), undefined, 2),
   );
 
   resource(
@@ -318,7 +318,7 @@ export function build(startup: Startup): McpServer {
     "orchestrator://workspace_path",
     "the runtime directory, for file watchers",
     "text/plain",
-    () => started().views.report().runtime_root,
+    () => started().reports.report().runtime_root,
   );
 
   return mcp;

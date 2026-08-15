@@ -23,17 +23,37 @@ export interface PathReport {
   views: Record<ViewName, string>;
 }
 
-export class Views {
-  constructor(
-    private readonly config: ServerConfig,
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly dispatcher: Dispatcher,
-    private readonly checker: Checker,
-    private readonly transitions: Transitions,
-    private readonly publisher: Publisher,
-    private readonly paths: Paths,
-  ) {}
+export interface ReportsOptions {
+  config: ServerConfig;
+  graph: TaskGraph;
+  pool: Pool;
+  dispatcher: Dispatcher;
+  checker: Checker;
+  transitions: Transitions;
+  publisher: Publisher;
+  paths: Paths;
+}
+
+export class Reports {
+  private readonly config: ServerConfig;
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly dispatcher: Dispatcher;
+  private readonly checker: Checker;
+  private readonly transitions: Transitions;
+  private readonly publisher: Publisher;
+  private readonly paths: Paths;
+
+  constructor(options: ReportsOptions) {
+    this.config = options.config;
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.dispatcher = options.dispatcher;
+    this.checker = options.checker;
+    this.transitions = options.transitions;
+    this.publisher = options.publisher;
+    this.paths = options.paths;
+  }
 
   async write(): Promise<void> {
     await this.pool.readStats();

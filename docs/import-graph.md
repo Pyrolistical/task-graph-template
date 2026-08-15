@@ -28,10 +28,10 @@ flowchart LR
     orchestrator_tasks_app_health_ts["app/health"]
     orchestrator_tasks_app_lander_ts["app/lander"]
     orchestrator_tasks_app_recovery_ts["app/recovery"]
+    orchestrator_tasks_app_reports_ts["app/reports"]
     orchestrator_tasks_app_server_ts["app/server"]
     orchestrator_tasks_app_settler_ts["app/settler"]
     orchestrator_tasks_app_task_graph_ts["app/task-graph"]
-    orchestrator_tasks_app_views_ts["app/views"]
     orchestrator_tasks_domain_rows_ts["domain/rows"]
     orchestrator_tasks_policy_inbox_ts["policy/inbox"]
     orchestrator_tasks_policy_settle_ts["policy/settle"]
@@ -153,7 +153,7 @@ flowchart LR
   orchestrator_main_compose_ts --> orchestrator_tasks_app_checker_ts
   orchestrator_main_compose_ts --> orchestrator_tasks_app_server_ts
   orchestrator_main_compose_ts --> orchestrator_tasks_app_health_ts
-  orchestrator_main_compose_ts --> orchestrator_tasks_app_views_ts
+  orchestrator_main_compose_ts --> orchestrator_tasks_app_reports_ts
   orchestrator_main_compose_ts --> orchestrator_tasks_app_settler_ts
   orchestrator_main_compose_ts --> orchestrator_tasks_app_task_graph_ts
   orchestrator_main_compose_ts --> orchestrator_kernel_domain_latch_ts
@@ -220,6 +220,11 @@ flowchart LR
   orchestrator_tasks_app_lander_ts --> orchestrator_vocabulary_task_ts
   orchestrator_tasks_app_recovery_ts --> orchestrator_tasks_app_task_graph_ts
   orchestrator_tasks_app_recovery_ts --> orchestrator_vocabulary_state_machine_ts
+  orchestrator_tasks_app_reports_ts --> orchestrator_tasks_app_checker_ts
+  orchestrator_tasks_app_reports_ts --> orchestrator_tasks_app_dispatcher_ts
+  orchestrator_tasks_app_reports_ts --> orchestrator_tasks_app_task_graph_ts
+  orchestrator_tasks_app_reports_ts --> orchestrator_tasks_policy_inbox_ts
+  orchestrator_tasks_app_reports_ts --> orchestrator_agents_policy_scheduler_ts
   orchestrator_tasks_app_server_ts --> orchestrator_kernel_domain_errors_ts
   orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_dispatcher_ts
   orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_health_ts
@@ -227,7 +232,7 @@ flowchart LR
   orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_recovery_ts
   orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_checker_ts
   orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_task_graph_ts
-  orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_views_ts
+  orchestrator_tasks_app_server_ts --> orchestrator_tasks_app_reports_ts
   orchestrator_tasks_app_server_ts --> orchestrator_kernel_domain_latch_ts
   orchestrator_tasks_app_settler_ts --> orchestrator_tasks_app_task_graph_ts
   orchestrator_tasks_app_settler_ts --> orchestrator_kernel_domain_awaitable_ts
@@ -242,11 +247,6 @@ flowchart LR
   orchestrator_tasks_app_task_graph_ts --> orchestrator_vocabulary_blocking_ts
   orchestrator_tasks_app_task_graph_ts --> orchestrator_vocabulary_task_ts
   orchestrator_tasks_app_task_graph_ts --> orchestrator_vocabulary_state_machine_ts
-  orchestrator_tasks_app_views_ts --> orchestrator_tasks_app_checker_ts
-  orchestrator_tasks_app_views_ts --> orchestrator_tasks_app_dispatcher_ts
-  orchestrator_tasks_app_views_ts --> orchestrator_tasks_app_task_graph_ts
-  orchestrator_tasks_app_views_ts --> orchestrator_tasks_policy_inbox_ts
-  orchestrator_tasks_app_views_ts --> orchestrator_agents_policy_scheduler_ts
   orchestrator_tasks_policy_inbox_ts --> orchestrator_views_inbox_ts
   orchestrator_tasks_policy_settle_ts --> orchestrator_workspaces_domain_guard_ts
   orchestrator_tasks_policy_settle_ts --> orchestrator_agents_domain_protocol_ts

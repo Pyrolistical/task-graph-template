@@ -68,16 +68,16 @@ async function aRig(
     () => false,
     (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
-  const settler = new Settler(
+  const settler = new Settler({
     graph,
     pool,
     assignments,
-    new FakeTaskFiles(),
-    new FakePrompts(),
+    reviews: new FakeTaskFiles(),
+    prompts: new FakePrompts(),
     publisher,
     workspaces,
-    "master",
-  );
+    base: "master",
+  });
 
   const run = await aRun(
     pool,

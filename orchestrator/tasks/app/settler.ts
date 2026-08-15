@@ -19,17 +19,37 @@ import {
   decideSettle,
 } from "../policy/settle.ts";
 
+export interface SettlerOptions {
+  graph: TaskGraph;
+  pool: Pool;
+  assignments: Assignments;
+  reviews: Reviews;
+  prompts: Prompts;
+  publisher: Publisher;
+  workspaces: Workspaces;
+  base: string;
+}
+
 export class Settler {
-  constructor(
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly assignments: Assignments,
-    private readonly reviews: Reviews,
-    private readonly prompts: Prompts,
-    private readonly publisher: Publisher,
-    private readonly workspaces: Workspaces,
-    private readonly base: string,
-  ) {}
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly assignments: Assignments;
+  private readonly reviews: Reviews;
+  private readonly prompts: Prompts;
+  private readonly publisher: Publisher;
+  private readonly workspaces: Workspaces;
+  private readonly base: string;
+
+  constructor(options: SettlerOptions) {
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.assignments = options.assignments;
+    this.reviews = options.reviews;
+    this.prompts = options.prompts;
+    this.publisher = options.publisher;
+    this.workspaces = options.workspaces;
+    this.base = options.base;
+  }
 
   async nudge(taskId: TaskId, state: ClaimState): Promise<string> {
     const findings = await this.reviews.findings(taskId);

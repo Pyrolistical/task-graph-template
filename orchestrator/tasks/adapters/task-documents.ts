@@ -19,7 +19,6 @@ import {
   decide,
   isBlocked,
   isClaimState,
-  isHeld,
   isValidState,
   requireText,
 } from "../../vocabulary/state-machine.ts";
@@ -152,9 +151,7 @@ async function settleTransition(
 
   const nextBody = decided.body ?? body;
   meta.state = decided.to;
-  if (!isHeld(decided.to)) {
-    meta.held_reason = undefined;
-  }
+  meta.held_reason = decided.heldReason;
 
   if (decided.to === "CLOSED") {
     meta.workspace = undefined;

@@ -5,7 +5,7 @@ import type { TaskRow } from "../../views/tasks.ts";
 import type { InboxRow } from "../../views/inbox.ts";
 import type { Candidate } from "../../views/queue.ts";
 
-export interface Views {
+export interface Published {
   seq: number;
   agentsFile: string;
   slots: SlotRow[];
@@ -27,7 +27,7 @@ export const VIEW_NAMES = [
 export type ViewName = (typeof VIEW_NAMES)[number];
 
 export interface Publisher {
-  publish(views: Views): Awaitable<void>;
+  publish(published: Published): Awaitable<void>;
   read(name: ViewName): Awaitable<string>;
   lastSlots(): Awaitable<DetachedSlot[] | undefined>;
   log(line: string): Awaitable<void>;

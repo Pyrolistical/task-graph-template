@@ -21,21 +21,45 @@ import { branchName } from "../../workspaces/domain/workspace.ts";
 import { type Candidate } from "../../views/queue.ts";
 import { schedule } from "../../agents/policy/scheduler.ts";
 
+export interface DispatcherOptions {
+  graph: TaskGraph;
+  pool: Pool;
+  settler: Settler;
+  workspaces: Workspaces;
+  assignments: Assignments;
+  messages: Messages;
+  paths: Paths;
+  publisher: Publisher;
+  base: string;
+  agentsPath: string;
+}
+
 export class Dispatcher {
   private scheduling = false;
 
-  constructor(
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly settler: Settler,
-    private readonly workspaces: Workspaces,
-    private readonly assignments: Assignments,
-    private readonly messages: Messages,
-    private readonly paths: Paths,
-    private readonly publisher: Publisher,
-    private readonly base: string,
-    private readonly agentsPath: string,
-  ) {}
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly settler: Settler;
+  private readonly workspaces: Workspaces;
+  private readonly assignments: Assignments;
+  private readonly messages: Messages;
+  private readonly paths: Paths;
+  private readonly publisher: Publisher;
+  private readonly base: string;
+  private readonly agentsPath: string;
+
+  constructor(options: DispatcherOptions) {
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.settler = options.settler;
+    this.workspaces = options.workspaces;
+    this.assignments = options.assignments;
+    this.messages = options.messages;
+    this.paths = options.paths;
+    this.publisher = options.publisher;
+    this.base = options.base;
+    this.agentsPath = options.agentsPath;
+  }
 
   get enabled(): boolean {
     return this.scheduling;
