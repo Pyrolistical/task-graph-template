@@ -4,7 +4,7 @@
 
 ## What the number does not see
 
-- `main/mcp.test.ts` drives the server as a **subprocess** over a real stdio client, and nothing a subprocess executes is instrumented: the entry points `mcp.ts` and `console.ts` are absent from the report, `main/serve.ts` reads at a third because only its in-process half (`boot`, `startTicking`) is reached, and manager-only paths in `tasks/app/server.ts` read as uncovered despite having tests
+- **nothing starts either program the way a person does.** `main/mcp.test.ts` drives a real MCP client over an `InMemoryTransport` against a `build()` in this process, so the entry points `mcp.ts` and `console.ts` never run at all and are absent from the report, and `main/serve.ts` reads at a third: `boot` and `startTicking` are driven, the stdio serving, the signal handlers and the detach around them are not
 - a line that ran once is credited with values it never took; the gaps below are mostly branches, not statements
 
 ## The gaps, worst first
