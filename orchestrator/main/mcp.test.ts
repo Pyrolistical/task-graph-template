@@ -31,7 +31,8 @@ import {
   serverFor,
 } from "../testing/server-jig.ts";
 import type { App } from "./compose.ts";
-import { type Ticking, boot, build, startTicking } from "../../mcp.ts";
+import { build } from "./mcp.ts";
+import { type Ticking, boot, startTicking } from "./serve.ts";
 import { at, present } from "../testing/present.ts";
 
 const openClients: Client[] = [];

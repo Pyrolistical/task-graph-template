@@ -3,7 +3,7 @@
 Eleven slices, each an onion of its own, ordered so that every dependency points inward.
 
 ```text
-main/        composition root — mcp.ts · console.ts      builds adapters, wires the app
+main/        composition root — compose · serve · mcp     builds adapters, wires the app
 console/     the reader: panes · frame · keys · tty      a whole second process
 tasks/       the graph, the tick, and what a turn meant  the pipeline
 checks/      run a task's checks, sandboxed              one port, one runner, no peer
@@ -134,8 +134,9 @@ That last one is the boundary the split was really about. `SlotsView` lived besi
 
 ```mermaid
 flowchart TB
-  subgraph procs["main/ — the two processes"]
-    mcpTs["mcp.ts<br/>tools · resources"]
+  subgraph procs["the two processes"]
+    serveTs["main/serve.ts<br/>boot · tick · detach"]
+    mcpTs["main/mcp.ts<br/>tools · resources"]
     consoleTs["console.ts<br/>reader"]
   end
 
@@ -166,6 +167,8 @@ flowchart TB
   mcpTs -->|read · write| reports
   mcpTs -->|refuse while set| health
   mcpTs -->|reload prompts| server
+  serveTs -->|registers| mcpTs
+  serveTs -->|start · tick · detach| server
   consoleTs -.->|reads the view files| reports
 
   server --> recovery

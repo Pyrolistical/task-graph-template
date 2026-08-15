@@ -4,7 +4,7 @@
 
 ## What the number does not see
 
-- `main/mcp.test.ts` drives the server as a **subprocess** over a real stdio client, and nothing a subprocess executes is instrumented: `mcp.ts` and `console.ts` are absent from the report, and manager-only paths in `tasks/app/server.ts` read as uncovered despite having tests
+- `main/mcp.test.ts` drives the server as a **subprocess** over a real stdio client, and nothing a subprocess executes is instrumented: the entry points `mcp.ts` and `console.ts` are absent from the report, `main/serve.ts` reads at a third because only its in-process half (`boot`, `startTicking`) is reached, and manager-only paths in `tasks/app/server.ts` read as uncovered despite having tests
 - a line that ran once is credited with values it never took; the gaps below are mostly branches, not statements
 
 ## The gaps, worst first

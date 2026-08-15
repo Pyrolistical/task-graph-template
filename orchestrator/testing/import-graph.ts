@@ -13,7 +13,7 @@ const ROOTS = [
     module: "mcp.ts",
     title: "The server",
     blurb:
-      "`mcp.ts` builds the app through `compose.ts` and serves the manager over stdio. It is the only program that holds a running piece of more than one slice.",
+      "`mcp.ts` enters `main/serve.ts`, which wires the app through `compose.ts`, ticks it, and serves the manager over stdio the tools and resources `main/mcp.ts` registers. It is the only program that holds a running piece of more than one slice.",
   },
   {
     module: "console.ts",

@@ -1,0 +1,313 @@
+import { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
+import { isValidId } from "../vocabulary/task.ts";
+import type { EntryName } from "../vocabulary/state-machine.ts";
+import type { ViewName } from "../runtime/ports/publisher.ts";
+import type { Awaitable } from "../kernel/domain/awaitable.ts";
+import type { App } from "./compose.ts";
+
+export interface Startup {
+  app?: App;
+  error?: string;
+}
+
+const taskId = z.string().refine(isValidId, {
+  error: (issue) => `"${issue.input}" is not a six-digit task ID`,
+});
+
+function text(value: string) {
+  return { content: [{ type: "text" as const, text: value }] };
+}
+
+function json(value: unknown) {
+  return text(JSON.stringify(value, undefined, 2));
+}
+
+export function build(startup: Startup): McpServer {
+  const mcp = new McpServer(
+    { name: "task-graph-orchestrator", version: "1.0.0" },
+    { capabilities: { tools: {}, resources: {} } },
+  );
+
+  function started(): App {
+    if (!startup.app) {
+      throw new Error(
+        startup.error ?? "the server did not start, and said nothing about why",
+      );
+    }
+    return startup.app;
+  }
+
+  function live(): App {
+    const app = started();
+    if (app.health.lastError) {
+      throw new Error(app.health.lastError);
+    }
+    return app;
+  }
+
+  async function applied<T>(work: (app: App) => Promise<T>): Promise<T> {
+    const app = live();
+    const value = await work(app);
+    await app.reports.write();
+    return value;
+  }
+
+  mcp.registerTool(
+    "task_create",
+    {
+      description:
+        "Create a new task and return the path of its document. The document is yours to edit directly until it leaves NEW.",
+      inputSchema: z.object({ title: z.string().min(1) }),
+    },
+    async ({ title }) => json(await applied((app) => app.graph.create(title))),
+  );
+
+  mcp.registerTool(
+    "task_write_body",
+    {
+      description:
+        "Replace a task document's body under the graph lock. Use this for a task you do not hold; edit the file directly for one you do.",
+      inputSchema: z.object({ id: taskId, body: z.string().min(1) }),
+    },
+    async ({ id, body }) =>
+      json({
+        filePath: await applied((app) => app.graph.writeBody(id, body)),
+      }),
+  );
+
+  mcp.registerTool(
+    "task_submit",
+    {
+      description:
+        "Close a task from MANAGER_REVIEW: the work is landed first (rebase, recheck, fast-forward), then the task closes.",
+      inputSchema: z.object({ id: taskId }),
+    },
+    async ({ id }) => json(await applied((app) => app.lander.merge(id))),
+  );
+
+  function entry(tool: string, name: EntryName, description: string) {
+    mcp.registerTool(
+      tool,
+      {
+        description: `${description} Dependencies still open park it in that phase's blocked state instead, and it enters the phase when they are gone.`,
+        inputSchema: z.object({ id: taskId }),
+      },
+      async ({ id }) => json(await applied((app) => app.graph.enter(id, name))),
+    );
+  }
+
+  entry(
+    "task_submit_designing",
+    "submit_designing",
+    "Dispatch a task out of NEW or a blocked state into DESIGN, to be designed, planned and worked.",
+  );
+
+  entry(
+    "task_submit_planning",
+    "submit_planning",
+    "Dispatch a task out of NEW or a blocked state into PLAN, skipping design because the body already carries one. Nothing checks that it does.",
+  );
+
+  entry(
+    "task_submit_working",
+    "submit_working",
+    "Dispatch a task out of NEW or a blocked state into WORK, skipping design and planning because the body already carries both. Nothing checks that it does.",
+  );
+
+  mcp.registerTool(
+    "task_feedback",
+    {
+      description:
+        "Send a task back to work with review findings: MANAGER_REVIEW → WORK. The findings are appended to the task body under # Review findings with a fresh Implementation Notes section for the next worker round, and the worker is reminded of them at dispatch.",
+      inputSchema: z.object({
+        id: taskId,
+        findings: z.array(z.string().min(1)).min(1),
+      }),
+    },
+    async ({ id, findings }) =>
+      json(await applied((app) => app.graph.feedback(id, findings, "manager"))),
+  );
+
+  mcp.registerTool(
+    "task_resume",
+    {
+      description:
+        "Take a task out of HELD, having decided the wall is gone. Each held state returns to the phase it was held from: HELD_DESIGN → DESIGN, HELD_PLAN → PLAN, HELD_WORK → WORK. Dependencies added while it was held put it in that phase's blocked state instead, and the last dependency to close releases it into the phase.",
+      inputSchema: z.object({ id: taskId }),
+    },
+    async ({ id }) => json(await applied((app) => app.graph.resume(id))),
+  );
+
+  mcp.registerTool(
+    "task_hold",
+    {
+      description:
+        "Park a task, whether or not an agent is holding it. It lands in the held state of the phase it was in: HELD_DESIGN from DESIGN or DESIGN_REVIEW, HELD_PLAN from PLAN or PLAN_REVIEW, HELD_WORK from WORK, CHECK or WORK_REVIEW. The document is yours to edit directly while it is held; task_resume sends it back, task_abort closes it.",
+      inputSchema: z.object({ id: taskId, reason: z.string().min(1) }),
+    },
+    async ({ id, reason }) =>
+      json(await applied((app) => app.graph.hold(id, reason))),
+  );
+
+  mcp.registerTool(
+    "task_abort",
+    {
+      description:
+        "Throw the task away because it was the wrong shape, from MANAGER_REVIEW once the work is in, or from HELD_DESIGN, HELD_PLAN or HELD_WORK while it is parked. Closes it right away. To abort a task that is still in DESIGN, PLAN or WORK, task_hold it first. Refused if the branch already landed.",
+      inputSchema: z.object({ id: taskId }),
+    },
+    async ({ id }) => json(await applied((app) => app.lander.abort(id))),
+  );
+
+  mcp.registerTool(
+    "enable_scheduler",
+    { description: "Begin dispatching queued work. Returns immediately." },
+    async () => {
+      await applied((app) => app.dispatcher.setEnabled(true));
+      return text("the scheduler is dispatching");
+    },
+  );
+
+  mcp.registerTool(
+    "disable_scheduler",
+    {
+      description:
+        "Start nothing new. Run processes are still settled and their slots still released.",
+    },
+    async () => {
+      await applied((app) => app.dispatcher.setEnabled(false));
+      return text("the scheduler is paused; running work still settles");
+    },
+  );
+
+  mcp.registerTool(
+    "reload_prompts",
+    {
+      description:
+        "Re-read every prompt and template from disk, so edits to the project's overrides take effect without restarting the server. Returns the absolute path of each file now cached.",
+      inputSchema: z.object({}),
+    },
+    async () => json(await applied((app) => app.server.reloadPrompts())),
+  );
+
+  mcp.registerTool(
+    "enable_agent",
+    {
+      description:
+        "Let an agent be dispatched to again. Names an agent, not a slot: type-provider-model, without the trailing slot number.",
+      inputSchema: z.object({ agent: z.string().min(1) }),
+    },
+    async ({ agent }) =>
+      json(await applied((app) => app.pool.setAgentEnabled(agent, true))),
+  );
+
+  mcp.registerTool(
+    "disable_agent",
+    {
+      description:
+        "Stop dispatching to every slot of an agent. Names an agent, not a slot: type-provider-model, without the trailing slot number. Slots running right now finish their task first; they read as still running with enabled false, and go DISABLED once released.",
+      inputSchema: z.object({ agent: z.string().min(1) }),
+    },
+    async ({ agent }) =>
+      json(await applied((app) => app.pool.setAgentEnabled(agent, false))),
+  );
+
+  mcp.registerTool(
+    "set_agent_slots",
+    {
+      description:
+        "Set how many slots an agent runs with, for as long as this server lives. Names an agent, not a slot: type-provider-model, without the trailing slot number. Growing takes the free numbers below the count; shrinking drops idle slots first, and a slot that is running finishes its task before it leaves, reading as a slot number above the count until it does. One slot is the floor, `maxSlots` in agents.json is the ceiling when it declares one, and a restart puts the count back to agents.json.",
+      inputSchema: z.object({
+        agent: z.string().min(1),
+        slots: z.int().min(1),
+      }),
+    },
+    async ({ agent, slots }) =>
+      json(await applied((app) => app.pool.setAgentSlots(agent, slots))),
+  );
+
+  mcp.registerTool(
+    "slot_abort",
+    {
+      description:
+        "Kill the bash command a slot is running right now. Names a slot (with the trailing number), and is refused unless that slot is inside a bash tool call. The command dies and the turn dies with it, then the same session is prompted with the command that died and carries on: session, claim, slot and worktree are kept. Three aborts in one dispatch hold the task instead.",
+      inputSchema: z.object({ slot: z.string().min(1) }),
+    },
+    async ({ slot }) => json(await applied((app) => app.pool.abortSlot(slot))),
+  );
+
+  function resource(
+    name: string,
+    uri: string,
+    description: string,
+    mimeType: string,
+    read: () => Awaitable<string>,
+  ): void {
+    mcp.registerResource(name, uri, { description, mimeType }, async () => ({
+      contents: [{ uri, mimeType, text: await read() }],
+    }));
+  }
+
+  function view(name: ViewName, description: string) {
+    resource(
+      name,
+      `orchestrator://${name}`,
+      description,
+      "application/json",
+      () => live().reports.read(name),
+    );
+  }
+
+  view(
+    "inbox",
+    [
+      "everything waiting on the manager, most nearly closed first. Ranks and how to handle them:",
+      "MANAGER_REVIEW: the work is done and the work review passed; task_submit to land it, task_feedback with findings to send it back to work, or task_abort. The document is yours to edit directly. Task graph changes the close needs are made by editing the graph yourself, at any time.",
+      "HELD_DESIGN/HELD_PLAN/HELD_WORK: an agent stalled or was blocked; held_reason says why. Resolve by directly updating the task document (edit the file or task_write_body), then task_resume to re-dispatch, or task_abort to close it. Never add todos — the plan's todo list is the planner's to write.",
+      "NEW: author the task (edit the file: body, checks, dependencies), then task_submit_designing — or task_submit_planning if the body already carries the design, task_submit_working if it carries the design and the plan.",
+    ].join(" "),
+  );
+
+  view("slots", "every agent slot, idle ones included");
+
+  view("checks", "the check processes running right now");
+
+  view("tasks", "the last 100 tasks to change state");
+
+  view(
+    "queue",
+    "the tasks waiting on a slot, in the order the scheduler will dispatch them",
+  );
+
+  resource(
+    "paths",
+    "orchestrator://paths",
+    "the paths the server knows at startup: task directory, agents file, prompt overrides, runtime root and logs",
+    "application/json",
+    () => JSON.stringify(started().reports.report(), undefined, 2),
+  );
+
+  resource(
+    "error",
+    "orchestrator://error",
+    "why the server is not working: the failure that stopped it starting, or the last one it hit while running. Absent when there is none. Every tool and every view fails with this message while it is set; the paths and workspace_path resources answer anyway, because they are how the failure is diagnosed. A running server clears it on the first tick that comes round cleanly.",
+    "application/json",
+    () =>
+      JSON.stringify(
+        { error: startup.error ?? startup.app?.health.lastError },
+        undefined,
+        2,
+      ),
+  );
+
+  resource(
+    "workspace_path",
+    "orchestrator://workspace_path",
+    "the runtime directory, for file watchers",
+    "text/plain",
+    () => started().reports.report().runtime_root,
+  );
+
+  return mcp;
+}
