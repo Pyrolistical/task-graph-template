@@ -1,6 +1,6 @@
 import type { Assignments } from "../../runtime/ports/assignments.ts";
 import type { Prompts } from "../../prompting/ports/prompts.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Reviews } from "../../runtime/ports/reviews.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
 import type { Run, Pool } from "../../agents/app/pool.ts";
@@ -25,7 +25,7 @@ export interface SettlerOptions {
   assignments: Assignments;
   reviews: Reviews;
   prompts: Prompts;
-  publisher: Publisher;
+  log: Log;
   workspaces: Workspaces;
   base: string;
 }
@@ -36,7 +36,7 @@ export class Settler {
   private readonly assignments: Assignments;
   private readonly reviews: Reviews;
   private readonly prompts: Prompts;
-  private readonly publisher: Publisher;
+  private readonly log: Log;
   private readonly workspaces: Workspaces;
   private readonly base: string;
 
@@ -46,7 +46,7 @@ export class Settler {
     this.assignments = options.assignments;
     this.reviews = options.reviews;
     this.prompts = options.prompts;
-    this.publisher = options.publisher;
+    this.log = options.log;
     this.workspaces = options.workspaces;
     this.base = options.base;
   }
@@ -74,7 +74,7 @@ export class Settler {
     await run.process.stream.settled();
 
     if (!run.process.alive) {
-      await this.publisher.log(
+      await this.log(
         `${run.slot.name} on ${run.taskId}: the process exited without settling: ${run.process.stream.state.failure}`,
       );
       await this.pool.finish(run);
@@ -86,7 +86,7 @@ export class Settler {
 
     const closing = await orUndefined(run.process.lastAssistantText());
     if (closing) {
-      await this.publisher.log(
+      await this.log(
         `${run.slot.name} on ${run.taskId} settled (${stopReason}): ${closing.split("\n")[0]}`,
       );
     }
@@ -202,7 +202,7 @@ export class Settler {
     }
 
     if (run.results.length > 0) {
-      await this.publisher.log(
+      await this.log(
         `${run.slot.name} on ${run.taskId} compacted after its result: left alone to settle`,
       );
       return;
@@ -214,7 +214,7 @@ export class Settler {
       await this.workspaces.resetTo(run.checkout.worktree, run.checkout.head);
     }
 
-    await this.publisher.log(
+    await this.log(
       `${run.slot.name} on ${run.taskId} compacted: ${resetting ? "worktree reset, " : ""}steered back to the assignment`,
     );
 
@@ -227,7 +227,7 @@ export class Settler {
 
     this.pool.waiting(run, wait);
 
-    await this.publisher.log(
+    await this.log(
       `${run.slot.name} waiting ${wait.delayMs}ms on ${wait.loading ? "model loading" : "provider error"}: ${message}`,
     );
   }
@@ -241,7 +241,7 @@ export class Settler {
     const issue = ISSUES[name];
     const used = run.attempts(name);
 
-    await this.publisher.log(
+    await this.log(
       `${run.slot.name} on ${run.taskId}: ${name} (${used}/${issue.attempts} retried)${detail === "" ? "" : `: ${detail}`}`,
     );
 

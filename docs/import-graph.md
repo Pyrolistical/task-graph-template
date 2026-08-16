@@ -383,6 +383,7 @@ the same — see [The slices](architecture.md).
 - `orchestrator/prompting/ports/prompts.ts`
 - `orchestrator/runtime/ports/assignments.ts`
 - `orchestrator/runtime/ports/command-channel.ts`
+- `orchestrator/runtime/ports/log.ts`
 - `orchestrator/runtime/ports/messages.ts`
 - `orchestrator/runtime/ports/paths.ts`
 - `orchestrator/runtime/ports/publisher.ts`

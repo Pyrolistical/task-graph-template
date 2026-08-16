@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TaskGraph } from "./task-graph.ts";
 import {
-  FakePublisher,
+  fakeLog,
   FakeTaskFiles,
   FakeTasks,
   FakeTransitions,
@@ -21,7 +21,7 @@ function aRig(state: TaskMeta["state"]) {
     new FakeWorkspaces(),
     reviews,
     new FakeTransitions(),
-    new FakePublisher(),
+    fakeLog().log,
     fakePaths(),
   );
   return { graph, store, reviews, task };
@@ -60,7 +60,7 @@ describe("Feature: one door onto the task documents", () => {
       new FakeWorkspaces(),
       new FakeTaskFiles(),
       new FakeTransitions(),
-      new FakePublisher(),
+      fakeLog().log,
       fakePaths(),
     );
 

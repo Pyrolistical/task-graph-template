@@ -1,5 +1,5 @@
 import type { AgentProcess, Agents } from "../ports/agents.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
 import {
   type DetachedSlot,
@@ -137,7 +137,7 @@ export class Pool {
   constructor(
     private readonly agents: Agents,
     private readonly workspaces: Workspaces,
-    private readonly publisher: Publisher,
+    private readonly log: Log,
     private readonly alive: (pid: number) => Awaitable<boolean>,
     private readonly costs: (
       taskId: TaskId,
@@ -221,7 +221,7 @@ export class Pool {
     } else {
       this.unreachable.add(provider);
     }
-    await this.publisher.log(
+    await this.log(
       healthy
         ? `provider ${provider} answered its health check: its slots are dispatchable again`
         : `provider ${provider} failed its health check: ${reason}; its slots are held back`,
@@ -316,7 +316,7 @@ export class Pool {
     if (rows.length > total) {
       parts.push(`${rows.length - total} still running`);
     }
-    await this.publisher.log(parts.join("; "));
+    await this.log(parts.join("; "));
 
     return rows;
   }
@@ -333,7 +333,7 @@ export class Pool {
     const rows = this.rows().filter((row) => row.agent === agent);
     const draining = rows.filter((row) => row.state !== "DISABLED").length;
 
-    await this.publisher.log(
+    await this.log(
       enabled
         ? `agent ${agent} enabled: ${rows.length} slots dispatchable`
         : `agent ${agent} disabled: ${draining} of ${rows.length} slots still running`,
@@ -361,9 +361,7 @@ export class Pool {
 
     runner.aborted = activity.target;
     runner.process.abort();
-    await this.publisher.log(
-      `${name} aborted the turn inside bash: ${activity.target}`,
-    );
+    await this.log(`${name} aborted the turn inside bash: ${activity.target}`);
 
     return this.rowOf(runner);
   }
@@ -484,7 +482,7 @@ export class Pool {
   track(run: Run, work: Promise<void>): void {
     const settling = work
       .catch(async (err: unknown) => {
-        await this.publisher.log(
+        await this.log(
           `${run.slot.name} on ${run.taskId} failed: ${messageOf(err)}`,
         );
         await this.stop(run);
@@ -572,7 +570,7 @@ export class Pool {
 
     const agent = runner.slot.agent;
     for (const dropped of this.reap(agent)) {
-      await this.publisher.log(
+      await this.log(
         `${dropped} went idle and left the pool: agent ${agent} is down to ${this.targets.get(agent) ?? 0} slots`,
       );
     }

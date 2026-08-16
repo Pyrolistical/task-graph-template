@@ -1,7 +1,7 @@
 import type { Checks } from "../../checks/ports/checks.ts";
 import type { Messages } from "../../runtime/ports/messages.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Prompts } from "../../prompting/ports/prompts.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
 import { TaskGraph } from "./task-graph.ts";
 import type { CheckResult } from "../../checks/domain/checks.ts";
 import type { RunningCheck } from "../../views/checks.ts";
@@ -22,7 +22,7 @@ export class Checker {
     private readonly checks: Checks,
     private readonly messages: Messages,
     private readonly prompts: Prompts,
-    private readonly publisher: Publisher,
+    private readonly log: Log,
     private readonly repo: string,
   ) {}
 
@@ -35,9 +35,7 @@ export class Checker {
         id,
         this.runAll(id)
           .catch((err: unknown) =>
-            this.publisher.log(
-              `the checks for ${id} could not run: ${messageOf(err)}`,
-            ),
+            this.log(`the checks for ${id} could not run: ${messageOf(err)}`),
           )
           .finally(() => {
             this.pending.delete(id);

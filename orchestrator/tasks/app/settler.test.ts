@@ -7,7 +7,7 @@ import {
   FakeTaskFiles,
   FakeTransitions,
   FakePrompts,
-  FakePublisher,
+  fakeLog,
   FakeTasks,
   FakeWorkspaces,
   aCheckout,
@@ -42,7 +42,7 @@ async function aRig(
   });
   const store = new FakeTasks(new Map<TaskId, TaskMeta>([[task.id, task]]));
   const workspaces = new FakeWorkspaces();
-  const publisher = new FakePublisher();
+  const { log } = fakeLog();
   const paths = fakePaths();
   const assignments = new FakeAssignments();
   await assignments.write(task.id, live);
@@ -52,7 +52,7 @@ async function aRig(
     workspaces,
     new FakeTaskFiles(),
     new FakeTransitions(),
-    publisher,
+    log,
     paths,
   );
   const prompted: string[] = [];
@@ -64,7 +64,7 @@ async function aRig(
       results,
     ),
     workspaces,
-    publisher,
+    log,
     () => false,
     (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
@@ -74,7 +74,7 @@ async function aRig(
     assignments,
     reviews: new FakeTaskFiles(),
     prompts: new FakePrompts(),
-    publisher,
+    log,
     workspaces,
     base: "master",
   });
@@ -103,7 +103,6 @@ async function aRig(
     store,
     assignments,
     prompted,
-    publisher,
   };
 }
 

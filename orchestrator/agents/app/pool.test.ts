@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Run, Pool } from "./pool.ts";
 import {
-  FakePublisher,
+  fakeLog,
   FakeWorkspaces,
   type Reservation,
   aRun,
@@ -23,7 +23,7 @@ function aPool(
   session: () => AgentProcess = () => aSession(),
 ) {
   const workspaces = new FakeWorkspaces();
-  const publisher = new FakePublisher();
+  const { log, lines } = fakeLog();
   const probed: string[] = [];
   const agents = fakeAgents(slots, session, (slot) => {
     probed.push(slot.provider);
@@ -33,7 +33,7 @@ function aPool(
   const pool = new Pool(
     agents,
     workspaces,
-    publisher,
+    log,
     () => alive,
     (id, cost, resumed) => {
       costs.push({ id, cost, resumed });
@@ -41,7 +41,7 @@ function aPool(
   );
   return {
     pool,
-    log: publisher.lines,
+    log: lines,
     harvested: workspaces.harvested,
     workspaces,
     probed,
@@ -503,12 +503,12 @@ describe("Feature: releasing a slot when its work ends", () => {
   test("a slot is released only once its process is confirmed dead", async () => {
     // Given a pool whose process check waits to be answered
     const workspaces = new FakeWorkspaces();
-    const publisher = new FakePublisher();
+    const { log } = fakeLog();
     let confirm: (dead: boolean) => void = () => {};
     const pool = new Pool(
       fakeAgents([aSlot()]),
       workspaces,
-      publisher,
+      log,
       () =>
         new Promise<boolean>((resolve) => {
           confirm = resolve;

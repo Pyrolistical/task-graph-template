@@ -52,8 +52,4 @@ export class ViewFiles implements Publisher {
     );
     return view.slots;
   }
-
-  log(line: string): Promise<void> {
-    return this.runtime.log(line);
-  }
 }

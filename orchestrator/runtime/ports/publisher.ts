@@ -30,5 +30,4 @@ export interface Publisher {
   publish(published: Published): Awaitable<void>;
   read(name: ViewName): Awaitable<string>;
   lastSlots(): Awaitable<DetachedSlot[] | undefined>;
-  log(line: string): Awaitable<void>;
 }

@@ -6,7 +6,7 @@ import { TaskGraph } from "./task-graph.ts";
 import {
   FakeAssignments,
   FakePrompts,
-  FakePublisher,
+  fakeLog,
   FakeTaskFiles,
   FakeTasks,
   FakeTransitions,
@@ -25,7 +25,7 @@ const QUEUED = "the manager says the null case matters";
 async function aRig(task: TaskMeta) {
   const store = new FakeTasks(new Map<TaskId, TaskMeta>([[task.id, task]]));
   const workspaces = new FakeWorkspaces();
-  const publisher = new FakePublisher();
+  const { log } = fakeLog();
   const paths = fakePaths();
   const assignments = new FakeAssignments();
   const files = new FakeTaskFiles();
@@ -36,13 +36,13 @@ async function aRig(task: TaskMeta) {
     workspaces,
     files,
     new FakeTransitions(),
-    publisher,
+    log,
     paths,
   );
   const pool = new Pool(
     fakeAgents([aSlot()], () => aSession({ kind: "none" }, true, prompted)),
     workspaces,
-    publisher,
+    log,
     () => false,
     (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
@@ -52,7 +52,7 @@ async function aRig(task: TaskMeta) {
     assignments,
     reviews: files,
     prompts: new FakePrompts(),
-    publisher,
+    log,
     workspaces,
     base: "master",
   });
@@ -64,7 +64,7 @@ async function aRig(task: TaskMeta) {
     assignments,
     messages: files,
     paths,
-    publisher,
+    log,
     base: "master",
     agentsPath: "/agents.json",
   });

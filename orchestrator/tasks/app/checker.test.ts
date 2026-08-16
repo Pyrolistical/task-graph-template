@@ -4,7 +4,7 @@ import { TaskGraph } from "./task-graph.ts";
 import {
   FakeChecks,
   FakePrompts,
-  FakePublisher,
+  fakeLog,
   FakeTaskFiles,
   FakeTasks,
   FakeTransitions,
@@ -24,13 +24,13 @@ class RefusingTasks extends FakeTasks {
 }
 
 function aRig(store: FakeTasks) {
-  const publisher = new FakePublisher();
+  const { log, lines } = fakeLog();
   const graph = new TaskGraph(
     store,
     new FakeWorkspaces(),
     new FakeTaskFiles(),
     new FakeTransitions(),
-    publisher,
+    log,
     fakePaths(),
   );
   const checker = new Checker(
@@ -38,7 +38,7 @@ function aRig(store: FakeTasks) {
     new FakeChecks(),
     new FakeTaskFiles(),
     new FakePrompts(),
-    publisher,
+    log,
     "/repo",
   );
 
@@ -47,7 +47,7 @@ function aRig(store: FakeTasks) {
     await checker.settled();
   };
 
-  return { checker, runChecks, log: publisher.lines };
+  return { checker, runChecks, log: lines };
 }
 
 const CHECKING = aTask({ state: "CHECK", checks: ["bun test"] });

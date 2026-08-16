@@ -2,7 +2,7 @@ import type { Awaitable } from "../../kernel/domain/awaitable.ts";
 import { Latch } from "../../kernel/domain/latch.ts";
 import { Queue } from "../../kernel/domain/queue.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Reviews } from "../../runtime/ports/reviews.ts";
 import type { ClaimArgs, CreatedTask, Tasks } from "../ports/tasks.ts";
 import type { Transitions } from "../../runtime/ports/transitions.ts";
@@ -48,7 +48,7 @@ export class TaskGraph {
     private readonly workspaces: Workspaces,
     private readonly reviews: Reviews,
     private readonly transitions: Transitions,
-    private readonly publisher: Publisher,
+    private readonly log: Log,
     private readonly paths: Paths,
     private readonly wake: Latch = new Latch(),
   ) {}
@@ -90,12 +90,12 @@ export class TaskGraph {
 
     for (const [filePath, message] of problems) {
       if (this.problems.get(filePath) !== message) {
-        await this.publisher.log(`ignoring ${filePath}: ${message}`);
+        await this.log(`ignoring ${filePath}: ${message}`);
       }
     }
     for (const filePath of this.problems.keys()) {
       if (!problems.has(filePath)) {
-        await this.publisher.log(`${filePath} parses again`);
+        await this.log(`${filePath} parses again`);
       }
     }
     this.problems = problems;
@@ -109,7 +109,7 @@ export class TaskGraph {
 
     for (const id of cycling) {
       if (!this.cycling.has(id)) {
-        await this.publisher.log(
+        await this.log(
           `task ${id} depends on itself through ${tasks.get(id)?.depends_on.join(", ")}; it can never unblock`,
         );
       }

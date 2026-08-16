@@ -96,14 +96,14 @@ from the rules it happens to reuse.
 What does the work instead is `import type`. It erases at compile time, so a slice that is only named for its types is not bound to at runtime at all. Of the imports that cross a slice boundary, leaving out the three shared tiers:
 
 ```text
-52  type-only     the shape of what compose will hand over
+53  type-only     the shape of what compose will hand over
 11  value         a pure function or constant genuinely reused
 ```
 
 and by the layer they land in:
 
 ```text
-36  ports/     the declared API
+37  ports/     the declared API
 17  domain/    pure rules, reused on purpose
  6  app/       all type-only — a constructor parameter's type
  2  policy/    the scheduler's ranking, called by the dispatcher and the reports

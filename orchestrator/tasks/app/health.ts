@@ -1,9 +1,9 @@
-import type { Publisher } from "../../runtime/ports/publisher.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 
 export class Health {
   private failure: string | undefined = undefined;
 
-  constructor(private readonly publisher: Publisher) {}
+  constructor(private readonly log: Log) {}
 
   get lastError(): string | undefined {
     return this.failure;
@@ -11,7 +11,7 @@ export class Health {
 
   async fail(message: string): Promise<void> {
     this.failure = message;
-    await this.publisher.log(message);
+    await this.log(message);
   }
 
   async recover(): Promise<void> {
@@ -19,6 +19,6 @@ export class Health {
       return;
     }
     this.failure = undefined;
-    await this.publisher.log("the tick came round cleanly; the server is up");
+    await this.log("the tick came round cleanly; the server is up");
   }
 }

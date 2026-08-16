@@ -1,7 +1,7 @@
 import type { Assignments } from "../../runtime/ports/assignments.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Messages } from "../../runtime/ports/messages.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
 import type { Checkout, Pool, Run } from "../../agents/app/pool.ts";
 import { Settler } from "./settler.ts";
@@ -29,7 +29,7 @@ export interface DispatcherOptions {
   assignments: Assignments;
   messages: Messages;
   paths: Paths;
-  publisher: Publisher;
+  log: Log;
   base: string;
   agentsPath: string;
 }
@@ -44,7 +44,7 @@ export class Dispatcher {
   private readonly assignments: Assignments;
   private readonly messages: Messages;
   private readonly paths: Paths;
-  private readonly publisher: Publisher;
+  private readonly log: Log;
   private readonly base: string;
   private readonly agentsPath: string;
 
@@ -56,7 +56,7 @@ export class Dispatcher {
     this.assignments = options.assignments;
     this.messages = options.messages;
     this.paths = options.paths;
-    this.publisher = options.publisher;
+    this.log = options.log;
     this.base = options.base;
     this.agentsPath = options.agentsPath;
   }
@@ -72,7 +72,7 @@ export class Dispatcher {
       );
     }
     this.scheduling = enabled;
-    await this.publisher.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
+    await this.log(`scheduler ${enabled ? "enabled" : "disabled"}`);
   }
 
   async resumable(tasks: Map<TaskId, TaskMeta>): Promise<Set<TaskId>> {
@@ -110,7 +110,7 @@ export class Dispatcher {
       try {
         await this.assign(task, candidate, slot);
       } catch (err) {
-        await this.publisher.log(
+        await this.log(
           `dispatch of ${task.id} to ${slot.name} failed: ${messageOf(err)}`,
         );
         await this.pool.finishSlot(slot.name);

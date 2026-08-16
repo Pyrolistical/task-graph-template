@@ -17,6 +17,7 @@ import { branchName } from "../workspaces/domain/workspace.ts";
 import { checkWrite, loadAgents } from "../agents/adapters/agent-pool.ts";
 import { CommandFile } from "../runtime/adapters/command.ts";
 import { exists } from "../kernel/adapters/files.ts";
+import type { Log } from "../runtime/ports/log.ts";
 import * as git from "../workspaces/adapters/git.ts";
 import { GitWorkspaces } from "../workspaces/adapters/git-workspaces.ts";
 import { PiAgents } from "../agents/adapters/pi-agents.ts";
@@ -136,6 +137,8 @@ export async function wire(options: WiringOptions): Promise<App> {
 
   const publisher = new ViewFiles(runtime);
 
+  const log: Log = (line) => runtime.log(line);
+
   const commands = new CommandFile(runtime);
 
   const wake = new Latch();
@@ -145,14 +148,14 @@ export async function wire(options: WiringOptions): Promise<App> {
     workspaces,
     files,
     transitions,
-    publisher,
+    log,
     runtime,
     wake,
   );
   const pool = new Pool(
     agents,
     workspaces,
-    publisher,
+    log,
     isProcessAlive,
     (taskId, cost, resumed) => graph.recordCost(taskId, cost, resumed),
   );
@@ -162,7 +165,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     assignments: files,
     reviews: files,
     prompts,
-    publisher,
+    log,
     workspaces,
     base: config.base,
   });
@@ -174,11 +177,11 @@ export async function wire(options: WiringOptions): Promise<App> {
     assignments: files,
     messages: files,
     paths: runtime,
-    publisher,
+    log,
     base: config.base,
     agentsPath: config.agentsPath,
   });
-  const checker = new Checker(graph, checks, files, prompts, publisher, repo);
+  const checker = new Checker(graph, checks, files, prompts, log, repo);
   const lander = new Lander(graph, pool, checker, workspaces, config.base);
   const recovery = new Recovery(
     graph,
@@ -186,6 +189,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     workspaces,
     runtime,
     publisher,
+    log,
     isProcessAlive,
     config.base,
   );
@@ -200,7 +204,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     publisher,
     paths: runtime,
   });
-  const health = new Health(publisher);
+  const health = new Health(log);
 
   const server = new Server({
     config,
@@ -214,7 +218,7 @@ export async function wire(options: WiringOptions): Promise<App> {
     commands,
     prompts,
     paths: runtime,
-    publisher,
+    log,
     reports,
     health,
   });

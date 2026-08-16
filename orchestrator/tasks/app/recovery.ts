@@ -1,3 +1,4 @@
+import type { Log } from "../../runtime/ports/log.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
 import type { Publisher } from "../../runtime/ports/publisher.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
@@ -14,6 +15,7 @@ export class Recovery {
     private readonly workspaces: Workspaces,
     private readonly paths: Paths,
     private readonly publisher: Publisher,
+    private readonly log: Log,
     private readonly alive: (pid: number) => Awaitable<boolean>,
     private readonly base: string,
   ) {}
@@ -25,7 +27,7 @@ export class Recovery {
         continue;
       }
       if (!(await this.workspaces.branchExists(workspace.branch))) {
-        await this.publisher.log(
+        await this.log(
           `task ${id} lost both its worktree and branch ${workspace.branch}`,
         );
         continue;
@@ -36,7 +38,7 @@ export class Recovery {
         workspace.worktree,
         this.base,
       );
-      await this.publisher.log(
+      await this.log(
         `recloned the workspace for ${id} from ${workspace.branch}`,
       );
     }
@@ -64,7 +66,7 @@ export class Recovery {
         continue;
       }
 
-      await this.publisher.log(
+      await this.log(
         `${row.name} is still running ${row.task_id} as pid ${row.pid}; leaving it alone`,
       );
     }
@@ -81,7 +83,7 @@ export class Recovery {
         continue;
       }
 
-      await this.publisher.log(
+      await this.log(
         `reaping ${id}: "${task.claimed_by}" (pid ${task.claimed_pid}) is gone`,
       );
       await this.pool.harvest(task.workspace);

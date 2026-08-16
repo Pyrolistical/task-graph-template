@@ -2,6 +2,7 @@ import type { AgentProcess, Agents } from "../agents/ports/agents.ts";
 import type { Assignments } from "../runtime/ports/assignments.ts";
 import type { Checks } from "../checks/ports/checks.ts";
 import type { Messages } from "../runtime/ports/messages.ts";
+import type { Log } from "../runtime/ports/log.ts";
 import type { Paths } from "../runtime/ports/paths.ts";
 import type { Prompts } from "../prompting/ports/prompts.ts";
 import type {
@@ -147,8 +148,17 @@ export function aSession(
   };
 }
 
+export function fakeLog(): { log: Log; lines: string[] } {
+  const lines: string[] = [];
+  return {
+    lines,
+    log: (line) => {
+      lines.push(line);
+    },
+  };
+}
+
 export class FakePublisher implements Publisher {
-  readonly lines: string[] = [];
   rows: DetachedSlot[] | undefined = undefined;
   published: Published | undefined = undefined;
 
@@ -168,10 +178,6 @@ export class FakePublisher implements Publisher {
 
   lastSlots(): Promise<DetachedSlot[] | undefined> {
     return yielded(this.rows);
-  }
-
-  log(line: string): Awaitable<void> {
-    this.lines.push(line);
   }
 }
 
@@ -430,7 +436,6 @@ export class FakeAssignments implements Assignments {
 export class FakePaths implements Paths {
   readonly prepared: TaskId[] = [];
   readonly discarded: TaskId[] = [];
-  readonly lines: string[] = [];
 
   readonly root = "/runtime";
   readonly serverLog = "/runtime/server.log";
@@ -484,10 +489,6 @@ export class FakePaths implements Paths {
 
   discard(id: TaskId): Awaitable<void> {
     this.discarded.push(id);
-  }
-
-  log(line: string): Awaitable<void> {
-    this.lines.push(line);
   }
 
   takeLock(): Awaitable<void> {}

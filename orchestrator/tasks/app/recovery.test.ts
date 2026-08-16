@@ -6,6 +6,7 @@ import {
   FakeTaskFiles,
   FakeTransitions,
   FakePublisher,
+  fakeLog,
   FakeTasks,
   FakeWorkspaces,
   aRun,
@@ -37,6 +38,7 @@ function aRig(tasks: TaskMeta[], slots = [aSlot()], alive = true) {
   const store = new FakeTasks(byId);
   const workspaces = new FakeWorkspaces();
   const publisher = new FakePublisher();
+  const { log, lines } = fakeLog();
   const paths = fakePaths();
 
   const graph = new TaskGraph(
@@ -44,13 +46,13 @@ function aRig(tasks: TaskMeta[], slots = [aSlot()], alive = true) {
     workspaces,
     new FakeTaskFiles(),
     new FakeTransitions(),
-    publisher,
+    log,
     paths,
   );
   const pool = new Pool(
     fakeAgents(slots, () => aSession({ kind: "none" }, alive)),
     workspaces,
-    publisher,
+    log,
     (pid) => pid === LIVE_PID,
     (id, cost, resumed) => graph.recordCost(id, cost, resumed),
   );
@@ -60,11 +62,12 @@ function aRig(tasks: TaskMeta[], slots = [aSlot()], alive = true) {
     workspaces,
     paths,
     publisher,
+    log,
     (pid) => pid === LIVE_PID,
     "master",
   );
 
-  return { recover, pool, workspaces, store, log: publisher.lines, publisher };
+  return { recover, pool, workspaces, store, log: lines, publisher };
 }
 
 describe("Feature: reaping claims whose process is gone", () => {

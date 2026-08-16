@@ -2,7 +2,7 @@ import { messageOf } from "../../kernel/domain/errors.ts";
 import type { CommandChannel } from "../../runtime/ports/command-channel.ts";
 import type { Paths } from "../../runtime/ports/paths.ts";
 import type { Prompts } from "../../prompting/ports/prompts.ts";
-import type { Publisher } from "../../runtime/ports/publisher.ts";
+import type { Log } from "../../runtime/ports/log.ts";
 import type { ServerConfig } from "./config.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { Health } from "./health.ts";
@@ -27,7 +27,7 @@ export interface ServerOptions {
   commands: CommandChannel;
   prompts: Prompts;
   paths: Paths;
-  publisher: Publisher;
+  log: Log;
   reports: Reports;
   health: Health;
 }
@@ -46,7 +46,7 @@ export class Server {
   private readonly commands: CommandChannel;
   private readonly prompts: Prompts;
   private readonly paths: Paths;
-  private readonly publisher: Publisher;
+  private readonly log: Log;
   private readonly reports: Reports;
   private readonly health: Health;
 
@@ -62,7 +62,7 @@ export class Server {
     this.commands = options.commands;
     this.prompts = options.prompts;
     this.paths = options.paths;
-    this.publisher = options.publisher;
+    this.log = options.log;
     this.reports = options.reports;
     this.health = options.health;
   }
@@ -75,11 +75,11 @@ export class Server {
     await this.paths.takeLock();
     try {
       await this.graph.takeLock();
-      await this.publisher.log(
+      await this.log(
         `starting against ${this.config.repo} (base ${this.config.base})`,
       );
       for (const filePath of this.prompts.cachedFiles()) {
-        await this.publisher.log(`cached ${filePath}`);
+        await this.log(`cached ${filePath}`);
       }
       await this.recovery.reclone();
       await this.recovery.reattach();
@@ -97,7 +97,7 @@ export class Server {
   async reloadPrompts(): Promise<string[]> {
     const paths = await this.prompts.reload();
     for (const filePath of paths) {
-      await this.publisher.log(`cached ${filePath}`);
+      await this.log(`cached ${filePath}`);
     }
     return paths;
   }
@@ -143,7 +143,7 @@ export class Server {
   }
 
   private async applyCommand(command: Command): Promise<void> {
-    await this.publisher.log(`console: ${JSON.stringify(command)}`);
+    await this.log(`console: ${JSON.stringify(command)}`);
     try {
       if (command.command === "scheduler") {
         await this.dispatcher.setEnabled(command.enabled);
@@ -155,7 +155,7 @@ export class Server {
         await this.pool.setAgentEnabled(command.agent, command.enabled);
       }
     } catch (err) {
-      await this.publisher.log(`console command refused: ${messageOf(err)}`);
+      await this.log(`console command refused: ${messageOf(err)}`);
       return;
     }
     try {
@@ -169,9 +169,7 @@ export class Server {
   async detach(): Promise<void> {
     this.stopTaking();
     await this.release();
-    await this.publisher.log(
-      "manager exited; agents left running, views left on disk",
-    );
+    await this.log("manager exited; agents left running, views left on disk");
     await this.close();
   }
 

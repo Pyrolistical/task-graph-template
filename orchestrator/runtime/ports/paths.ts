@@ -23,7 +23,6 @@ export interface Paths {
   messagesDir(id: TaskId): string;
   prepare(id: TaskId): Awaitable<void>;
   discard(id: TaskId): Awaitable<void>;
-  log(line: string): Awaitable<void>;
   takeLock(): Awaitable<void>;
   clearLock(): Awaitable<void>;
   close(): Awaitable<void>;
