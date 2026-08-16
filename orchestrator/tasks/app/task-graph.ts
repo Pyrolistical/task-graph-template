@@ -9,6 +9,7 @@ import type { Transitions } from "../../runtime/ports/transitions.ts";
 import type { Workspaces } from "../../workspaces/ports/workspaces.ts";
 import { type TaskRow } from "../../views/tasks.ts";
 import { RECENT_TASKS, taskRow, taskRows } from "../domain/rows.ts";
+import { keepRecent } from "../policy/recent.ts";
 import { blockingCounts } from "../../vocabulary/blocking.ts";
 import type { Cost } from "../../vocabulary/costs.ts";
 import {
@@ -48,7 +49,7 @@ export interface TaskGraphOptions {
 
 export class TaskGraph {
   private readonly edits = new Queue();
-  private readonly recent: TaskId[] = [];
+  private recent: TaskId[] = [];
   private readonly closed = new Map<TaskId, TaskRow>();
   private problems = new Map<string, string>();
   private cycling = new Set<TaskId>();
@@ -304,17 +305,16 @@ export class TaskGraph {
     taskId: TaskId,
     tasks: Map<TaskId, TaskMeta>,
   ): Promise<void> {
-    const at = this.recent.indexOf(taskId);
-    if (at !== -1) {
-      this.recent.splice(at, 1);
-    }
-    this.recent.unshift(taskId);
+    const { recent, discards } = keepRecent(
+      taskId,
+      this.recent,
+      new Set(tasks.keys()),
+    );
+    this.recent = recent;
 
-    for (const dropped of this.recent.splice(RECENT_TASKS)) {
-      if (!tasks.has(dropped)) {
-        this.closed.delete(dropped);
-        await this.paths.discard(dropped);
-      }
+    for (const dropped of discards) {
+      this.closed.delete(dropped);
+      await this.paths.discard(dropped);
     }
   }
 }
