@@ -625,6 +625,20 @@ describe("Feature: releasing a slot when its work ends", () => {
     expect(costs).toEqual([]);
   });
 
+  test("a run outlives its slot, reading what it ran rather than the empty slot", async () => {
+    // Given a run whose slot has since been released
+    const { pool } = aPool();
+    const run = await onATask(pool);
+    await pool.release("pi-fake-fake-1");
+
+    // When whoever is still holding that run reads it
+    // Then it names the session it opened, and the pool refuses to move it on
+    expect(run.session).toBe(A_SESSION);
+    expect(() => pool.busy(run)).toThrow(
+      "pi-fake-fake-1 no longer holds 000042; its slot was released",
+    );
+  });
+
   test("a pool with nothing tracked has no work in flight", () => {
     // Given a pool that has dispatched nothing
     const { pool } = aPool();

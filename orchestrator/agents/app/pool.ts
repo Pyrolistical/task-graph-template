@@ -68,24 +68,11 @@ function freshRunner(slot: Slot): Runner {
   return {
     slot,
     state: "IDLE",
-    run: undefined,
-    taskId: undefined,
-    taskState: undefined,
-    role: undefined,
-    process: undefined,
-    startedAt: undefined,
-    detachedPid: undefined,
-    session: undefined,
     resumed: false,
     carried: { seconds: 0, cost: 0 },
-    tokens: undefined,
-    cost: undefined,
-    contextPercent: undefined,
     compactions: 0,
     results: [],
     issues: new Map(),
-    wait: undefined,
-    aborted: undefined,
   };
 }
 
@@ -566,7 +553,7 @@ export class Pool {
         runner.resumed,
       );
     }
-    Object.assign(runner, freshRunner(runner.slot));
+    this.byName.set(name, freshRunner(runner.slot));
 
     const agent = runner.slot.agent;
     for (const dropped of this.reap(agent)) {
