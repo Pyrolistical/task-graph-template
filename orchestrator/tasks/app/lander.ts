@@ -12,14 +12,28 @@ import {
 
 const ABORTABLE_STATES: TaskState[] = ["MANAGER_REVIEW", ...HELD_STATES];
 
+export interface LanderOptions {
+  graph: TaskGraph;
+  pool: Pool;
+  checker: Checker;
+  workspaces: Workspaces;
+  base: string;
+}
+
 export class Lander {
-  constructor(
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly checker: Checker,
-    private readonly workspaces: Workspaces,
-    private readonly base: string,
-  ) {}
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly checker: Checker;
+  private readonly workspaces: Workspaces;
+  private readonly base: string;
+
+  constructor(options: LanderOptions) {
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.checker = options.checker;
+    this.workspaces = options.workspaces;
+    this.base = options.base;
+  }
 
   async merge(taskId: TaskId): Promise<TransitionResult> {
     const task = await this.requireManagerReview(taskId);

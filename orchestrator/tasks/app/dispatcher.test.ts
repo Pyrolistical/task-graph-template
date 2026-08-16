@@ -31,21 +31,23 @@ async function aRig(task: TaskMeta) {
   const files = new FakeTaskFiles();
   const prompted: string[] = [];
 
-  const graph = new TaskGraph(
-    store,
+  const graph = new TaskGraph({
+    tasks: store,
     workspaces,
-    files,
-    new FakeTransitions(),
+    reviews: files,
+    transitions: new FakeTransitions(),
     log,
     paths,
-  );
-  const pool = new Pool(
-    fakeAgents([aSlot()], () => aSession({ kind: "none" }, true, prompted)),
+  });
+  const pool = new Pool({
+    agents: fakeAgents([aSlot()], () =>
+      aSession({ kind: "none" }, true, prompted),
+    ),
     workspaces,
     log,
-    () => false,
-    (id, cost, resumed) => graph.recordCost(id, cost, resumed),
-  );
+    alive: () => false,
+    costs: (id, cost, resumed) => graph.recordCost(id, cost, resumed),
+  });
   const settler = new Settler({
     graph,
     pool,

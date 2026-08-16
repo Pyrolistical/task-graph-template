@@ -36,6 +36,16 @@ export interface Snapshot {
   blocking: Map<TaskId, number>;
 }
 
+export interface TaskGraphOptions {
+  tasks: Tasks;
+  workspaces: Workspaces;
+  reviews: Reviews;
+  transitions: Transitions;
+  log: Log;
+  paths: Paths;
+  wake?: Latch;
+}
+
 export class TaskGraph {
   private readonly edits = new Queue();
   private readonly recent: TaskId[] = [];
@@ -43,15 +53,23 @@ export class TaskGraph {
   private problems = new Map<string, string>();
   private cycling = new Set<TaskId>();
 
-  constructor(
-    private readonly tasks: Tasks,
-    private readonly workspaces: Workspaces,
-    private readonly reviews: Reviews,
-    private readonly transitions: Transitions,
-    private readonly log: Log,
-    private readonly paths: Paths,
-    private readonly wake: Latch = new Latch(),
-  ) {}
+  private readonly tasks: Tasks;
+  private readonly workspaces: Workspaces;
+  private readonly reviews: Reviews;
+  private readonly transitions: Transitions;
+  private readonly log: Log;
+  private readonly paths: Paths;
+  private readonly wake: Latch;
+
+  constructor(options: TaskGraphOptions) {
+    this.tasks = options.tasks;
+    this.workspaces = options.workspaces;
+    this.reviews = options.reviews;
+    this.transitions = options.transitions;
+    this.log = options.log;
+    this.paths = options.paths;
+    this.wake = options.wake ?? new Latch();
+  }
 
   private edit<T>(work: () => Awaitable<T>): Promise<T> {
     const done = this.edits.submit(work);

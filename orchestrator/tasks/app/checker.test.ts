@@ -25,22 +25,22 @@ class RefusingTasks extends FakeTasks {
 
 function aRig(store: FakeTasks) {
   const { log, lines } = fakeLog();
-  const graph = new TaskGraph(
-    store,
-    new FakeWorkspaces(),
-    new FakeTaskFiles(),
-    new FakeTransitions(),
+  const graph = new TaskGraph({
+    tasks: store,
+    workspaces: new FakeWorkspaces(),
+    reviews: new FakeTaskFiles(),
+    transitions: new FakeTransitions(),
     log,
-    fakePaths(),
-  );
-  const checker = new Checker(
+    paths: fakePaths(),
+  });
+  const checker = new Checker({
     graph,
-    new FakeChecks(),
-    new FakeTaskFiles(),
-    new FakePrompts(),
+    checks: new FakeChecks(),
+    messages: new FakeTaskFiles(),
+    prompts: new FakePrompts(),
     log,
-    "/repo",
-  );
+    repo: "/repo",
+  });
 
   const runChecks = async (task: TaskMeta): Promise<void> => {
     checker.start(new Map([[task.id, task]]));

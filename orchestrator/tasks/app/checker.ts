@@ -14,17 +14,33 @@ type CheckFailure = {
   output: string;
 };
 
+export interface CheckerOptions {
+  graph: TaskGraph;
+  checks: Checks;
+  messages: Messages;
+  prompts: Prompts;
+  log: Log;
+  repo: string;
+}
+
 export class Checker {
   private readonly pending = new Map<TaskId, Promise<void>>();
 
-  constructor(
-    private readonly graph: TaskGraph,
-    private readonly checks: Checks,
-    private readonly messages: Messages,
-    private readonly prompts: Prompts,
-    private readonly log: Log,
-    private readonly repo: string,
-  ) {}
+  private readonly graph: TaskGraph;
+  private readonly checks: Checks;
+  private readonly messages: Messages;
+  private readonly prompts: Prompts;
+  private readonly log: Log;
+  private readonly repo: string;
+
+  constructor(options: CheckerOptions) {
+    this.graph = options.graph;
+    this.checks = options.checks;
+    this.messages = options.messages;
+    this.prompts = options.prompts;
+    this.log = options.log;
+    this.repo = options.repo;
+  }
 
   start(tasks: Map<TaskId, TaskMeta>): void {
     for (const [id, task] of tasks) {

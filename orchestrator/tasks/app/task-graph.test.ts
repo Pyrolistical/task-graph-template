@@ -16,14 +16,14 @@ function aRig(state: TaskMeta["state"]) {
   const task = aTask({ state });
   const store = new FakeTasks(new Map<TaskId, TaskMeta>([[task.id, task]]));
   const reviews = new FakeTaskFiles();
-  const graph = new TaskGraph(
-    store,
-    new FakeWorkspaces(),
+  const graph = new TaskGraph({
+    tasks: store,
+    workspaces: new FakeWorkspaces(),
     reviews,
-    new FakeTransitions(),
-    fakeLog().log,
-    fakePaths(),
-  );
+    transitions: new FakeTransitions(),
+    log: fakeLog().log,
+    paths: fakePaths(),
+  });
   return { graph, store, reviews, task };
 }
 
@@ -55,14 +55,14 @@ describe("Feature: one door onto the task documents", () => {
   test("edits that arrive together are applied one after the other", async () => {
     // Given a store that reads a whole document, then writes the whole of it back
     const store = new WholeDocumentTasks(new Map<TaskId, TaskMeta>());
-    const graph = new TaskGraph(
-      store,
-      new FakeWorkspaces(),
-      new FakeTaskFiles(),
-      new FakeTransitions(),
-      fakeLog().log,
-      fakePaths(),
-    );
+    const graph = new TaskGraph({
+      tasks: store,
+      workspaces: new FakeWorkspaces(),
+      reviews: new FakeTaskFiles(),
+      transitions: new FakeTransitions(),
+      log: fakeLog().log,
+      paths: fakePaths(),
+    });
 
     // When a cost and a body change are handed to the graph at the same moment
     await Promise.all([

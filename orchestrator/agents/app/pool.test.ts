@@ -30,15 +30,15 @@ function aPool(
     return health();
   });
   const costs: { id: string; cost: Cost; resumed: boolean }[] = [];
-  const pool = new Pool(
+  const pool = new Pool({
     agents,
     workspaces,
     log,
-    () => alive,
-    (id, cost, resumed) => {
+    alive: () => alive,
+    costs: (id, cost, resumed) => {
       costs.push({ id, cost, resumed });
     },
-  );
+  });
   return {
     pool,
     log: lines,
@@ -505,16 +505,16 @@ describe("Feature: releasing a slot when its work ends", () => {
     const workspaces = new FakeWorkspaces();
     const { log } = fakeLog();
     let confirm: (dead: boolean) => void = () => {};
-    const pool = new Pool(
-      fakeAgents([aSlot()]),
+    const pool = new Pool({
+      agents: fakeAgents([aSlot()]),
       workspaces,
       log,
-      () =>
+      alive: () =>
         new Promise<boolean>((resolve) => {
           confirm = resolve;
         }),
-      () => {},
-    );
+      costs: () => {},
+    });
     const run = await onATask(pool);
 
     // When the work the pool is tracking fails, before the process check answers

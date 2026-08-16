@@ -41,31 +41,31 @@ function aRig(tasks: TaskMeta[], slots = [aSlot()], alive = true) {
   const { log, lines } = fakeLog();
   const paths = fakePaths();
 
-  const graph = new TaskGraph(
-    store,
+  const graph = new TaskGraph({
+    tasks: store,
     workspaces,
-    new FakeTaskFiles(),
-    new FakeTransitions(),
+    reviews: new FakeTaskFiles(),
+    transitions: new FakeTransitions(),
     log,
     paths,
-  );
-  const pool = new Pool(
-    fakeAgents(slots, () => aSession({ kind: "none" }, alive)),
+  });
+  const pool = new Pool({
+    agents: fakeAgents(slots, () => aSession({ kind: "none" }, alive)),
     workspaces,
     log,
-    (pid) => pid === LIVE_PID,
-    (id, cost, resumed) => graph.recordCost(id, cost, resumed),
-  );
-  const recover = new Recovery(
+    alive: (pid) => pid === LIVE_PID,
+    costs: (id, cost, resumed) => graph.recordCost(id, cost, resumed),
+  });
+  const recover = new Recovery({
     graph,
     pool,
     workspaces,
     paths,
     publisher,
     log,
-    (pid) => pid === LIVE_PID,
-    "master",
-  );
+    alive: (pid) => pid === LIVE_PID,
+    base: "master",
+  });
 
   return { recover, pool, workspaces, store, log: lines, publisher };
 }

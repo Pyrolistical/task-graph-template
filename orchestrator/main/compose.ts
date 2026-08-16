@@ -143,22 +143,22 @@ export async function wire(options: WiringOptions): Promise<App> {
 
   const wake = new Latch();
 
-  const graph = new TaskGraph(
+  const graph = new TaskGraph({
     tasks,
     workspaces,
-    files,
+    reviews: files,
     transitions,
     log,
-    runtime,
+    paths: runtime,
     wake,
-  );
-  const pool = new Pool(
+  });
+  const pool = new Pool({
     agents,
     workspaces,
     log,
-    isProcessAlive,
-    (taskId, cost, resumed) => graph.recordCost(taskId, cost, resumed),
-  );
+    alive: isProcessAlive,
+    costs: (taskId, cost, resumed) => graph.recordCost(taskId, cost, resumed),
+  });
   const settler = new Settler({
     graph,
     pool,
@@ -181,18 +181,31 @@ export async function wire(options: WiringOptions): Promise<App> {
     base: config.base,
     agentsPath: config.agentsPath,
   });
-  const checker = new Checker(graph, checks, files, prompts, log, repo);
-  const lander = new Lander(graph, pool, checker, workspaces, config.base);
-  const recovery = new Recovery(
+  const checker = new Checker({
+    graph,
+    checks,
+    messages: files,
+    prompts,
+    log,
+    repo,
+  });
+  const lander = new Lander({
+    graph,
+    pool,
+    checker,
+    workspaces,
+    base: config.base,
+  });
+  const recovery = new Recovery({
     graph,
     pool,
     workspaces,
-    runtime,
+    paths: runtime,
     publisher,
     log,
-    isProcessAlive,
-    config.base,
-  );
+    alive: isProcessAlive,
+    base: config.base,
+  });
 
   const reports = new Reports({
     config,

@@ -47,17 +47,17 @@ async function aRig(
   const assignments = new FakeAssignments();
   await assignments.write(task.id, live);
 
-  const graph = new TaskGraph(
-    store,
+  const graph = new TaskGraph({
+    tasks: store,
     workspaces,
-    new FakeTaskFiles(),
-    new FakeTransitions(),
+    reviews: new FakeTaskFiles(),
+    transitions: new FakeTransitions(),
     log,
     paths,
-  );
+  });
   const prompted: string[] = [];
-  const pool = new Pool(
-    fakeAgents(
+  const pool = new Pool({
+    agents: fakeAgents(
       [aSlot()],
       () => aSession(activity, alive, prompted, {}, stream),
       () => undefined,
@@ -65,9 +65,9 @@ async function aRig(
     ),
     workspaces,
     log,
-    () => false,
-    (id, cost, resumed) => graph.recordCost(id, cost, resumed),
-  );
+    alive: () => false,
+    costs: (id, cost, resumed) => graph.recordCost(id, cost, resumed),
+  });
   const settler = new Settler({
     graph,
     pool,

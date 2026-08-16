@@ -8,17 +8,37 @@ import type { Awaitable } from "../../kernel/domain/awaitable.ts";
 import { isClaimState } from "../../vocabulary/state-machine.ts";
 import type { TaskId, TaskMeta } from "../../vocabulary/task.ts";
 
+export interface RecoveryOptions {
+  graph: TaskGraph;
+  pool: Pool;
+  workspaces: Workspaces;
+  paths: Paths;
+  publisher: Publisher;
+  log: Log;
+  alive: (pid: number) => Awaitable<boolean>;
+  base: string;
+}
+
 export class Recovery {
-  constructor(
-    private readonly graph: TaskGraph,
-    private readonly pool: Pool,
-    private readonly workspaces: Workspaces,
-    private readonly paths: Paths,
-    private readonly publisher: Publisher,
-    private readonly log: Log,
-    private readonly alive: (pid: number) => Awaitable<boolean>,
-    private readonly base: string,
-  ) {}
+  private readonly graph: TaskGraph;
+  private readonly pool: Pool;
+  private readonly workspaces: Workspaces;
+  private readonly paths: Paths;
+  private readonly publisher: Publisher;
+  private readonly log: Log;
+  private readonly alive: (pid: number) => Awaitable<boolean>;
+  private readonly base: string;
+
+  constructor(options: RecoveryOptions) {
+    this.graph = options.graph;
+    this.pool = options.pool;
+    this.workspaces = options.workspaces;
+    this.paths = options.paths;
+    this.publisher = options.publisher;
+    this.log = options.log;
+    this.alive = options.alive;
+    this.base = options.base;
+  }
 
   async reclone(): Promise<void> {
     for (const [id, task] of await this.graph.list()) {

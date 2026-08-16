@@ -111,6 +111,14 @@ export class Run {
   }
 }
 
+export interface PoolOptions {
+  agents: Agents;
+  workspaces: Workspaces;
+  log: Log;
+  alive: (pid: number) => Awaitable<boolean>;
+  costs: (taskId: TaskId, cost: Cost, resumed: boolean) => Awaitable<void>;
+}
+
 export class Pool {
   readonly rates = new Rates();
 
@@ -121,18 +129,24 @@ export class Pool {
   private readonly unreachable = new Set<string>();
   private readonly tracked = new Set<Promise<void>>();
 
-  constructor(
-    private readonly agents: Agents,
-    private readonly workspaces: Workspaces,
-    private readonly log: Log,
-    private readonly alive: (pid: number) => Awaitable<boolean>,
-    private readonly costs: (
-      taskId: TaskId,
-      cost: Cost,
-      resumed: boolean,
-    ) => Awaitable<void>,
-  ) {
-    for (const slot of agents.slots()) {
+  private readonly agents: Agents;
+  private readonly workspaces: Workspaces;
+  private readonly log: Log;
+  private readonly alive: (pid: number) => Awaitable<boolean>;
+  private readonly costs: (
+    taskId: TaskId,
+    cost: Cost,
+    resumed: boolean,
+  ) => Awaitable<void>;
+
+  constructor(options: PoolOptions) {
+    this.agents = options.agents;
+    this.workspaces = options.workspaces;
+    this.log = options.log;
+    this.alive = options.alive;
+    this.costs = options.costs;
+
+    for (const slot of options.agents.slots()) {
       this.byName.set(slot.name, freshRunner(slot));
       this.targets.set(slot.agent, (this.targets.get(slot.agent) ?? 0) + 1);
       if (!this.order.has(slot.agent)) {
