@@ -323,11 +323,7 @@ interface Landing {
 }
 
 export type TransitionResult = Landing &
-  (
-    | { to: undefined }
-    | { to: Exclude<TaskState, "CLOSED"> }
-    | { to: "CLOSED"; closedPath: string }
-  );
+  ({ to: Exclude<TaskState, "CLOSED"> } | { to: "CLOSED"; closedPath: string });
 
 export type Decision =
   | { kind: "stay" }

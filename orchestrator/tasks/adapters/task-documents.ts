@@ -143,7 +143,7 @@ async function settleTransition(
     return {
       taskId,
       from,
-      to: undefined,
+      to: from,
       unblocked: [],
       dependentsUpdated: [],
     };

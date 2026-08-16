@@ -86,7 +86,7 @@ describe("Feature: a task that waits on other tasks", () => {
       // When it is submitted again
       const result = await run(dir, main, "submit_designing");
       // Then the machine moves it nowhere, and it keeps waiting
-      expect(result.to).toBeUndefined();
+      expect(result.to).toBe("BLOCKED_DESIGN");
       expect((await metaOf(dir, main)).state).toBe("BLOCKED_DESIGN");
     },
   );
@@ -103,7 +103,9 @@ describe("Feature: a task that waits on other tasks", () => {
       await editTask(dir, main, (meta) => {
         meta.depends_on = [first];
       });
-      expect((await run(dir, main, "submit_designing")).to).toBeUndefined();
+      expect((await run(dir, main, "submit_designing")).to).toBe(
+        "BLOCKED_DESIGN",
+      );
       // Given the last dependency edited out of it
       await editTask(dir, main, (meta) => {
         meta.depends_on = [];
@@ -551,7 +553,9 @@ describe("Feature: what changes as a task walks the pipeline", () => {
     const before = await enteredAt(dir, main);
     await Bun.sleep(5);
     // When it is submitted again and stays blocked
-    expect((await run(dir, main, "submit_designing")).to).toBeUndefined();
+    expect((await run(dir, main, "submit_designing")).to).toBe(
+      "BLOCKED_DESIGN",
+    );
     // Then the clock still moved, so the inbox shows how long it has waited
     expect(await enteredAt(dir, main)).toBeGreaterThan(before);
   });

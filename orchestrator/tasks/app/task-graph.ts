@@ -207,9 +207,7 @@ export class TaskGraph {
     if (name === "submit" && isReviewState(result.from)) {
       await this.reviews.clearFailures(taskId);
     }
-    const to = result.to ?? before?.state ?? "NEW";
-
-    if (to === "CLOSED" && before) {
+    if (result.to === "CLOSED" && before) {
       this.closed.set(taskId, {
         ...taskRow(before, blockingCounts(tasks).get(taskId) ?? 0),
         state: "CLOSED",
@@ -225,7 +223,7 @@ export class TaskGraph {
       task_id: taskId,
       transition: name,
       from: result.from,
-      to,
+      to: result.to,
       by,
     });
     await this.remember(taskId, tasks);
