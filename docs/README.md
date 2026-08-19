@@ -36,6 +36,7 @@ Invariants everything else rests on:
 | [Sessions](sessions.md)                   | what resumes, what is fresh                             |
 | [Agents](agents.md)                       | `agents.json`, health checks, outages, disabling        |
 | [Sandbox](sandbox.md)                     | `pi` spawn, `bwrap`, cgroups, the rpc stream            |
+| [Inline agent](inline-agent.md)           | the turn in the server's process, and what that costs   |
 | [Prompts](prompts.md)                     | every word an agent reads, and overrides                |
 | [Console](console.md)                     | read-only TUI over the views                            |
 | [Testing](testing.md)                     | the fake `pi`, the jigs                                 |
