@@ -7,6 +7,22 @@ pi      server ── JSONL rpc ──▶ bwrap ── pi ── tools
 inline  server ── a function call ──▶ the loop ── tools ── bwrap (bash only)
 ```
 
+## The plans
+
+This document is the design. It is cut into [plans](plans/README.md) that are implemented one at a time, each landing on its own with the suite green.
+
+| Plan                                                               | Lands                                       |
+| ------------------------------------------------------------------ | ------------------------------------------- |
+| [1 · the inline row](plans/01-inline-agent-entry.md)               | `type: "inline"` and `id` in `agents.json`  |
+| [2 · `inline` for the pid](plans/02-inline-not-a-pid.md)           | what a busy inline pane says it is          |
+| [3 · `TurnState`](plans/03-turn-state.md)                          | the state machine out of the JSONL parser   |
+| [4 · the `Models` port](plans/04-the-models-port.md)               | two api adapters, streaming, usage, retries |
+| [5 · the tools](plans/05-the-inline-tools.md)                      | bash, read, write, edit, and the path guard |
+| [6 · transcript and sessions](plans/06-transcript-and-sessions.md) | the JSONL a turn writes and resumes from    |
+| [7 · the run](plans/07-the-inline-run.md)                          | the loop, the router, `compose.ts`          |
+| [8 · the suite](plans/08-inline-in-the-suite.md)                   | every behaviour test against both types     |
+| [9 · aborting one command](plans/09-aborting-one-command.md)       | `slot_abort` stops a command, not a turn    |
+
 ## Why
 
 What the subprocess costs, in the order it hurts:
@@ -25,7 +41,7 @@ The port is the seam. Nothing above `agents/ports/agents.ts` learns a new word.
 
 | `AgentProcess`   | pi                        | inline                                    |
 | ---------------- | ------------------------- | ----------------------------------------- |
-| `pid`            | the child                 | the server's own                          |
+| `pid`            | the child                 | the server's own, drawn as `inline`       |
 | `alive`          | exit code, stdout open    | the run is not finished                   |
 | `stream.state`   | parsed out of JSONL       | written by the loop                       |
 | `newSession`     | `new_session`+`get_state` | create the file, return its path          |
@@ -38,6 +54,10 @@ The port is the seam. Nothing above `agents/ports/agents.ts` learns a new word.
 `kill()` is the one place the process metaphor leaks. `Pool.stopSlot` kills when `alive(pid)` answers true, and an inline run's pid is the server's, so `kill()` must mean "abandon this run and kill whatever `bash` child it holds" and must never reach `process.kill`. Pin it with a test that stops an inline run and asserts the server is still ticking.
 
 Reporting the server's pid is right, not a fudge: a claim exists so the reaper can ask whether the thing holding it is gone, and for an inline run the answer is exactly "is that server gone". A restarted server finds its predecessor's pid dead, skips the reattach, releases the claim and re-queues the task — the existing path, unchanged.
+
+Reattach is refused by type rather than by liveness. A new server that finds an inline row in `slots.json` leaves it alone whatever `alive(pid)` says, because a recycled pid must never be read as a turn still running in a process that is gone.
+
+It is not worth _drawing_, though. A number every inline pane shares, that names the console's own server rather than anything running the turn, is four columns of noise beside a live transcript; the pane says `inline` where a pi pane says `pid 4242`, which is the fact an operator actually reads off that line — this turn is happening here, there is nothing to `kill -9`.
 
 ## The turn
 
@@ -99,8 +119,8 @@ Everything [Sessions](sessions.md) says about which turns resume and which start
 
 Usage arrives on every response, so `stats()` answers from counters instead of a round trip.
 
-- `contextPercent` is tokens over the model's window, and the window comes from the catalog — an entry without one is refused on load, not drawn as 0%
-- `costOf` already prefers a reported cost over the wattage meter. An inline agent reports one only if its entry carries `costPerMtokIn`/`costPerMtokOut`; a local model leaves them at zero and keeps [`wattage`](agents.md#wattage-and-costperkwh). One or the other, never both
+- `contextPercent` is tokens over the model's window, and the window is the row's own `contextWindow` — a row without one is refused on load, not drawn as 0%
+- `costOf` already prefers a reported cost over the wattage meter. An inline agent reports one only if its row carries `costPerMtokIn`/`costPerMtokOut`; a local model leaves them at zero and keeps [`wattage`](agents.md#wattage-and-costperkwh). One or the other, never both — a row carrying a token price _and_ a meter is refused on load
 
 ## Compaction and steering
 
@@ -113,26 +133,38 @@ The loop decides, at the top of each iteration: over the threshold, keep the fir
 - **the turn** — shutdown, a detected loop, a settle that must end. Cancel the request signal, kill the running tool's sandbox, mark it settled. Exactly today's meaning, and [settle](settle.md) needs no change
 - **the command** — the console's `slot_abort`. Kill the `bash` child and hand the turn `the operator aborted this command` as that tool's result. The turn keeps its context and carries on: no settle, no `aborted` issue, no re-prompt of a dead command
 
-Ship the first, then move `slot_abort` to the second as its own change — it changes what an operator's button means and it retires an issue with a retry budget attached.
+Ship the first, then move `slot_abort` to the second as [its own change](plans/09-aborting-one-command.md) — it changes what an operator's button means and it retires an issue with a retry budget attached.
 
 ## The provider
 
 A `Models` port with one method: a request with an `AbortSignal`, streamed back. Adapters for the two api families [`health.ts`](../orchestrator/agents/domain/health.ts) already knows how to probe, `anthropic-messages` and `openai-completions`.
 
-Endpoints come from `<task dir>/models.json`, keyed by the `provider` in `agents.json`, so both files sit in the [task directory](task-document.md) and one orchestrator still drives several projects:
+There is no second file. An inline agent is one row in [`agents.json`](agents.md), and that row carries everything a request needs:
 
 ```json
 {
-  "anthropic": {
-    "api": "anthropic-messages",
-    "baseUrl": "https://api.anthropic.com",
-    "apiKeyEnv": "ANTHROPIC_API_KEY",
-    "contextWindow": 200000
-  }
+  "type": "inline",
+  "id": "sonnet",
+  "api": "anthropic-messages",
+  "baseUrl": "https://api.anthropic.com",
+  "apiKeyEnv": "ANTHROPIC_API_KEY",
+  "model": "claude-sonnet-4-5",
+  "contextWindow": 200000,
+  "costPerMtokIn": 3,
+  "costPerMtokOut": 15,
+  "slots": 2
 }
 ```
 
-The env var's name, never the key. `unhealthy()` keeps calling `probe()`; only where the base url came from changes, and the pi import in `compose.ts` goes with it.
+A pool file that declares an agent is a pool file that can spawn it: one thing to read, one thing to get wrong, one place a typo is refused. `provider` was a key into pi's catalog and only pi has one, so an inline row does not take one — it names its endpoint outright. `apiKeyEnv` is the env var's name, never the key; leaving it out is the local server that wants no credential.
+
+### `id`
+
+Required on an inline row, refused on a `pi` one, and the name the whole system uses. Slot names are `type-provider-model-index` for pi and `type-id-index` for inline, so this row's slots are `inline-sonnet-1` and `inline-sonnet-2`, and that is what lands in `claimed_by`, in the console's header and in every log line. Two rows may run the same `model` against different endpoints, or the same endpoint at different context windows; `id` is what tells them apart, so it is the operator's word and not a derived one.
+
+Constrained to `[a-z0-9]` and single dashes, because a name that reads back out of a claim should not need quoting. Agent names are unique across the pool — the rule pi's `type+provider+model` already enforced, now stated once over the derived name.
+
+`unhealthy()` keeps calling `probe()` with this row's `baseUrl` and `api`; nothing about [`healthCheck`](agents.md#healthcheck) changes but where the endpoint came from. pi keeps reading its own from `ModelRuntime` for as long as `type: "pi"` exists, and neither half learns of the other.
 
 Retries stay where they are today, both of them. The loop retries a transport failure a few times with the same 1s/2s/4s shape and raises the retry events, so `retrying` keeps meaning what it means; when it gives up, the turn ends with `stopReason: error` and the server's [backoff](agents.md#when-the-provider-is-down) takes over. One policy per scope, and neither is new.
 
@@ -149,7 +181,6 @@ Retries stay where they are today, both of them. The loop retries a transport fa
 | `agents/adapters/inline-run.ts`         | adapters | `implements AgentProcess` — the loop                   |
 | `agents/adapters/tools/*.ts`            | adapters | bash, read, write, edit                                |
 | `agents/adapters/anthropic-messages.ts` | adapters | `implements Models`                                    |
-| `agents/adapters/model-catalog.ts`      | adapters | `models.json`                                          |
 | `agents/adapters/agents-by-type.ts`     | adapters | routes `spawn`/`unhealthy`/`hasSession` on `slot.type` |
 
 The router is what lets both types run in one pool, and `compose.ts` is the only module holding both halves — the shape [the slices](architecture.md) already require. `type` stops being a free string in `slots.ts` and becomes an enum, because a pool naming a type nothing can spawn should fail on load, not on the tenth dispatch.
