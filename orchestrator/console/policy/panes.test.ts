@@ -34,6 +34,7 @@ import { hitAt } from "./keys.ts";
 import {
   SLOTS,
   busyRow,
+  candidateOf,
   entryOf,
   layoutOf,
   paneOf,
@@ -122,7 +123,7 @@ describe("Feature: joining a slot to the task it is running", () => {
   });
 
   test("an idle slot shows no task, no check and no clock", () => {
-    // Given a view whose only slot is idle
+    // Given a view whose only slot is idle and whose queue is empty
     const view = { slots: [idleRow(SLOTS[1], SLOTS.length)] };
 
     // When the view is joined into one pane per slot
@@ -135,6 +136,69 @@ describe("Feature: joining a slot to the task it is running", () => {
     expect(detailLine(pane)).toBe("no task");
     expect(activityLine(pane)).toBe("");
     expect(statsLine(pane, undefined)).toBe("");
+  });
+
+  test("an idle slot facing a queue it cannot serve names the work it waits for", () => {
+    // Given a view whose only slot takes worker work while the queue holds reviewer work
+    const view = {
+      slots: [idleRow({ ...SLOTS[0], roles: ["worker"] }, SLOTS.length)],
+      queue: [candidateOf({ role: "reviewer" })],
+    };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it says the work it waits for, not that there is no task
+    expect(detail).toBe("waiting for a worker task");
+  });
+
+  test("an idle slot open to several roles lists them in the order it declares", () => {
+    // Given a view whose only slot takes work, review and design while the queue holds planning
+    const view = {
+      slots: [
+        idleRow(
+          { ...SLOTS[0], roles: ["worker", "reviewer", "designer"] },
+          SLOTS.length,
+        ),
+      ],
+      queue: [candidateOf({ role: "planner" })],
+    };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it names each kind of work in the order the slot lists them
+    expect(detail).toBe("waiting for a worker, reviewer or designer task");
+  });
+
+  test("an idle slot the queue has work for shows no task", () => {
+    // Given a view whose only slot takes reviewer work and a queue holding some
+    const view = {
+      slots: [
+        idleRow({ ...SLOTS[0], roles: ["worker", "reviewer"] }, SLOTS.length),
+      ],
+      queue: [candidateOf({ role: "reviewer" })],
+    };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it says no task, because the queue is not what is holding it up
+    expect(detail).toBe("no task");
+  });
+
+  test("a disabled slot facing a queue it cannot serve still shows no task", () => {
+    // Given a view whose only slot is disabled while the queue holds work it does not take
+    const view = {
+      slots: [idleRow({ ...SLOTS[0], roles: ["worker"] }, SLOTS.length, false)],
+      queue: [candidateOf({ role: "reviewer" })],
+    };
+
+    // When the pane's detail line is drawn
+    const detail = detailLine(paneOf(view));
+
+    // Then it says no task, because a disabled slot is off rather than waiting
+    expect(detail).toBe("no task");
   });
 
   test("a task the view has dropped still draws from the agent row", () => {

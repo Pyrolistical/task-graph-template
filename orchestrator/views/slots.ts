@@ -37,6 +37,7 @@ export const SlotRow = z.strictObject({
   state: SlotState,
   task_id: maybe(z.string()),
   role: maybe(z.enum(ALL_ROLES)),
+  roles: z.array(z.enum(ALL_ROLES)),
   pid: maybe(z.int()),
   started_at: maybe(z.string()),
   activity: Activity,

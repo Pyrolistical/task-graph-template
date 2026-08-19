@@ -21,6 +21,7 @@ tool: bash — bun test (12s)  [abort]│thinking (12s)                      │
 - each pane joins three sources by slot: its `slots.json` row, the `tasks.json` row for the task it holds, and that task's `checks.json` row — a running check displaces the activity line, because a task in `CHECK` has no agent doing anything
 - a slot whose provider failed its [health check](agents.md#healthcheck) reads `unreachable` with its switch still on: the agent is enabled, the provider is not there
 - a slot the clock has taken outside its [schedule](agents.md#schedule) reads `off schedule`, switch on for the same reason: nobody turned it off, its next segment has not come round
+- an idle slot names the work it waits for — `waiting for a worker task` for a worker-only slot, each of its kinds in turn for a multi-role one — exactly when the queue holds work and none of it is work the slot may take, so a queue full of another role's work is not mistaken for an idle system. Anything else reads `no task`: an empty queue, a queue holding work this slot could be handed, or a slot that is switched off rather than waiting
 - panes divide the terminal evenly; below a minimum width it refuses to draw and says how many columns it needs. With no agents there are no panes, only the pool file's path
 - disabled agents collapse to the right under one `hide disabled` button — console-local state, nothing written to the server
 

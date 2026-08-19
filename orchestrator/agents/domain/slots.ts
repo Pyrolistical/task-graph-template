@@ -17,7 +17,10 @@ function poolSchema(defaultWrite: string[]) {
     wattage: z.number().min(0).default(0),
     costPerKwh: z.number().min(0).default(0),
     write: z.array(z.string().min(1)).default(() => [...defaultWrite]),
-    roles: z.array(z.enum(ALL_ROLES)).default(() => [...ALL_ROLES]),
+    roles: z
+      .array(z.enum(ALL_ROLES))
+      .min(1, "must name a role, or none at all to take every role")
+      .default(() => [...ALL_ROLES]),
   });
 
   return z.strictObject({ agents: z.array(Entry) }).superRefine((pool, ctx) => {
@@ -157,6 +160,7 @@ export function idleRow(
     state: idleState(enabled, reachable, scheduled),
     task_id: undefined,
     role: undefined,
+    roles: slot.roles,
     pid: undefined,
     started_at: undefined,
     activity: { kind: "none" },

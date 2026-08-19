@@ -282,6 +282,26 @@ describe("Feature: loading the pool of agents", () => {
       expect(at(slots, 1).roles).toEqual(["reviewer"]);
     },
   );
+  testInTempDirs("an agent restricted to no role at all is refused", () => {
+    // Given a pool whose agent declares an empty list of roles
+    const pool = {
+      agents: [
+        {
+          type: "pi",
+          provider: "anthropic",
+          model: "m",
+          slots: 1,
+          roles: [],
+        },
+      ],
+    };
+    // When the pool is loaded
+    const attempt = () => parsePool(pool);
+    // Then it is refused, because a slot no task may be handed to never runs
+    expect(attempt).toThrow(
+      /agents\[0\]\.roles: must name a role, or none at all to take every role/,
+    );
+  });
   testInTempDirs(
     "a slot is a type, provider, model and number, and nothing more",
     () => {

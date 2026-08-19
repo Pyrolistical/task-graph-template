@@ -59,7 +59,7 @@ The ceiling on that count, for the agent whose slots cost something the machine 
 
 ## roles
 
-Defaults to all four; the only knob on what a slot may be handed. The task's state decides the role needed and a slot lacking it is skipped, so a pool can say the cheap local model only works and the expensive one only reviews. Restricting does not promise capacity: a worker-only pool leaves planners and reviewers waiting, visible as queued work beside idle slots.
+Defaults to all four; the only knob on what a slot may be handed. An empty list is refused rather than read as a slot no work may reach, since that is an agent declared and never run. The task's state decides the role needed and a slot lacking it is skipped, so a pool can say the cheap local model only works and the expensive one only reviews. Restricting does not promise capacity: a worker-only pool leaves planners and reviewers waiting, visible as queued work beside idle slots.
 
 ## write
 

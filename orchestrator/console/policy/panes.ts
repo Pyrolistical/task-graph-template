@@ -12,6 +12,7 @@ import type { Entry } from "../domain/session.ts";
 import type { TaskId } from "../../vocabulary/task.ts";
 import type { Candidate } from "../../views/queue.ts";
 import type { Hit } from "../domain/hits.ts";
+import type { Role } from "../../vocabulary/state-machine.ts";
 import {
   type Line,
   DIM,
@@ -46,6 +47,7 @@ export interface Pane {
   task?: TaskRow;
   check?: RunningCheck;
   sinceMs?: number;
+  waitingFor?: Role[];
 }
 
 export function panes(view: ConsoleView): Pane[] {
@@ -71,6 +73,7 @@ export function panes(view: ConsoleView): Pane[] {
         task: slot.task_id ? tasks.get(slot.task_id) : undefined,
         check: slot.task_id ? checks.get(slot.task_id) : undefined,
         sinceMs: !slot.started_at ? undefined : Date.parse(slot.started_at),
+        waitingFor: waitingFor(slot, view.queue),
       };
     })
     .sort((one, two) => Number(two.slot.enabled) - Number(one.slot.enabled));
@@ -159,6 +162,24 @@ function stateLine(pane: Pane, nowMs: number): string {
   return state === "busy" ? since : `${state} ${since}`;
 }
 
+function waitingFor(slot: ConsoleSlot, queue: Candidate[]): Role[] | undefined {
+  const served = (candidate: Candidate) => slot.roles.includes(candidate.role);
+  if (slot.state !== "IDLE" || queue.length === 0 || queue.some(served)) {
+    return undefined;
+  }
+  return slot.roles;
+}
+
+function roleList(roles: Role[]): string {
+  const last = roles[roles.length - 1];
+  if (!last) {
+    throw new Error("a slot takes at least one role");
+  }
+  return roles.length === 1
+    ? last
+    : `${roles.slice(0, -1).join(", ")} or ${last}`;
+}
+
 export function detailLine(pane: Pane): string {
   const { slot, task } = pane;
   if (slot.pending) {
@@ -171,7 +192,9 @@ export function detailLine(pane: Pane): string {
     return "outside its schedule";
   }
   if (!slot.task_id) {
-    return "no task";
+    return pane.waitingFor
+      ? `waiting for a ${roleList(pane.waitingFor)} task`
+      : "no task";
   }
 
   const parts = [`task ${slot.task_id}`];
