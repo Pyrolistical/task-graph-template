@@ -207,7 +207,7 @@ This first phase lands [the core refactoring](#the-core-refactoring) in seven ch
 
 ### 1 · the http server
 
-The stdio process serves the route table on loopback, and the tools and resources become clients of it — one fetch per verb, carrying the call's `signal`, no retry. The port is the process's own: in this phase only its own tools use it, and one manager runs stdio at a time, so the bind is uncontended. From the manager's perspective nothing has changed — same tools, same names, same payloads, same stdio.
+The stdio process serves the route table on loopback, and the tools and resources become clients of it — one fetch per verb, carrying the call's `signal`, no retry. The port is the process's own: in this phase only its own tools use it, and one manager runs stdio at a time, so the bind is uncontended. From the manager's perspective nothing has changed — same tools, same names, same payloads, same stdio. In detail: [the step-1 plan](http-server-step-1-plan.md).
 
 **Needs first:** nothing.
 
