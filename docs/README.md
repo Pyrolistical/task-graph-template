@@ -29,6 +29,8 @@ Invariants everything else rests on:
 | [Import graph](import-graph.md)           | every value import between modules, generated           |
 | [Runtime directory](runtime-directory.md) | views, transition log, retention                        |
 | [Server](server.md)                       | startup, tick order, pause, detach                      |
+| [HTTP server](http-server.md)             | the long-running server: registry, api, shared pool     |
+| [Pi extension](http-server-pi-ext.md)     | the pi manager over the api — the next phase            |
 | [Scheduler](scheduler.md)                 | dispatch order, slot choice, inbox order                |
 | [Settle](settle.md)                       | turn end → graph, issues and their budgets              |
 | [Checks](checks.md)                       | the deterministic half                                  |
